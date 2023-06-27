@@ -59,6 +59,7 @@ def parse_aln(aln):
     return meta_dict
 
 hhrs = [i for i in Path("hhblits_out").iterdir() if i.suffix == ".hhr"]
+hhrs = [i for i in hhrs if i.stat().st_size > 0]
 assert len(hhrs) > 1
 if __name__ == "__main__":
     for hhr_file in hhrs:
