@@ -2,16 +2,14 @@ from pathlib import Path
 import sys
 sys.path = ["./src"] + sys.path
 import click
-
-import jobs
+import subprocess
 
 
 @click.command()
 @click.option('--start', default=0, help="start index inclusive")
 @click.option('--end', default=1, help="end index exclusive")
 @click.option('--db-path', default="~/databases/pdb70/")
-def main(start, end, write_dir):
-    assert write_dir.is_dir()
+def main(start, end, db_path):
 
     fastas = [i for i in Path("input_sequences").iterdir() if i.suffix == ".fasta"]
     

@@ -59,22 +59,22 @@ def parse_aln(aln):
     return meta_dict
 
 hhrs = [i for i in Path("hhblits_out").iterdir() if i.suffix == ".hhr"]
-hhrs = [i for i in hhrs if i.stat().st_size > 0]
+hhrs = [i for i in hhrs if i.stat().st_size != 0]
 assert len(hhrs) > 1
 if __name__ == "__main__":
+    QueryUID = []
+    PDB70ID = []
+    Probab = []
+    Evalue = []
+    Score = []
+    Aligned_cols = []
+    Identities = []
+    Similarity = []
+    Sum_probs = []
+    Template_Neff = []
+    Q = []
+    T = [] 
     for hhr_file in hhrs:
-        QueryUID = []
-        PDB70ID = []
-        Probab = []
-        Evalue = []
-        Score = []
-        Aligned_cols = []
-        Identities = []
-        Similarity = []
-        Sum_probs = []
-        Template_Neff = []
-        Q = []
-        T = [] 
 
         alns = parse_hhr_file(str(hhr_file))
         assert len(alns) > 0, hhr_file
@@ -114,4 +114,4 @@ if __name__ == "__main__":
             "Template_Neff": Template_Neff,
             "Q": Q,
             "T": T})
-    df.to_csv("hhblits_out/hhr_pair_align.csv", index=False)
+    df.to_csv("hhblits_out/PreyPDB70PairAlign.csv", index=False)

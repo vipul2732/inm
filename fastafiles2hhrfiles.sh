@@ -29,14 +29,12 @@ conda activate wyndevpy39
 which python3
 python3 --version
 
-ls -lah /dev/shm
 cp -r ~/databases/pdb70 /dev/shm/
 echo "After copying"
-ls -lah /dev/shm
 
-echo "Running: python3 scripts/fastafiles2hhrfiles.py --start $1 --end $2 --db-path /dev/shm/pdb70"
+echo "Running: python3 fastafiles2hhrfiles.py --start $1 --end $2 --db-path /dev/shm/pdb70"
 
-python3 scripts/fastafiles2hhrfiles.py --start $1 --end $2 --db-path /dev/shm/pdb70 
+python3 fastafiles2hhrfiles.py --start $1 --end $2 --db-path /dev/shm/pdb70 
 echo "End python job"
 ## End-of-job summary, if running as a job
 [[ -n "$JOB_ID" ]] && qstat -j "$JOB_ID"  # This is useful for debugging and usage purposes,
