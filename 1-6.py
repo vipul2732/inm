@@ -3,10 +3,15 @@ Filter Out The Significant Hits
 """
 
 import pandas as pd
-df = pd.read_csv("hhblits_out/PreyPDB70PairAlign.csv")
+import numpy as np
 
-df = df[df['E-value'] >= 1e-7]
-df = df[df['Aln_cols'] >= 88]
-df.loc[:, 'Identities'] = [int(i.strip("%") for i in df['Identities'].values]
-df = df[df['Identities'] >= 30]
-df.to_csv("SignificantPreyPDB70PairAlign.csv", index=False)
+df = pd.read_csv("hhblits_out/PreyPDB70PairAlign.csv")
+df.loc[:, "Aligned_cols"] = np.array([int(i) for i in df["Aligned_cols"].values], dtype=int) 
+df.loc[:, "Identities"] = np.array([int(i.strip("%")) for i in df["Identities"].values], dtype=int)
+assert df["Evalue"].values.dtype == np.float64
+
+df = df[df['Evalue'] <= 1e-7]
+df = df[df['Aligned_cols'] >= 88]
+
+df = df[df["Identities"] >= 30]
+df.to_csv("hhblits_out/SignificantPreyPDB70PairAlign.csv", index=False)

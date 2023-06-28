@@ -2,3 +2,4 @@
 *.swp
 *.sh.o*
 hhblits_out/*.hhr
+__pycache__
