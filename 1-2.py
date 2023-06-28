@@ -5,7 +5,6 @@ Add the sequences
 import pandas as pd
 import sys
 sys.path = sys.path + ["../../../pyext/src/"]
-import cullin_benchmark_test as cb
 from pathlib import Path
 import biotite.database.uniprot
 
@@ -16,11 +15,19 @@ df = pd.read_csv("table1.csv")
 
 assert len(df) == len(set(df['PreyGene']))
 
-while len([i for i in Path("input_sequences").iterdir() if i.suffix==".fasta"]) < 3062:
+while len([i for i in Path("input_sequences").iterdir() if i.suffix==".fasta"]) < 3062: # This condition can terminate
     try:
         for j in df['UniprotId'].values:
             eprint(f"Fetching {j}")
             uniprot = biotite.database.uniprot.fetch(j, "fasta", "input_sequences")
     except TimeoutError:
         eprint(f"Timeout {j}")
+
+
+try:
+    for j in df['UniprotId'].values:
+        eprint(f"Fetching {j}")
+        uniprot = biotite.database.uniprot.fetch(j, "fasta", "input_sequences")
+except TimeoutError:
+    eprint(f"Timeout {j}")
 
