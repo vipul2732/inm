@@ -23,6 +23,14 @@ PreyGene, UniprotId, UniprotSeq, UniprotSeqLen
 
 Uniprot sequences were fetched for all prey
 
-HHBlits was used to search the PDB70 with the following parameters
+HHBlits was used to search the PDB70 with default parameters. 
 
-- e\-value $1e^{-7}$
+Table2.
+eueryUID,PDB70ID,Probab,E-value,Score,Aligned\_cols,Identities,Similarity,Sum\_probs,Template\_Neff,Q,T 
+
+Filter the pairwise alignments by resulting in 
+- evalue > 1e-7
+- aln\_len > 88
+- %seq ID >= 30$ 
+
+XX Alignments
