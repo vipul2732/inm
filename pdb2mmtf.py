@@ -10,7 +10,18 @@ import biotite.structure.io.pdb as pdb
 @click.command()
 @click.option("-i", required=True, help="pdb file path")
 @click.option("-o", required=True, help="output dir")
-def main(i, o):
+@click.option("-from", default="pdb")
+@click.option("-to", default="mmtf")
+def main(i, o, from_, to):
+    if from_ == "pdb": 
+        Reader = pdb.PDBFile
+	read_suffix = ".pdb"
+    
+    if to == "mmtf":
+        write_mod = mmtf
+        write_suffix = "mmtf"
+        Writer = mmtf.MMTFFile
+
     pdb_file_path = i
     output_dir = o
 
