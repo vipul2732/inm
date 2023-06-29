@@ -6,6 +6,10 @@ import click
 import biotite.structure.io.mmtf as mmtf
 import biotite.structure.io.pdb as pdb
 import biotite.structure.io.pdbx as pdbx
+import sys
+
+def eprint(*args, **kwargs):
+    print(*args, file=sys.stderr, **kwargs)
 
 
 @click.command()
@@ -31,18 +35,21 @@ def main(i, o, from_, to):
 
     pdb_file_path = i
     output_dir = o
-
-    db_file = Reader.read(pdb_file_path)
-    stack = read_mod.get_structure(db_file)
-    assert len(stack) == 1, f"multiple models in {pdb_file_path}"
-    array = stack[0]
-
     pdb_id = Path(pdb_file_path).name.removesuffix(read_suffix)
     output_path = f"{output_dir}/{pdb_id}.{write_suffix}"
+    paths_list = [str(i) for i in Path(o).iterdir()]
+    if output_path not in paths_list:
+        eprint(f"Converting {pdb_id} to {output_path}") 
+        db_file = Reader.read(pdb_file_path)
+        stack = read_mod.get_structure(db_file)
     
-    write_file = Writer()
-    write_mod.set_structure(write_file, array)
-    write_file.write(output_path)
+        
+        write_file = Writer()
+        write_mod.set_structure(write_file, stack)
+        write_file.write(output_path)
+
+    else:
+        eprint(f"Skipping {output_path}")
 
 if __name__ == "__main__":
     main()
