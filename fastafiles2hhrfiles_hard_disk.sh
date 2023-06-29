@@ -21,6 +21,7 @@
 ## Arrays are indexed from 0, so we subtract one from the task index
 # param="${params[$((SGE_TASK_ID - 1))]}"
 
+echo "fastafiles2hhrfiles_hard_disk.sh"
 date
 hostname
 
@@ -29,10 +30,7 @@ conda activate wyndevpy39
 which python3
 python3 --version
 
-
-echo "Running: python3 scripts/fastafiles2hhrfiles.py --start $1 --end $2"
-
-python3 scripts/fastafiles2hhrfiles.py --start $1 --end $2 
+python3 fastafiles2hhrfiles.py --start $1 --end $2 
 echo "End python job"
 ## End-of-job summary, if running as a job
 [[ -n "$JOB_ID" ]] && qstat -j "$JOB_ID"  # This is useful for debugging and usage purposes,
