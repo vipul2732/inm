@@ -16,7 +16,7 @@ def eprint(*args, **kwargs):
 @click.option("-i", required=True, help="pdb file path")
 @click.option("-o", required=True, help="output dir")
 @click.option("-from", "from_", default="pdb")
-@click.option("-to", default="mmtf")
+@click.option("-to", default="mmtf", help="mmtf, or biommtf")
 def main(i, o, from_, to):
     if from_ == "pdb": 
         Reader = pdb.PDBFile
@@ -26,24 +26,35 @@ def main(i, o, from_, to):
         Reader = pdbx.PDBxFile
         read_suffix = ".cif"
         read_mod = pdbx
+    else:
+        raise ValueError(f"{from_} is not pdb or cif")
 
-    if to == "mmtf":
+    if (to == "mmtf") or (to == "biommtf"):
         write_mod = mmtf
         write_suffix = "mmtf"
         Writer = mmtf.MMTFFile
+    else:
+        raise ValueError(f"{to} is not mmtf or biommtf")
 
 
     pdb_file_path = i
     output_dir = o
     pdb_id = Path(pdb_file_path).name.removesuffix(read_suffix)
-    output_path = f"{output_dir}/{pdb_id}.{write_suffix}"
+    if to == "mmtf":
+        output_path = f"{output_dir}/{pdb_id}.{write_suffix}"
+    elif to == "biommtf":
+        output_path = f"{output_dir}/{pdb_id}.bio.{write_suffix}"
+
     paths_list = [str(i) for i in Path(o).iterdir()]
     if output_path not in paths_list:
         eprint(f"Converting {pdb_id} to {output_path}") 
         db_file = Reader.read(pdb_file_path)
-        stack = read_mod.get_structure(db_file)
-    
         
+        if to == "mmtf":
+            stack = read_mod.get_structure(db_file)
+        elif to == "biommtf":
+            stack = read_mod.get_assembly(db_file)
+    
         write_file = Writer()
         write_mod.set_structure(write_file, stack)
         write_file.write(output_path)
