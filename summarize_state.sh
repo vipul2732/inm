@@ -13,6 +13,10 @@ NRENUPDB=$(ls renumbered_pdb_files/*.pdb | wc -l)
 NRENUCIF=$(ls renumbered_big_pdb_files/*.cif | wc -l)
 NRENMMTF=$(ls renumbered_mmtf/*.mmtf | wc -l)
 NFAILED=$(cat "1-8Failed_log.csv" | wc -l)
+NSELFBIOCIF=$(ls significant_cifs/*.cif | wc -l) 
+
+NSELFPAIRPDB=$(cat hhblits_out/self_pair_pdbs.csv | wc -l)
+NSELFNONPAIRPDB=$(cat hhblits_out/nonself_pair_pdbs.csv | wc -ls)
 
 echo "N-Fasta,$NFASTA"
 echo "N-hhr,$NHHR"
@@ -20,8 +24,11 @@ echo "N-ali,$NALIGNMENTS"
 echo "N-sig-ali,$NSIGALI"
 echo "N-self-prey-pair,$NSELFPREYPAIR"
 echo "N-nonself-prey-pair,$NNONSELFPREYPAIR"
+echo "N-self-pdbs,$NSELFPAIRPDB"
+echo "N-nonself-pdbs,$NSELFNONPAIRPDB"
 echo "N-pdb,$NPDBFILES"
 echo "N-cif,$NCIFFILES"
+echo "N-bio-cifs,$NSELFBIOCIF"
 echo "N-repdb,$NRENUPDB"
 echo "N-failed-pdb,$NFAILED"
 echo "N-renucif,$NRENUCIF"
