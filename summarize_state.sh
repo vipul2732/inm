@@ -17,6 +17,7 @@ NNONSELFBIOCIF=$(ls significant_cifs/*.cif | wc -l)
 
 NSELFPAIRPDB=$(cat hhblits_out/self_pair_pdbs.csv | wc -l)
 NSELFNONPAIRPDB=$(cat hhblits_out/nonself_pair_pdbs.csv | wc -l)
+NDIFFMMTF=$(ls significant_cifs/*.mmtf | wc -l)
 
 echo "N-Fasta,$NFASTA"
 echo "N-hhr,$NHHR"
@@ -26,6 +27,7 @@ echo "N-PreyMap2Same,$NSELFPREYPAIR"
 echo "N-PreyMap2Diff,$NNONSELFPREYPAIR"
 echo "N-SamePreyPDBS,$NSELFPAIRPDB"
 echo "N-DiffPDBS,$NSELFNONPAIRPDB"
+echo "N-SigMMTF,$NDIFFMMTF"
 echo "N-pdb-files,$NPDBFILES"
 echo "N-big-files,$NCIFFILES"
 echo "N-nonself-bio-cifs,$NNONSELFBIOCIF"
