@@ -13,22 +13,22 @@ NRENUPDB=$(ls renumbered_pdb_files/*.pdb | wc -l)
 NRENUCIF=$(ls renumbered_big_pdb_files/*.cif | wc -l)
 NRENMMTF=$(ls renumbered_mmtf/*.mmtf | wc -l)
 NFAILED=$(cat "1-8Failed_log.csv" | wc -l)
-NSELFBIOCIF=$(ls significant_cifs/*.cif | wc -l) 
+NNONSELFBIOCIF=$(ls significant_cifs/*.cif | wc -l) 
 
 NSELFPAIRPDB=$(cat hhblits_out/self_pair_pdbs.csv | wc -l)
-NSELFNONPAIRPDB=$(cat hhblits_out/nonself_pair_pdbs.csv | wc -ls)
+NSELFNONPAIRPDB=$(cat hhblits_out/nonself_pair_pdbs.csv | wc -l)
 
 echo "N-Fasta,$NFASTA"
 echo "N-hhr,$NHHR"
 echo "N-ali,$NALIGNMENTS"
 echo "N-sig-ali,$NSIGALI"
-echo "N-self-prey-pair,$NSELFPREYPAIR"
-echo "N-nonself-prey-pair,$NNONSELFPREYPAIR"
-echo "N-self-pdbs,$NSELFPAIRPDB"
-echo "N-nonself-pdbs,$NSELFNONPAIRPDB"
-echo "N-pdb,$NPDBFILES"
-echo "N-cif,$NCIFFILES"
-echo "N-bio-cifs,$NSELFBIOCIF"
+echo "N-PreyMap2Same,$NSELFPREYPAIR"
+echo "N-PreyMap2Diff,$NNONSELFPREYPAIR"
+echo "N-SamePreyPDBS,$NSELFPAIRPDB"
+echo "N-DiffPDBS,$NSELFNONPAIRPDB"
+echo "N-pdb-files,$NPDBFILES"
+echo "N-big-files,$NCIFFILES"
+echo "N-nonself-bio-cifs,$NNONSELFBIOCIF"
 echo "N-repdb,$NRENUPDB"
 echo "N-failed-pdb,$NFAILED"
 echo "N-renucif,$NRENUCIF"
