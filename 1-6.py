@@ -15,3 +15,8 @@ df = df[df['Aligned_cols'] >= 88]
 
 df = df[df["Identities"] >= 30]
 df.to_csv("hhblits_out/SignificantPreyPDB70PairAlign.csv", index=False)
+
+sig_pdbs = list(set([i.split("_")[0] for i in df['PDB70ID'].values]))
+df = pd.DataFrame({"sig_pdbs": sig_pdbs})
+df.to_csv("hhblits_out/SignificantPDB70_PDBIDs.csv", index=False, header=False)
+
