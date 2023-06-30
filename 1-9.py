@@ -159,6 +159,7 @@ bt_aln_T = []
 Q = []
 T = []
 
+alpha = biotite.sequence.ProteinSequence.alphabet
 for pdb_id in expected_pdbs:
     fpath = f"significant_cifs/{pdb_id}.bio.mmtf"
     eprint(f"reading {fpath}")
@@ -169,6 +170,19 @@ for pdb_id in expected_pdbs:
     mask = biotite.structure.filter_amino_acids(bio_array)
     bio_array = bio_array[mask]
     seq_dict = get_sequence_dict(bio_array)
+    new_dict = {}
+    for chain, seq in seq_dict.items():
+        seq = seq.replace("U", "C")
+        seq = seq.replace("J", "X")
+        seq = seq.replace("Z", "X")
+        seq = seq.replace("B", "X")
+        seq = seq.replace("O", "X")
+        
+        for letter in seq:
+            assert letter in alpha, (letter, chain, pdb_id)
+        new_dict[chain] = seq
+    seq_dict = new_dict
+        
     bio_sequences[pdb_id] = seq_dict
 
 # bio_assemblies
@@ -210,7 +224,7 @@ for pdb_id in expected_pdbs:
                     
 out_df = pd.DataFrame({"QueryID": QueryID, "ChainID": ChainID,
         "PDBID": PDBID, "bt_aln_score": bt_aln_score, "bt_aln_evalue": bt_evalue,
-	"bt_aln_percent_seq_id": bt_psid, "bt_aln_Q": bt_aln_Q, "bt_aln_T": bt_aln_T, "Q": Q, "T": T})
+        "bt_aln_percent_seq_id": bt_psid, "bt_aln_Q": bt_aln_Q, "bt_aln_T": bt_aln_T, "Q": Q, "T": T})
 
 print(out_df)
 out_df.to_csv("significant_cifs/chain_mapping.csv", index=False)
