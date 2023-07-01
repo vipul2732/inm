@@ -53,7 +53,7 @@ def main(i, o, from_, to):
         if to == "mmtf":
             stack = read_mod.get_structure(db_file)
         elif to == "biommtf":
-            stack = read_mod.get_assembly(db_file)
+            stack = read_mod.get_assembly(db_file, model=1)
     
         write_file = Writer()
         write_mod.set_structure(write_file, stack)
