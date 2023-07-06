@@ -24,8 +24,15 @@ hhblits_df = pd.read_csv("hhblits_out/SignificantPreyPDB70PairAlign.csv")
 hhblits_cols = hhblits_df.columns
 chain_mapping = pd.read_csv("significant_cifs/chain_mapping.csv")
 
-bsasa = pd.read_csv("significant_cifs/bsasa.csv")
+bsasa = pd.read_csv("significant_cifs/BSASA_concat.csv")
 eprint(f"N bsasa {len(bsasa)}")
+
+# Drop the key errors
+sel = bsasa["BSASA"] != "KeyError"
+bsasa = bsasa[sel]
+
+bsasa["BSASA"] = np.array([float(i) for i in bsasa["BSASA"].values])
+
 assert bsasa["BSASA"].values.dtype == np.float64
 sel = bsasa["BSASA"].values >= 500
 bsasa = bsasa[sel]
