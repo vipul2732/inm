@@ -3,3 +3,7 @@
 *.sh.o*
 hhblits_out/*.hhr
 __pycache__
+significant_cifs/bsasa_*.csv
+significant_cifs/*.gz
+significant_cifs/*.bio.mmtf
+significant_cifs/*.cif

@@ -17,8 +17,9 @@ import biotite.structure.io.mmtf as mmtf
 import biotite.sequence.align
 import sys
 import numpy as np
-import xarray as xr
 
+def eprint(*args, **kwargs):
+    print(*args, file=sys.stderr, **kwargs)
 
 hhblits_df = pd.read_csv("hhblits_out/SignificantPreyPDB70PairAlign.csv")
 hhblits_cols = hhblits_df.columns
@@ -37,14 +38,14 @@ assert bsasa["BSASA"].values.dtype == np.float64
 sel = bsasa["BSASA"].values >= 500
 bsasa = bsasa[sel]
 eprint(f"N bsasa {len(bsasa)} 500")
-
-chain_mapping.loc[:, "bt_percent_sequence_id"] = np.array([float(i) for i in chain_mapping["bt_percent_sequence_id"].values])
-sel = chain_mapping["bt_percent_sequence_id"] >= 0.3
+seqid_col = "bt_aln_percent_seq_id"
+chain_mapping.loc[:, seqid_col] = np.array([float(i) for i in chain_mapping[seqid_col].values])
+sel = chain_mapping[seqid_col] >= 0.3
 chain_mapping = chain_mapping[sel]
 eprint(f"N mapped chains {sum(sel)}")
 
-uid_set = list(set(chain_mapping["QueryID"].values))
-pdb_set = list(set(bsasa["pdb_id"].values))
+uid_set = sorted(list(set(chain_mapping["QueryID"].values)))
+pdb_set = sorted(list(set(bsasa["PDBID"].values)))
 uid_pairs = list(combinations(uid_set, 2))
 
 #dims = ["preyu", "preyv", "pdb_id"]
@@ -56,10 +57,10 @@ uid_pairs = list(combinations(uid_set, 2))
 
 def fetch_prey(chain_mapping_subframe, pdb_id, chain_id):
     sel = chain_mapping_subframe["ChainID"] == chain_id
-    chain_df = subframe[sel]
+    chain_df = chain_mapping_subframe[sel]
     result = ""
     for i, r in chain_df.iterrows():
-        prey = row["QueryID"]
+        prey = r["QueryID"]
         result = result + ";" + prey
     return result
 
@@ -71,26 +72,35 @@ chain1_lst = []
 chain2_lst = []
 bsasa_lst = []
 
-bsasa_pdb_set = set(bsasa["PDBID"].values)
+bsasa_pdb_set = sorted(set(bsasa["PDBID"].values))
 for pdb_id in bsasa_pdb_set:
     chain_subframe = chain_mapping[chain_mapping["PDBID"] == pdb_id]
     bsasa_subframe = bsasa[bsasa["PDBID"] == pdb_id]
+    assert len(bsasa_subframe) > 0, pdb_id
 
-    bsasa_chain_set = set(bsasa_subframe["ChainID"].values)
+    bsasa_chain_set = set(bsasa_subframe["Chain1"].values).union(bsasa_subframe["Chain2"].values)
+    chain_pairs = list(combinations(bsasa_chain_set, 2))
 
     chain2prey_lst = {chain: fetch_prey(chain_subframe, pdb_id, chain) for chain in bsasa_chain_set}
 
-    chain_pairs = list(combinations(bsasa_chain_set, 2))
 
     chainpair2bsasa = {}
-    for i, r in bsasa_subframe:
+    for i, r in bsasa_subframe.iterrows():
         chain1 = r["Chain1"]
         chain2 = r["Chain2"]
+        #assert isinstance(chain1, str), (chain1, pdb_id)
+        #assert isinstance(chain2, str), (chain2, pdb_id)
         bsasa_calc = r["BSASA"]
-        chainpair2bsasa[(chain1, chain2)] = bsasa_calc
+        chainpair2bsasa[frozenset((chain1, chain2))] = bsasa_calc
 
     for (chain1, chain2) in chain_pairs:
-           
+        #assert isinstance(chain1, str), (chain1, pdb_id)
+        #assert isinstance(chain2, str), (chain2, pdb_id)
+
+        chain_key = frozenset((chain1, chain2))
+
+        if chain_key not in chainpair2bsasa:
+            continue
         preylst_1 = chain2prey_lst[chain1]
         preylst_2 = chain2prey_lst[chain2]
 
@@ -110,7 +120,7 @@ for pdb_id in bsasa_pdb_set:
                     pdb_id_lst.append(pdb_id)
                     chain1_lst.append(chain1)
                     chain2_lst.append(chain2)
-                    bsasa_lst.append(chainpair2bsasa[(chain1, chain2)])
+                    bsasa_lst.append(chainpair2bsasa[chain_key])
 
 df = pd.DataFrame({"Prey1": prey1_lst,
   "Prey2": prey2_lst,
@@ -119,4 +129,4 @@ df = pd.DataFrame({"Prey1": prey1_lst,
   "Chain2": chain2_lst,
   "bsasa_lst": bsasa_lst})
 
-df.to_csv("significant_cifs/bsasa_reference.csv", index=False)
+df.to_csv("significant_cifs/BSASA_reference.csv", index=False)
