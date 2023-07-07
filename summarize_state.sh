@@ -19,6 +19,10 @@ NSELFPAIRPDB=$(cat hhblits_out/self_pair_pdbs.csv | wc -l)
 NSELFNONPAIRPDB=$(cat hhblits_out/nonself_pair_pdbs.csv | wc -l)
 NDIFFMMTF=$(ls significant_cifs/*.mmtf | wc -l)
 
+# Number of chains mapped
+
+NMAPPEDCHAINS=$(cat significant_cifs/filter_chain_mapping_1-9a.csv | wc -l) # Plus one
+
 echo "N-Fasta,$NFASTA"
 echo "N-hhr,$NHHR"
 echo "N-ali,$NALIGNMENTS"
@@ -28,6 +32,7 @@ echo "N-PreyMap2Diff,$NNONSELFPREYPAIR"
 echo "N-SamePreyPDBS,$NSELFPAIRPDB"
 echo "N-DiffPDBS,$NSELFNONPAIRPDB"
 echo "N-SigMMTF,$NDIFFMMTF"
+echo "NMappedChains plus one,$NMAPPEDCHAINS"
 echo "N-pdb-files,$NPDBFILES"
 echo "N-big-files,$NCIFFILES"
 echo "N-nonself-bio-cifs,$NNONSELFBIOCIF"

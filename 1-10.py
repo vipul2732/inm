@@ -17,7 +17,7 @@ import biotite.structure.io.mmtf as mmtf
 import biotite.sequence.align
 import sys
 import numpy as np
-
+import pdb
 def eprint(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
 
@@ -41,6 +41,7 @@ eprint(f"N bsasa {len(bsasa)} 500")
 seqid_col = "bt_aln_percent_seq_id"
 chain_mapping.loc[:, seqid_col] = np.array([float(i) for i in chain_mapping[seqid_col].values])
 sel = chain_mapping[seqid_col] >= 0.3
+
 chain_mapping = chain_mapping[sel]
 eprint(f"N mapped chains {sum(sel)}")
 

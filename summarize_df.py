@@ -29,7 +29,8 @@ def pp(x):
 @click.option("--df-path", required=True, type=str)
 @click.option("--pdbs", is_flag=True, default=False)
 @click.option("--nans", is_flag=True, default=False)
-def main(df_path, pdbs, nans):
+@click.option("--keys", type=list, default=None, help="A list of column names to summarize")
+def main(df_path, pdbs, nans, key):
     df = pd.read_csv(df_path)
     eprint(df_path)
     eprint(f"N {h(len(df))}")
@@ -37,6 +38,11 @@ def main(df_path, pdbs, nans):
        eprint(f"N pdbs {h(npdbs(df))}")
     if nans:
        eprint(f"N nan rows {h(nnan_rows(df))}")
+
+    if keys:
+        for key in keys: 
+            eprint(f"N {key} {h(lset(df, key))}")
+
 
 if __name__ == "__main__":
     main()

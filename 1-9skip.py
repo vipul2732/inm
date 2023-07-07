@@ -1,5 +1,6 @@
 
 """
+Skip the largest structures
 Output Columns:
 
 1. Read in every bio.mmtf file.
@@ -27,6 +28,16 @@ def eprint(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
 
 
+skip_lst = [
+"7r5k",  # Human Nuclear pore complex
+"4v3p",  # Eukaryotic poly ribosomes
+"7tbl",  # Human Nuclear pore complex ET
+"7tbj",  # Human Nuclear pore complex ET
+"7tbi",  # S. cerevisiae nuclear pore complex
+"6u42",  # Nativley decorate ciliary doublet
+"7rro",  # Structure of the 48-nm repeat doublet microtubule
+"7sqc"]  # Ciliary C1 central pair apparatus
+
 p = Path("significant_cifs")
 
 file_path = p / "bsasa.csv"
@@ -37,6 +48,10 @@ i = 0
 for mmtf_file_path in bio_mmtfs:
     eprint(f"Reading {str(mmtf_file_path)}")
     pdb_id = mmtf_file_path.name[0:4] 
+
+    if pdb_id in skip_lst:
+        eprint(f"Skipping {pdb_id}")
+        continue
     mmtf_file = mmtf.MMTFFile.read(str(mmtf_file_path))
 
     
@@ -99,4 +114,4 @@ for mmtf_file_path in bio_mmtfs:
        row_lst.append((pdb_id, chain1, chain2, bsasa, sasa12, sasa1, sasa2))
 columns = ["PDBID", "Chain1", "Chain2", "BSASA", "SASA12", "SASA1", "SASA2"]
 df = pd.DataFrame(row_lst, columns=columns)
-df.to_csv("significant_cifs/bsasa.csv", index=False)    
+df.to_csv("significant_cifs/bsasa_skip.csv", index=False)    

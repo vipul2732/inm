@@ -1,23 +1,46 @@
 """
-Read in all significant hhblits alignments, read in PDB sequences, do pairwise biotite alignments,
-do BSASA calculations, save the chain_pairing, save the BSASA calculation.
+1. Load in the SignificantNonself Pair Prey File
+2. For each pdb file
+   2a. Load in the query sequences
+   2b. For each query sequences
+       2aa. Load in the sequence-chain-id pairs for the pdb file
+       2ac. Filter to polypeptide sequecnes > 88 amino acids long
+       2ad. Do a pairwise sequence alignment to every sequence in the pdb file
+       2ae. If the alignment is > 88 aa, evalue < 1e-7, and 30% sequence id then add the sequence to the remap hit table
+
+
+Exclusion Criteria
+- A uniprot sequence is < 88 amino acids (52 sequences) 
+- A pdb modeled pdb sequence is < 88 amino acids
 """
 
 import pandas as pd
 from pathlib import Path
 import biotite.sequence.io.fasta
 import biotite.sequence
-import biotite.structure.io.mmtf as mmtf
+import biotite.structure.io.mmtf
 import biotite.sequence.align
 import sys
 
-production = False # Turn this on to enable checks
 
-# Globals
+def eprint(*args, **kwargs):
+    print(*args, file=sys.stderr, **kwargs)
+
+sig_alns = pd.read_csv("hhblits_out/SignificantNonSelfPairs.csv")
+expected_pdbs = [i.split("_")[0].lower() for i in sig_alns['PDB701'].values]
+sig_alns.loc[:, "pdb_id"] = expected_pdbs
+expected_pdbs = set(expected_pdbs)
+actual_pdbs = set([i.name.removesuffix(".mmtf") for i in Path("significant_cifs").iterdir() if i.suffix == ".mmtf"])
+diff = expected_pdbs.symmetric_difference(actual_pdbs)
+#assert len(diff) == 0, (len(diff), diff, actual_pdbs, expected_pdbs)
+
+df = sig_alns
+
 blossum62 = biotite.sequence.align.SubstitutionMatrix.std_protein_matrix()
+uids = set(df["Query1"].values).union(df["Query2"].values)
+sequences = {}
+
 ProtSeq = biotite.sequence.ProteinSequence
-alpha = biotite.sequence.ProteinSequence.alphabet
-min_length = 88
 
 non_canonical = {
 "MSE": "M",
@@ -89,31 +112,9 @@ non_canonical = {
 "S12": "S",
 "3K4": "X",    # Aziridine
 "U6A": "T",
-"CME": "C", 
-"CAF": "C",
-"LLP": "K",
-"SCY": "C",
-"SCH": "C",
-"CMT": "C",
-"DSN": "S",
-"NEP": "H",
-"MCS": "C",
-"TPQ": "Y",
-"SNN": "X",
-"OCS": "C",
-"OMT": "M",
-"MHO": "M",
-"RGP": "E",
-"FTR": "W",
-"4J4": "C",
 }
 
-def get_sequence_dict(atom_array):
-    chain_ids = set(atom_array.chain_id)
-    return {chain_id: get_sequence(atom_array, chain_id) for chain_id in chain_ids}
-
-global_lost = []
-def get_sequence(atom_array, chain_id, min_length=min_length):
+def get_sequence(atom_array, chain_id, min_length=88):
     """
     If the chain length is less than min length, an empty chain is returned
     """
@@ -132,70 +133,27 @@ def get_sequence(atom_array, chain_id, min_length=min_length):
             if resname in non_canonical:
                 resname = non_canonical[resname]
             else:
-                try:
-                    resname = ProtSeq.convert_letter_3to1(resname)
-                except:
-                    global_lost.append(resname)
-                    resname = "X"
+                resname = ProtSeq.convert_letter_3to1(resname)
         mapp[resids[i]] = resname
     for i in range(N): 
         if i in mapp:
             seq[i] = mapp[i]
     return "".join(seq) 
 
-def eprint(*args, **kwargs):
-    print(*args, file=sys.stderr, **kwargs)
+def get_sequence_dict(atom_array):
+    chain_ids = set(atom_array.chain_id)
+    return {chain_id: get_sequence(atom_array, chain_id) for chain_id in chain_ids}
 
-def h(x):
-    return '{:,}'.format(x)
-
-bio_paths = [i for i in Path("significant_cifs/").iterdir() if "bio.mmtf" in str(i)]
-
-sig_alns = pd.read_csv("hhblits_out/SignificantPreyPDB70PairAlign.csv")
-expected_pdbs = [i.split("_")[0].lower() for i in sig_alns['PDB70ID'].values]
-sig_alns.loc[:, "pdb_id"] = expected_pdbs
-
-
-uids = set(sig_alns["QueryUID"].values)
-uid_sequences = {}
 for uid in uids:
     fasta_file = biotite.sequence.io.fasta.FastaFile.read(f"input_sequences/{uid}.fasta")
     assert len(fasta_file) == 1, uid
     header, sequence = list(fasta_file.items())[0]
-    uid_sequences[uid]=sequence
+    sequences[uid]=sequence
 
-pdb_ids = set(sig_alns['pdb_id'].values)
-
-mmtf_files = set([i.name.removesuffix(".bio.mmtf") for i in bio_paths])
-
-if not production:
-    expected_pdbs = mmtf_files 
-
-if production:
-    assert len(pdb_ids.symmetric_difference(mmtf_files)) == 0
-
-# Mutate the uniprot sequences
-
-new_dict = {}
-for uid, seq in uid_sequences.items():
-    seq = seq.replace("U", "C")
-    seq = seq.replace("J", "X")
-    seq = seq.replace("Z", "X")
-    seq = seq.replace("B", "X")
-    seq = seq.replace("O", "X")
-    for letter in seq:
-        assert letter in alpha, (letter, uid)
-    new_dict[uid] = seq
-uid_sequences = new_dict.copy()
-
-eprint("uid sequences mutated")
-
-new_dict = {}
-
-pdb_bio_sequences = {}
-# Mutate the PDB Sequences
-
-
+assert len(uid.keys()) == 3062
+bio_assemblies = {}  # pdb_id : atom_array
+bio_sequences = {}   # pdb_id : {chain_id : sequence} 
+# sequences -> uid : sequence
 QueryID = []
 ChainID = []
 PDBID = []
@@ -207,9 +165,7 @@ bt_aln_T = []
 Q = []
 T = []
 
-if production:
-    assert len(uid_sequences.keys()) == 3062, len(uid_sequences.keys())
-
+alpha = biotite.sequence.ProteinSequence.alphabet
 for pdb_id in expected_pdbs:
     fpath = f"significant_cifs/{pdb_id}.bio.mmtf"
     eprint(f"reading {fpath}")
@@ -222,41 +178,45 @@ for pdb_id in expected_pdbs:
     seq_dict = get_sequence_dict(bio_array)
     new_dict = {}
     for chain, seq in seq_dict.items():
-        if len(seq) >= min_length:
-            seq = seq.replace("U", "C")
-            seq = seq.replace("J", "X")
-            seq = seq.replace("Z", "X")
-            seq = seq.replace("B", "X")
-            seq = seq.replace("O", "X")
+        seq = seq.replace("U", "C")
+        seq = seq.replace("J", "X")
+        seq = seq.replace("Z", "X")
+        seq = seq.replace("B", "X")
+        seq = seq.replace("O", "X")
         
-            for letter in seq:
-                assert letter in alpha, (letter, chain, pdb_id)
-            new_dict[chain] = seq
-
+        for letter in seq:
+            assert letter in alpha, (letter, chain, pdb_id)
+        new_dict[chain] = seq
     seq_dict = new_dict.copy()
-    pdb_bio_sequences[pdb_id] = seq_dict
-
+        
+    bio_sequences[pdb_id] = seq_dict
 eprint("pdb sequences mutated")
-eprint(set(global_lost))
+# bio_assemblies
+# bio_sequences
+new_dict = {}
+uid_sequences = sequences
+
+for uid, seq in uid_sequences.items():
+    seq = seq.replace("U", "C")
+    seq = seq.replace("J", "X")
+    seq = seq.replace("Z", "X")
+    seq = seq.replace("B", "X")
+    seq = seq.replace("O", "X")
+    for letter in seq:
+        assert letter in alpha, (letter, uid)
+    new_dict[uid] = seq
+uid_sequences = new_dict.copy()
+eprint("uid sequences mutated")
+
 for pdb_id in expected_pdbs:
-    fpath = f"significant_cifs/{pdb_id}.bio.mmtf"
-    eprint(f"reading {fpath}")
-    read_f = biotite.structure.io.mmtf.MMTFFile.read(fpath)
-    bio_array = biotite.structure.io.mmtf.get_structure(read_f, model=1)
-    #bio_assemblies[pdb_id] = bio_array
-    #mask = bio_array.hetero == False  # Exclude heteroatoms
-    mask = biotite.structure.filter_amino_acids(bio_array)
-    bio_array = bio_array[mask]
-
-    sel = sig_alns['pdb_id'] == pdb_id
-    subframe = sig_alns[sel]
-    sub_uids = set(subframe["QueryUID"].values)
-
+    sel = df['pdb_id'] == pdb_id
+    subframe = df[sel]
+    sub_uids = set(subframe["Query1"].values).union(subframe["Query2"].values)
     for sub_uid in sub_uids:
         sub_uid_seq = uid_sequences[sub_uid]
-        if len(sub_uid_seq) >= min_length:
-            for pdb_chain_id, pdb_seq in pdb_bio_sequences[pdb_id].items():
-                if len(pdb_seq) >= min_length: 
+        if len(sub_uid_seq) >= 88:
+            for pdb_chain_id, pdb_seq in bio_sequences[pdb_id].items():
+                if len(pdb_seq) >= 88: 
                     eprint(f"Aligning {sub_uid} {pdb_chain_id} in {pdb_id}")
                     # Do a pairwise sequence alignment
                     useq = biotite.sequence.ProteinSequence(sub_uid_seq)
@@ -286,5 +246,5 @@ out_df = pd.DataFrame({"QueryID": QueryID, "ChainID": ChainID,
         "PDBID": PDBID, "bt_aln_score": bt_aln_score, "bt_aln_evalue": bt_evalue,
         "bt_aln_percent_seq_id": bt_psid, "bt_aln_Q": bt_aln_Q, "bt_aln_T": bt_aln_T, "Q": Q, "T": T})
 
-out_df.to_csv("significant_cifs/chain_mapping.csv", index=False)
 print(out_df)
+out_df.to_csv("significant_cifs/chain_mapping.csv", index=False)
