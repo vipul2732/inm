@@ -71,3 +71,7 @@ df = pd.DataFrame({"QueryUID": query_ids, "PDB70_CLU": pdb70_clu_ids,
                    "Template_Neff": tneff, "Q": q, "T": t})
 df.to_csv("hhblits_out/SigPDB70Chain.csv", index=False)
 
+
+sig_pdbs = list(set([i.split("_")[0] for i in df['PDB70_Chain'].values]))
+df = pd.DataFrame({"sig_pdbs": sig_pdbs})
+df.to_csv("hhblits_out/SignificantPDB70_PDBIDs.csv", index=False, header=False)
