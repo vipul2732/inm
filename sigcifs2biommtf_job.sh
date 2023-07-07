@@ -36,7 +36,7 @@ for file in $(ls significant_cifs/*.cif | sed -n "$1,$2p" ); do
         echo "BASH SKIP ${pdb_id}"
     else
         echo "BASH RUN ${pdb_id}"
-        #python3 pdb2mmtf.py -i $file -o significant_cifs -from "cif" -to "biommtf" 
+        python3 pdb2mmtf.py -i $file -o significant_cifs -from "cif" -to "biommtf" 
     fi
 done
 
