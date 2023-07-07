@@ -3,9 +3,16 @@
 
 for pdb_id in $(cat hhblits_out/SignificantPDB70_PDBIDs.csv); do
     lower_pdb=${pdb_id,,}
+
+    if [[ "$lower_pdb" == "3jaq" ]]; then
+       echo "Obsolete PDB ID"
+       echo "Remapping to 6GSM"
+       lower_pdb="6gsm"
+    fi
+       
     middle=${lower_pdb:1:2}
     filename=all_bioassembly_cif/mmCIF/$middle/${lower_pdb}.cif.gz
-    
+
     if [[ ! -f "$filename" ]]; then
         echo "Error: File does not exist" >&2
         echo "$filename"
