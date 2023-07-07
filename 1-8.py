@@ -11,7 +11,7 @@ import biotite.structure.io.mmtf as mmtf
 import biotite.sequence.align
 import sys
 
-production = False # Turn this on to enable checks
+production = True# Turn this on to enable checks
 
 # Globals
 blossum62 = biotite.sequence.align.SubstitutionMatrix.std_protein_matrix()
@@ -151,8 +151,9 @@ def h(x):
 
 bio_paths = [i for i in Path("significant_cifs/").iterdir() if "bio.mmtf" in str(i)]
 
-sig_alns = pd.read_csv("hhblits_out/SignificantPreyPDB70PairAlign.csv")
-expected_pdbs = [i.split("_")[0].lower() for i in sig_alns['PDB70ID'].values]
+sig_alns = pd.read_csv("hhblits_out/SigPDB70Chain.csv")
+
+expected_pdbs = [i.split("_")[0].lower() for i in sig_alns['PDB70_Chain'].values]
 sig_alns.loc[:, "pdb_id"] = expected_pdbs
 
 
@@ -281,6 +282,7 @@ for pdb_id in expected_pdbs:
 
                     Q.append(sub_uid_seq)
                     T.append(pdb_seq)
+    break
                     
 out_df = pd.DataFrame({"QueryID": QueryID, "ChainID": ChainID,
         "PDBID": PDBID, "bt_aln_score": bt_aln_score, "bt_aln_evalue": bt_evalue,
