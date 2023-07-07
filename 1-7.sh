@@ -12,7 +12,10 @@ for pdb_id in $(cat hhblits_out/SignificantPDB70_PDBIDs.csv); do
        echo "Obsolete PDB ID"
        echo "Remapping to 8BXX"
        lower_pdb="8bxx"
-    
+    elif [[ "$lower_pdb" == "4xfg" ]]; then
+       echo "Obsolete PDB ID"
+       echo "Remapping to 5jpm"
+       lower_pdb="5jpm"
     fi
        
     middle=${lower_pdb:1:2}
