@@ -1,7 +1,10 @@
 #!/bin/bash
 # Fetch the significant PDBs and populate the significant cifs directory
 
-for pdb_id in $(cat hhblits_out/SignificantPDB70_PDBIDs.csv); do
+start=${1:-1}
+stop=${2:-50000}
+
+for pdb_id in $(cat hhblits_out/SignificantPDB70_PDBIDs.csv | sed -n "$start,${stop}p"); do
     lower_pdb=${pdb_id,,}
 
     if [[ "$lower_pdb" == "3jaq" ]]; then
@@ -12,10 +15,14 @@ for pdb_id in $(cat hhblits_out/SignificantPDB70_PDBIDs.csv); do
        echo "Obsolete PDB ID"
        echo "Remapping to 8BXX"
        lower_pdb="8bxx"
-    elif [[ "$lower_pdb" == "4xfg" ]]; then
+    elif [[ "$lower_pdb" == "4fxg" ]]; then
        echo "Obsolete PDB ID"
        echo "Remapping to 5jpm"
        lower_pdb="5jpm"
+    elif [[ "$lower_pdb" == "3unr" ]]; then
+       echo "Obsolete PDB ID"
+       echo "Remapping to 4yta"
+       lower_pdb="4yta"
     fi
        
     middle=${lower_pdb:1:2}
