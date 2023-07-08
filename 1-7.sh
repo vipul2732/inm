@@ -27,6 +27,18 @@ for pdb_id in $(cat hhblits_out/SignificantPDB70_PDBIDs.csv | sed -n "$start,${s
        echo "Obsolete PDB ID"
        echo "Remapping to 6i2d"
        lower_pdb="6i2d"
+    elif [[ "$lower_pdb" == "2f83" ]]; then
+       echo "Obsolete PDB ID"
+       echo "Remapping to 6i58"
+       lower_pdb="6i58"
+    elif [[ "$lower_pdb" == "6ers" ]]; then
+       echo "Obsolete PDB ID"
+       echo "Remapping to 6ers"
+       lower_pdb="6i2c"
+    elif [[ "$lower_pdb" == "5lho" ]]; then
+       echo "Obsolete PDB ID"
+       echo "Remapping to 5lho"
+       lower_pdb="5lvz"
     fi
        
     middle=${lower_pdb:1:2}
