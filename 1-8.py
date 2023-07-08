@@ -3,6 +3,7 @@ Read in all significant hhblits alignments, read in PDB sequences, do pairwise b
 do BSASA calculations, save the chain_pairing, save the BSASA calculation.
 """
 
+import click
 import pandas as pd
 from pathlib import Path
 import biotite.sequence.io.fasta
@@ -11,7 +12,7 @@ import biotite.structure.io.mmtf as mmtf
 import biotite.sequence.align
 import sys
 
-production = True# Turn this on to enable checks
+production = False#True# Turn this on to enable checks
 
 # Globals
 blossum62 = biotite.sequence.align.SubstitutionMatrix.std_protein_matrix()
@@ -173,7 +174,8 @@ if not production:
     expected_pdbs = mmtf_files 
 
 if production:
-    assert len(pdb_ids.symmetric_difference(mmtf_files)) == 0
+    sym_diff = pdb_ids.symmetric_difference(mmtf_files)
+    assert len(sym_diff) == 0, len(sym_diff)
 
 # Mutate the uniprot sequences
 
@@ -211,6 +213,7 @@ T = []
 if production:
     assert len(uid_sequences.keys()) == 3062, len(uid_sequences.keys())
 
+expected_pdbs = sorted(expected_pdbs)
 for pdb_id in expected_pdbs:
     fpath = f"significant_cifs/{pdb_id}.bio.mmtf"
     eprint(f"reading {fpath}")
@@ -237,56 +240,64 @@ for pdb_id in expected_pdbs:
     seq_dict = new_dict.copy()
     pdb_bio_sequences[pdb_id] = seq_dict
 
-eprint("pdb sequences mutated")
-eprint(set(global_lost))
-for pdb_id in expected_pdbs:
-    fpath = f"significant_cifs/{pdb_id}.bio.mmtf"
-    eprint(f"reading {fpath}")
-    read_f = biotite.structure.io.mmtf.MMTFFile.read(fpath)
-    bio_array = biotite.structure.io.mmtf.get_structure(read_f, model=1)
-    #bio_assemblies[pdb_id] = bio_array
-    #mask = bio_array.hetero == False  # Exclude heteroatoms
-    mask = biotite.structure.filter_amino_acids(bio_array)
-    bio_array = bio_array[mask]
+@click.command()
+@click.option("--start", required=True, type=int)
+@click.option("--stop", required=True, type=int)
+def main():
+    eprint("pdb sequences mutated")
+    eprint(set(global_lost))
+    assert start < stop
+    expected_pdbs = sorted(expected_pdbs)[start:stop]
+    for pdb_id in expected_pdbs:
+        fpath = f"significant_cifs/{pdb_id}.bio.mmtf"
+        eprint(f"reading {fpath}")
+        read_f = biotite.structure.io.mmtf.MMTFFile.read(fpath)
+        bio_array = biotite.structure.io.mmtf.get_structure(read_f, model=1)
+        #bio_assemblies[pdb_id] = bio_array
+        #mask = bio_array.hetero == False  # Exclude heteroatoms
+        mask = biotite.structure.filter_amino_acids(bio_array)
+        bio_array = bio_array[mask]
+    
+        sel = sig_alns['pdb_id'] == pdb_id
+        subframe = sig_alns[sel]
+        sub_uids = set(subframe["QueryUID"].values)
+    
+        for sub_uid in sub_uids:
+            sub_uid_seq = uid_sequences[sub_uid]
+            if len(sub_uid_seq) >= min_length:
+                for pdb_chain_id, pdb_seq in pdb_bio_sequences[pdb_id].items():
+                    if len(pdb_seq) >= min_length: 
+                        eprint(f"Aligning {sub_uid} {pdb_chain_id} in {pdb_id}")
+                        # Do a pairwise sequence alignment
+                        useq = biotite.sequence.ProteinSequence(sub_uid_seq)
+                        pdbseq = biotite.sequence.ProteinSequence(pdb_seq)
+    
+                        alignments = biotite.sequence.align.align_optimal(useq, pdbseq, blossum62,
+                                        local=False)
+                        aln=alignments[0]
+                        score = aln.score
+    
+                        u1, p2 = aln.get_gapped_sequences()
+                        QueryID.append(sub_uid)
+                        ChainID.append(pdb_chain_id)
+                        PDBID.append(pdb_id)
+                        bt_aln_score.append(score)
+                        bt_evalue.append(None)
+    
+                        percent_seq_id = biotite.sequence.align.get_sequence_identity(aln, mode="not_terminal")
+                        bt_psid.append(percent_seq_id)
+                        bt_aln_Q.append(u1)
+                        bt_aln_T.append(p2)
+    
+                        Q.append(sub_uid_seq)
+                        T.append(pdb_seq)
+                        
+    out_df = pd.DataFrame({"QueryID": QueryID, "ChainID": ChainID,
+            "PDBID": PDBID, "bt_aln_score": bt_aln_score, "bt_aln_evalue": bt_evalue,
+            "bt_aln_percent_seq_id": bt_psid, "bt_aln_Q": bt_aln_Q, "bt_aln_T": bt_aln_T, "Q": Q, "T": T})
+    
+    out_df.to_csv(f"significant_cifs/chain_mapping_{start}_{stop}.csv", index=False)
+    print(out_df)
 
-    sel = sig_alns['pdb_id'] == pdb_id
-    subframe = sig_alns[sel]
-    sub_uids = set(subframe["QueryUID"].values)
-
-    for sub_uid in sub_uids:
-        sub_uid_seq = uid_sequences[sub_uid]
-        if len(sub_uid_seq) >= min_length:
-            for pdb_chain_id, pdb_seq in pdb_bio_sequences[pdb_id].items():
-                if len(pdb_seq) >= min_length: 
-                    eprint(f"Aligning {sub_uid} {pdb_chain_id} in {pdb_id}")
-                    # Do a pairwise sequence alignment
-                    useq = biotite.sequence.ProteinSequence(sub_uid_seq)
-                    pdbseq = biotite.sequence.ProteinSequence(pdb_seq)
-
-                    alignments = biotite.sequence.align.align_optimal(useq, pdbseq, blossum62,
-                                    local=False)
-                    aln=alignments[0]
-                    score = aln.score
-
-                    u1, p2 = aln.get_gapped_sequences()
-                    QueryID.append(sub_uid)
-                    ChainID.append(pdb_chain_id)
-                    PDBID.append(pdb_id)
-                    bt_aln_score.append(score)
-                    bt_evalue.append(None)
-
-                    percent_seq_id = biotite.sequence.align.get_sequence_identity(aln, mode="not_terminal")
-                    bt_psid.append(percent_seq_id)
-                    bt_aln_Q.append(u1)
-                    bt_aln_T.append(p2)
-
-                    Q.append(sub_uid_seq)
-                    T.append(pdb_seq)
-    break
-                    
-out_df = pd.DataFrame({"QueryID": QueryID, "ChainID": ChainID,
-        "PDBID": PDBID, "bt_aln_score": bt_aln_score, "bt_aln_evalue": bt_evalue,
-        "bt_aln_percent_seq_id": bt_psid, "bt_aln_Q": bt_aln_Q, "bt_aln_T": bt_aln_T, "Q": Q, "T": T})
-
-out_df.to_csv("significant_cifs/chain_mapping.csv", index=False)
-print(out_df)
+if __name__ == "__main__":
+    main()
