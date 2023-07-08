@@ -12,13 +12,35 @@ import biotite.structure.io.mmtf as mmtf
 import biotite.sequence.align
 import sys
 
-production = False#True# Turn this on to enable checks
+production = True# Turn this on to enable checks
 
 # Globals
 blossum62 = biotite.sequence.align.SubstitutionMatrix.std_protein_matrix()
 ProtSeq = biotite.sequence.ProteinSequence
 alpha = biotite.sequence.ProteinSequence.alphabet
 min_length = 88
+
+obsolete2current = {"3jaq": "6gsm",
+    "6t8j": "8bxx",
+    "4fxg": "5jpm",
+    "3unr": "4yta",
+    "6emd": "6i2d",
+    "2f83": "6i58",
+    "6ers": "6i2c",
+    "5lho": "5lvz",
+    "6emb": "6i2a",
+    "6fbs": "6fuw",
+    "5fl8": "5jcs",
+    "5dd2": "5zz0",
+    "4iqq": "5noo",
+    "4xam": "5jtw",
+    "1a2k": "5bxq",
+    "7ulm": "8ecg",
+    "7s1e": "8g4j",
+    "4fxk": "5jpn" }
+
+}
+current2obsolete = {val:key for key,val in obsolete2current.items()}
 
 non_canonical = {
 "MSE": "M",
@@ -154,9 +176,23 @@ bio_paths = [i for i in Path("significant_cifs/").iterdir() if "bio.mmtf" in str
 
 sig_alns = pd.read_csv("hhblits_out/SigPDB70Chain.csv")
 
-expected_pdbs = [i.split("_")[0].lower() for i in sig_alns['PDB70_Chain'].values]
-sig_alns.loc[:, "pdb_id"] = expected_pdbs
+# Rename the obsolete pdb_ids
+tmp = []
+expected_pdbs = []
+for i, r in sig_alns.iterrows():
+    pdb_id, chain_id = r['PDB70_Chain'].split("_")
+    pdb_id = pdb_id.lower()
 
+    if pdb_id in obsolete2current:
+        pdb_id = obsolete2current[pdb_id]
+
+    pdb70_chain = pdb_id.upper() + "_" + chain_id 
+    expected_pdbs.append(pdb_id)
+    tmp.append(pdb70_chain)
+
+sig_alns.loc[:, "PDB70_Chain"] = np.array(tmp)
+
+sig_alns.loc[:, "pdb_id"] = expected_pdbs
 
 uids = set(sig_alns["QueryUID"].values)
 uid_sequences = {}
@@ -216,7 +252,7 @@ if production:
 @click.command()
 @click.option("--start", required=True, type=int)
 @click.option("--stop", required=True, type=int)
-def main(start, stop):
+def main(start, stop, expected_pdbs=expected_pdbs):
     expected_pdbs = sorted(expected_pdbs)[start:stop]
     assert start < stop
     for pdb_id in expected_pdbs:
