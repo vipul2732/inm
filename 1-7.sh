@@ -23,6 +23,10 @@ for pdb_id in $(cat hhblits_out/SignificantPDB70_PDBIDs.csv | sed -n "$start,${s
        echo "Obsolete PDB ID"
        echo "Remapping to 4yta"
        lower_pdb="4yta"
+    elif [[ "$lower_pdb" == "6emd" ]]; then
+       echo "Obsolete PDB ID"
+       echo "Remapping to 6i2d"
+       lower_pdb="6i2d"
     fi
        
     middle=${lower_pdb:1:2}
