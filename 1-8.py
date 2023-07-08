@@ -213,41 +213,41 @@ T = []
 if production:
     assert len(uid_sequences.keys()) == 3062, len(uid_sequences.keys())
 
-expected_pdbs = sorted(expected_pdbs)
-for pdb_id in expected_pdbs:
-    fpath = f"significant_cifs/{pdb_id}.bio.mmtf"
-    eprint(f"reading {fpath}")
-    read_f = biotite.structure.io.mmtf.MMTFFile.read(fpath)
-    bio_array = biotite.structure.io.mmtf.get_structure(read_f, model=1)
-    #bio_assemblies[pdb_id] = bio_array
-    #mask = bio_array.hetero == False  # Exclude heteroatoms
-    mask = biotite.structure.filter_amino_acids(bio_array)
-    bio_array = bio_array[mask]
-    seq_dict = get_sequence_dict(bio_array)
-    new_dict = {}
-    for chain, seq in seq_dict.items():
-        if len(seq) >= min_length:
-            seq = seq.replace("U", "C")
-            seq = seq.replace("J", "X")
-            seq = seq.replace("Z", "X")
-            seq = seq.replace("B", "X")
-            seq = seq.replace("O", "X")
-        
-            for letter in seq:
-                assert letter in alpha, (letter, chain, pdb_id)
-            new_dict[chain] = seq
-
-    seq_dict = new_dict.copy()
-    pdb_bio_sequences[pdb_id] = seq_dict
-
 @click.command()
 @click.option("--start", required=True, type=int)
 @click.option("--stop", required=True, type=int)
-def main():
-    eprint("pdb sequences mutated")
-    eprint(set(global_lost))
-    assert start < stop
+def main(start, stop):
     expected_pdbs = sorted(expected_pdbs)[start:stop]
+    assert start < stop
+    for pdb_id in expected_pdbs:
+        fpath = f"significant_cifs/{pdb_id}.bio.mmtf"
+        eprint(f"reading {fpath}")
+        read_f = biotite.structure.io.mmtf.MMTFFile.read(fpath)
+        bio_array = biotite.structure.io.mmtf.get_structure(read_f, model=1)
+        #bio_assemblies[pdb_id] = bio_array
+        #mask = bio_array.hetero == False  # Exclude heteroatoms
+        mask = biotite.structure.filter_amino_acids(bio_array)
+        bio_array = bio_array[mask]
+        seq_dict = get_sequence_dict(bio_array)
+        new_dict = {}
+        for chain, seq in seq_dict.items():
+            if len(seq) >= min_length:
+                seq = seq.replace("U", "C")
+                seq = seq.replace("J", "X")
+                seq = seq.replace("Z", "X")
+                seq = seq.replace("B", "X")
+                seq = seq.replace("O", "X")
+            
+                for letter in seq:
+                    assert letter in alpha, (letter, chain, pdb_id)
+                new_dict[chain] = seq
+    
+        seq_dict = new_dict.copy()
+        pdb_bio_sequences[pdb_id] = seq_dict
+    
+        eprint("pdb sequences mutated")
+        eprint(set(global_lost))
+
     for pdb_id in expected_pdbs:
         fpath = f"significant_cifs/{pdb_id}.bio.mmtf"
         eprint(f"reading {fpath}")
