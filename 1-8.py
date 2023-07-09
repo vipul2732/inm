@@ -10,10 +10,14 @@ import biotite.sequence.io.fasta
 import biotite.sequence
 import biotite.structure.io.mmtf as mmtf
 import biotite.sequence.align
+import numpy as np
 import sys
 
-production = True# Turn this on to enable checks
+def eprint(*args, **kwargs):
+    print(*args, file=sys.stderr, **kwargs)
 
+production = True# Turn this on to enable checks
+eprint(f"PRODUCTION {production}")
 # Globals
 blossum62 = biotite.sequence.align.SubstitutionMatrix.std_protein_matrix()
 ProtSeq = biotite.sequence.ProteinSequence
@@ -39,7 +43,6 @@ obsolete2current = {"3jaq": "6gsm",
     "7s1e": "8g4j",
     "4fxk": "5jpn" }
 
-}
 current2obsolete = {val:key for key,val in obsolete2current.items()}
 
 non_canonical = {
@@ -166,17 +169,17 @@ def get_sequence(atom_array, chain_id, min_length=min_length):
             seq[i] = mapp[i]
     return "".join(seq) 
 
-def eprint(*args, **kwargs):
-    print(*args, file=sys.stderr, **kwargs)
 
 def h(x):
     return '{:,}'.format(x)
 
+eprint("Reading bio.mmtf paths")
 bio_paths = [i for i in Path("significant_cifs/").iterdir() if "bio.mmtf" in str(i)]
-
+eprint("Reading SigPDB70Chain")
 sig_alns = pd.read_csv("hhblits_out/SigPDB70Chain.csv")
 
 # Rename the obsolete pdb_ids
+eprint("Rename obsolete pdb ids")
 tmp = []
 expected_pdbs = []
 for i, r in sig_alns.iterrows():
@@ -196,6 +199,7 @@ sig_alns.loc[:, "pdb_id"] = expected_pdbs
 
 uids = set(sig_alns["QueryUID"].values)
 uid_sequences = {}
+eprint("Reading FASTA sequences")
 for uid in uids:
     fasta_file = biotite.sequence.io.fasta.FastaFile.read(f"input_sequences/{uid}.fasta")
     assert len(fasta_file) == 1, uid
@@ -216,6 +220,7 @@ if production:
 # Mutate the uniprot sequences
 
 new_dict = {}
+eprint("Mutating U, J, Z, B and O")
 for uid, seq in uid_sequences.items():
     seq = seq.replace("U", "C")
     seq = seq.replace("J", "X")
@@ -246,13 +251,12 @@ bt_aln_T = []
 Q = []
 T = []
 
-if production:
-    assert len(uid_sequences.keys()) == 3062, len(uid_sequences.keys())
 
 @click.command()
 @click.option("--start", required=True, type=int)
 @click.option("--stop", required=True, type=int)
 def main(start, stop, expected_pdbs=expected_pdbs):
+    eprint("Begin main")
     expected_pdbs = sorted(expected_pdbs)[start:stop]
     assert start < stop
     for pdb_id in expected_pdbs:
