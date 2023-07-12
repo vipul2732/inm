@@ -95,7 +95,9 @@ bsasa_lst = []
 
 bsasa_pdb_set = sorted(set(bsasa["PDBID"].values))
 eprint(f"N PDBS {h(len(bsasa_pdb_set))}")
-for pdb_id in bsasa_pdb_set:
+for pdb_loop_idx, pdb_id in enumerate(bsasa_pdb_set):
+    if pdb_loop_idx % 1000 == 0:
+        eprint(f"{pdb_loop_idx}    {pdb_id}")
     chain_subframe = chain_mapping[chain_mapping["PDBID"] == pdb_id]
     bsasa_subframe = bsasa[bsasa["PDBID"] == pdb_id]
     assert len(bsasa_subframe) > 0, pdb_id
