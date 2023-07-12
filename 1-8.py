@@ -257,8 +257,8 @@ T = []
 @click.option("--stop", required=True, type=int)
 def main(start, stop, expected_pdbs=expected_pdbs):
     eprint("Begin main")
-    expected_pdbs = sorted(expected_pdbs)[start:stop]
-    assert start < stop
+    assert start < stop, (start, stop)
+    expected_pdbs = sorted(set(expected_pdbs))[start:stop]
     for pdb_id in expected_pdbs:
         fpath = f"significant_cifs/{pdb_id}.bio.mmtf"
         eprint(f"reading {fpath}")
