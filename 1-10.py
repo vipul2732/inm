@@ -21,29 +21,49 @@ import pdb
 def eprint(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
 
-hhblits_df = pd.read_csv("hhblits_out/SignificantPreyPDB70PairAlign.csv")
-hhblits_cols = hhblits_df.columns
-chain_mapping = pd.read_csv("significant_cifs/chain_mapping.csv")
+def h(x):
+    return '{:,}'.format(x)
+
+def h_len_set_col(df, col):
+    return h(len(set(df[col].values)))
+
+def summarize_df(df, spacer=""):
+    s = ""
+    for col in df.columns:
+        s = s + f"\n{spacer}{col} {len(set(df[col].values))}"
+    return s      
+
+#hhblits_df = pd.read_csv("hhblits_out/SigPDB70Chain.csv")
+#eprint(f"Input SIGPDB70Chain")
+#eprint(summarize_df(hhblits_df, spacer="  "))
+#hhblits_cols = hhblits_df.columns
+chain_mapping = pd.read_csv("significant_cifs/chain_mapping_all.csv")
+eprint(f"Input chain_mapping_all.csv")
+eprint(f"  Query ID {h_len_set_col(chain_mapping, 'QueryID')}")
+eprint(f"  PDB ID {h_len_set_col(chain_mapping, 'PDBID')}")
 
 bsasa = pd.read_csv("significant_cifs/BSASA_concat.csv")
-eprint(f"N bsasa {len(bsasa)}")
+eprint(f"BSASA Input")
 
 # Drop the key errors
 sel = bsasa["BSASA"] != "KeyError"
 bsasa = bsasa[sel]
+
+eprint(f"  PDB ID {h_len_set_col(bsasa, 'PDBID')}")
+eprint(f"BSASA_concat length {len(bsasa)}")
 
 bsasa["BSASA"] = np.array([float(i) for i in bsasa["BSASA"].values])
 
 assert bsasa["BSASA"].values.dtype == np.float64
 sel = bsasa["BSASA"].values >= 500
 bsasa = bsasa[sel]
-eprint(f"N bsasa {len(bsasa)} 500")
+eprint(f"N bsasa {h(len(bsasa))} over 500 A")
 seqid_col = "bt_aln_percent_seq_id"
 chain_mapping.loc[:, seqid_col] = np.array([float(i) for i in chain_mapping[seqid_col].values])
 sel = chain_mapping[seqid_col] >= 0.3
 
 chain_mapping = chain_mapping[sel]
-eprint(f"N mapped chains {sum(sel)}")
+eprint(f"N mapped chains {h(sum(sel))}")
 
 uid_set = sorted(list(set(chain_mapping["QueryID"].values)))
 pdb_set = sorted(list(set(bsasa["PDBID"].values)))
@@ -74,6 +94,7 @@ chain2_lst = []
 bsasa_lst = []
 
 bsasa_pdb_set = sorted(set(bsasa["PDBID"].values))
+eprint(f"N PDBS {h(len(bsasa_pdb_set))}")
 for pdb_id in bsasa_pdb_set:
     chain_subframe = chain_mapping[chain_mapping["PDBID"] == pdb_id]
     bsasa_subframe = bsasa[bsasa["PDBID"] == pdb_id]
@@ -129,5 +150,9 @@ df = pd.DataFrame({"Prey1": prey1_lst,
   "Chain1": chain1_lst,
   "Chain2": chain2_lst,
   "bsasa_lst": bsasa_lst})
+
+eprint(f"OUTPUT N PDBS {len(set(df['PDBID'].values))}")
+nout_prey = set(df['Prey1'].values).union(set(df['Prey2'].values))
+eprint(f"OUTPUT N Prey {len(nout_prey)}")
 
 df.to_csv("significant_cifs/BSASA_reference.csv", index=False)
