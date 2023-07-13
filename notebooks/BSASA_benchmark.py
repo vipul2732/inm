@@ -23,6 +23,7 @@ import xarray as xr
 import matplotlib.pyplot as plt
 from itertools import combinations
 import math
+import operator
 
 
 # +
@@ -100,9 +101,11 @@ print("It is estimated that 0.35%-1.5% of possible protein interactions are posi
 print(f"This corresponds to {h(int(n_possible_mapped_interactions * 0.0035))} to {h(int(n_possible_mapped_interactions * 0.015))} possible interactions")
 print(f"The remaining {uid_total - nuid} prey were not found in the PDB")
 print(f"This corresponds to {h(math.comb(uid_total - nuid, 2))} possible interactions")
+# -
+
+chain_mapping = pd.read_csv("../significant_cifs/chain_mapping_all.csv")
 
 # +
-chain_mapping = pd.read_csv("../significant_cifs/chain_mapping.csv")
 table1 = pd.read_csv("../table1.csv")
 print(f"table 1 {table1.shape}")
 print(f"BSASA REF {bsasa_ref.shape}")
@@ -361,20 +364,12 @@ for i, row in df_all.iterrows():
         unknown.append(1)
     else:
         unknown.append(0)
-        
 
-    
-    
-    
-    
+
 unknown = np.array(unknown)
 direct_interaction = np.array(direct_interaction)
 cocomplex_interactions = np.array(cocomplex_interactions)
-
-
 # -
-
-
 
 npairs = math.comb(3062, 2)
 nobs = math.comb(1400, 2)
@@ -386,46 +381,6 @@ print((f"Of the {h(math.comb(3062, 2))} possible protein interactions"
 
 
 bsasa_ref
-
-# +
-prey_pairs = list(combinations(prey_set, 2))
-direct_interaction_set = {}
-for i, r in bsasa_ref.iterrows():
-    p1 = r['Prey1Name']
-    p2 = r['Prey2Name']
-    direct_interaction_set[frozenset((p1, p2))] = ""
-pdb_positive = []
-prey1 = []
-prey2 = []
-for pair in prey_pairs:
-    fs = frozenset(pair)
-    p1, p2 = pair
-    prey1.append(p1)
-    prey2.append(p2)
-    if fs in direct_interaction_set:
-        pdb_positive.append(True)
-    else:
-        pdb_positive.append(False)
-        
-prey_pairs_df = pd.DataFrame({'Prey1Name': prey1, 'Prey2Name': prey2, 'pdb_pos': pdb_positive})
-nrows, ncols = prey_pairs_df.shape
-
-prey_pairs_df.loc[:, 'rand'] = np.array(jax.random.uniform(jax.random.PRNGKey(13), shape=(nrows, )))
-# -
-
-sum(prey_pairs_df['pdb_pos'].values)
-
-import operator
-
-prey_pairs_df['rand'] < 2
-
-
-
-
-
-# ?plt.legend
-
-sum(prey_pairs_df['pdb_pos'])
 
 
 # +
@@ -472,6 +427,7 @@ def pval(results, true_results):
 
 
 # +
+import jax
 vals = df_all['SaintScore'].values
 
 results, true_result = permutation_test(13, vals, vals[np.where(direct_interaction)], np.mean, 1000000)
@@ -665,11 +621,7 @@ for i, r in bsasa_ref.iterrows():
 ds = xr.Dataset({'cocomplex': cocomplex_matrix, 'direct': direct_matrix, 'CRL_E':tensorR, 'CRL_C':tensorC})
 # -
 
-
-
-cocomplex_matrix.loc[p1, p2]
-
-np.array(tensorC).shape
+ds
 
 df_new[df_new['condition']=='wt']
 
@@ -722,32 +674,295 @@ chain_mapping
 
 # +
 # Direct Interactions benchmark
+
+# +
+prey_pairs = list(combinations(prey_set, 2))
+direct_interaction_set = {}
+for i, r in bsasa_ref.iterrows():
+    p1 = r['Prey1Name']
+    p2 = r['Prey2Name']
+    direct_interaction_set[frozenset((p1, p2))] = ""
+pdb_positive = []
+prey1 = []
+prey2 = []
+for pair in prey_pairs:
+    fs = frozenset(pair)
+    p1, p2 = pair
+    prey1.append(p1)
+    prey2.append(p2)
+    if fs in direct_interaction_set:
+        pdb_positive.append(True)
+    else:
+        pdb_positive.append(False)
+        
+prey_pairs_df = pd.DataFrame({'Prey1Name': prey1, 'Prey2Name': prey2, 'pdb_pos': pdb_positive})
+nrows, ncols = prey_pairs_df.shape
+
+prey_pairs_df.loc[:, 'rand'] = np.array(jax.random.uniform(jax.random.PRNGKey(13), shape=(nrows, )))
 # -
 
-d = pd.read_excel("../1-s2.0-S1931312819302537-mmc2.xlsx", sheet_name=2)
+# DataSet
+print(f"N direct {h(np.sum(np.tril(ds['direct'] > 0, k=-1)))}")
+print(f"N cocomplex {h(np.sum(np.tril(ds['cocomplex'] > 0, k=-1)))}")
 
-sel = d['Bait'] == 'LRR1mock_MG132'
-d[sel].sort_values('SpecSum')[d['PreyGene'] == 'LLR1_HUMAN']
+# +
+# Append Cocomplex labels to DataFrame
+
+cocomplex_labels = []
+for i, r in df_new.iterrows():
+    bait = r['bait']
+    prey = r['PreyName']
+    if bait == 'LRR1':
+        bait = 'LLR1'
+    elif bait == 'CBFB':
+        bait = 'PEBB'
+        
+    val = ds['cocomplex'].sel(preyu=bait, preyv=prey).item()
+    cocomplex_labels.append(val)
+    
+df_new.loc[:, 'PDB_COCOMPLEX'] = np.array(cocomplex_labels, dtype=bool)
+    
+    
+
+# +
+df_new
+
+
+# -
+
+ds.sel(preyu='PEBB')
+
+xr.DataArray(df_new.sort_index())
 
 # +
 import operator
 # Function for plotting an accuracy curve
-def npos_ntotal(prey_pairs_df, col, threshold, comp=operator.le):
+def npos_ntotal(prey_pairs_df, col, threshold, comp=operator.le, pos_col='pdb_pos'):
     sel = prey_pairs_df[col] <= threshold
     sub_df = prey_pairs_df.loc[sel, :]
-    npos = np.sum(sub_df['pdb_pos'].values)
+    npos = np.sum(sub_df[pos_col].values)
     ntotal = len(sub_df)
     return npos, ntotal
 
-def xy_from(prey_pairs_df, col, thresholds):
+def xy_from(prey_pairs_df, col, thresholds, comp, pos_col):
     npos = []
     ntot = []
     for t in thresholds:
-        p, nt = npos_ntotal(prey_pairs_df, col, t)
+        p, nt = npos_ntotal(prey_pairs_df, col, t, comp=comp, pos_col=pos_col)
         npos.append(p)
         ntot.append(nt)
     return np.array(ntot), np.array(npos)
 
+
+# +
+x, y = xy_from(df_new, 'SaintScore', np.arange(1, 0, -0.05), comp=operator.ge, pos_col='PDB_COCOMPLEX')
+
+pos_col = 'PDB_COCOMPLEX'
+npairs = len(df_new)
+npdb_pos = sum(df_new[pos_col].values)
+
+yplot = y / npdb_pos
+xplot = x / npairs
+plt.plot(xplot, yplot, 'k.', label='Saint Score')
+plt.ylabel(f"Fraction PDB Cocomplex Positives (N={h(npdb_pos)})")
+plt.xlabel(f"Fraction Total Positives (N={h(npairs)})")
+
+#y2 = 1.0
+#x2 = npdb_pos / npairs
+#plt.vlines([0.0035, 0.015], 0, 1, label="Estimated fraction of true PPIs")
+
+
+#plt.plot(x2, y2, 'r+', label='PDB Benchmark')
+##xmul = 10
+#plt.plot(x2 * xmul, y2, 'rx', label=f'{xmul}x PDB')
+#plt.savefig('f1.png', dpi=300)
+plt.legend()
+plt.show()
+# -
+
+df_new.loc[:, 'rAv'] = df_new.loc[:, rsel].mean(axis=1)
+df_new.loc[:, 'cAv'] = df_new.loc[:, csel].mean(axis=1)
+df_new.loc[:, 'Av_diff'] = df_new['rAv'].values - df_new['cAv'].values
+
+df_new.shape
+
+# +
+"""
+JSON Structure for PreFilter
+
+There is 1 control shared between wt and vif conditions
+There is 1 control for the mock
+
+- vif/wt ctrl
+- mock ctrl
+- wt
+- vif
+- mock
+-rsel (4)
+-csel (12)
+
+vif - vif/wt ctrl
+wt  - vig/wt ctrl
+mock - mock ctrl
+"""
+
+def df_new2json(df):
+    csel = [f"c{i}" for i in range(1, 13)]
+    rsel = [f"r{i}" for i in range(1, 5)]
+    
+    Nrows = len(df)
+    Nrsel = len(rsel)
+    Ncsel = len(csel)
+    
+    RMatrix = df.loc[:, rsel].values
+    CMatrix = df.loc[:, csel].values
+    
+    RMatrix = [[int(i) for i in row] for row in RMatrix]
+    CMatrix = [[int(i) for i in row] for row in CMatrix]
+    
+    return {'Nrsel': Nrsel, 'Ncsel': Ncsel, 'Nrows': Nrows, 'Yexp': RMatrix,
+           'Yctrl': CMatrix}
+
+
+# -
+
+prey2seq = {r['QueryID']: r['Q'] for i, r in chain_mapping.iterrows()}
+df_new.loc[:, 'Q'] = np.array([(prey2seq[prey] if prey in prey2seq else np.nan) for prey in df_new['Prey'].values])
+
+
+    
+
+plt.title("Experimental Counts")
+x = np.ravel(df_new.loc[:, rsel].values)
+plt.hist(x, bins=100)
+s = f"Mean {np.mean(x)}\nMedian {np.median(x)}\nVar {np.var(x)}\nMin {np.min(x)}\nMax {np.max(x)}"
+plt.text(100, 30000, s)
+plt.show()
+
+# +
+import scipy as sp
+
+x1 = df_new['rAv'].values
+y1 = df_new['rVar'].values
+x2 = df_new['cAv'].values
+y2 = df_new['cVar'].values
+
+r1, p1 = sp.stats.pearsonr(x1, y1)
+r2, p2 = sp.stats.pearsonr(x2, y2)
+
+r1 = np.round(r1, 2)
+r2 = np.round(r2, 2)
+
+plt.plot(x1, y1, 'k.', label='experiment')
+plt.plot(x2, y2, 'rx', label='control')
+s = f"R Experiemnt {r1}\nR control {r2}"
+plt.text(60, 1400, s)
+plt.xlabel('Mean')
+plt.ylabel('Variance')
+plt.legend()
+plt.show()
+
+
+# -
+
+df_new.loc[:, 'rVar'] = df_new.loc[:, rsel].var(axis=1).values
+df_new.loc[:, 'cVar'] = df_new.loc[:, csel].var(axis=1).values
+
+ctrl_counts = (df_new.loc[(df_new['condition']=='wt') | (df_new['condition']=='mock'), csel])
+x = np.ravel(ctrl_counts.values)
+plt.title("Control Counts")
+plt.hist(x, bins=100)
+s = f"Mean {np.mean(x)}\nMedian {np.median(x)}\nVar {np.var(x)}\nMin {np.min(x)}\nMax {np.max(x)}"
+plt.text(100, 30000, s)
+plt.show()
+
+# +
+xall = np.concatenate([np.ravel(ctrl_counts.values), np.ravel(df_new.loc[:, rsel].values)])
+bounds = (0, 50)
+xaxis = np.arange(0, bounds[1], 1)
+r = 1/5
+yvalue = r * np.exp(-r * xaxis) * 5e5
+
+plt.hist(xall, bins=50, range=bounds)
+plt.plot(xaxis, yvalue, 'r', label='Model')
+plt.title("All Counts")
+s = f"Mean {np.mean(xall)}\nMedian {np.median(xall)}\nVar {np.var(xall)}\nMin {np.min(xall)}\nMax {np.max(xall)}"
+plt.xlabel("Spectral Count")
+plt.legend()
+plt.text(100, 30000, s)
+plt.show()
+
+def exp_pdf(x, r):
+    return r * np.exp(-x * r)
+
+
+# -
+
+df_new_all_json = df_new2json(df_new)
+import json
+with open("../sm1/df_new_all.json", 'w') as f:
+    json.dump(df_new_all_json, f)
+
+# + language="bash"
+# ls ../sm1
+# -
+
+# ?json.dump
+
+df_new_all_json
+
+
+
+sp.stats.beta(0.1, 0.9).pdf(xaxis / 401)
+
+(df_new['condition'] == 'wt') | (df_new['condition'] == 'mock')
+
+chain_mapping[chain_mapping['PDBID'] == '4n9f']
+
+prey2seq
+
+df_newjson = df_new2json(df_new)
+
+df_newjson['Ncsel']
+
+
+
+hist_bins, bin_edges, patches = plt.hist(df_new['Av_diff'].values, bins=100, range=(-5, 5))
+plt.vlines([-1, 1], 0, 2000, 'r')
+plt.title
+plt.show()
+
+diff_sel = ~(np.abs(df_new['Av_diff'].values) <= 1)
+sum(diff_sel)
+df_new2json(df_new[diff_sel])
+
+df_new[df_new['condition'] == 'vif'].loc['RUNX1', ['condition', 'bait'] + csel]
+
+set(df_new['condition'])
+
+df_new[df_new['Prey'] == 'P69723'].loc[:, ['bait', 'condition'] + csel]
+
+# +
+xaxis = np.arange(0, 10, 0.5)
+
+nremaining = [sum(~(np.abs(df_new['Av_diff'].values) <= i)) for i in xaxis]
+thresh = 1
+
+plt.title("Filtering thresholds")
+plt.plot(xaxis, nremaining, 'k.')
+plt.vlines(1, 0, 21000, 'r')
+plt.ylabel('N datapoints remaining')
+plt.xlabel("Spectral count threshold")
+plt.show()
+# -
+
+diff_sel = ~(np.abs(df_new['Av_diff'].values) <= 1)
+sum(diff_sel)
+
+
+
+
+# +
 x, y = xy_from(prey_pairs_df, 'rand', np.arange(0, 0.05, 0.005))
 
 npairs = len(prey_pairs_df)
