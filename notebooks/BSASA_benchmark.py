@@ -24,6 +24,12 @@ import matplotlib.pyplot as plt
 from itertools import combinations
 import math
 import operator
+from pathlib import Path
+import numpyro
+import numpyro.distributions as dist
+import biotite.sequence.io
+import jax.numpy as jnp
+import jax
 
 
 # +
@@ -66,6 +72,19 @@ def parse_spec(df, spec_colname='Spec', ctrl_colname='ctrlCounts',
 # -
 
 bsasa_ref = pd.read_csv("../significant_cifs/BSASA_reference.csv")
+
+# +
+uid2seq = {}
+tmp = [i for i in Path("../input_sequences/").iterdir() if ".fasta" in str(i)]
+#assert len(tmp) == 3062, len(tmp)
+for i in tmp:
+    uid = i.name.removesuffix(".fasta")
+    seq = biotite.sequence.io.load_sequence(str(i))
+    seq = str(seq)
+    uid2seq[uid] = seq
+    
+uid2seq_len = {uid: len(seq) for uid, seq in uid2seq.items()}
+    
 
 # +
 direct_interaction_set = {}
@@ -829,8 +848,8 @@ def df_new2json(df):
 prey2seq = {r['QueryID']: r['Q'] for i, r in chain_mapping.iterrows()}
 df_new.loc[:, 'Q'] = np.array([(prey2seq[prey] if prey in prey2seq else np.nan) for prey in df_new['Prey'].values])
 
-
-    
+xt = np.arange(-10, 10)
+yt = np
 
 plt.title("Experimental Counts")
 x = np.ravel(df_new.loc[:, rsel].values)
@@ -838,6 +857,9 @@ plt.hist(x, bins=100)
 s = f"Mean {np.mean(x)}\nMedian {np.median(x)}\nVar {np.var(x)}\nMin {np.min(x)}\nMax {np.max(x)}"
 plt.text(100, 30000, s)
 plt.show()
+
+df_new.loc[:, 'rVar'] = df_new.loc[:, rsel].var(axis=1).values
+df_new.loc[:, 'cVar'] = df_new.loc[:, csel].var(axis=1).values
 
 # +
 import scipy as sp
@@ -864,9 +886,6 @@ plt.show()
 
 
 # -
-
-df_new.loc[:, 'rVar'] = df_new.loc[:, rsel].var(axis=1).values
-df_new.loc[:, 'cVar'] = df_new.loc[:, csel].var(axis=1).values
 
 ctrl_counts = (df_new.loc[(df_new['condition']=='wt') | (df_new['condition']=='mock'), csel])
 x = np.ravel(ctrl_counts.values)
@@ -897,6 +916,645 @@ def exp_pdf(x, r):
 
 
 # -
+
+seq_lens = np.array([uid2seq_len[prey] for prey in df_new['Prey'].values])
+df_new.loc[:, 'aa_seq_len'] = seq_lens
+df_new.loc[:, 'exp_aa_seq_len'] = np.exp(seq_lens)
+
+
+# +
+def n_tryptic_cleavages(aa_seq):
+    assert aa_seq.isupper()
+    aa_seq = np.array(list(aa_seq))
+    n_sites = np.sum(aa_seq == 'K')
+    if aa_seq[-1] == 'K':
+        n_sites -= 1
+    
+    return n_sites
+
+def n_first_tryptic_cleavages(aa_seq):
+    return 2 * n_tryptic_cleavages(aa_seq)
+
+def n_first_typtic_cleavage_peptides(aa_seq):
+    return 1 + n_first_tryptic_cleavages(aa_seq)
+
+
+# -
+
+sel = df_new['aa_seq_len'] <= 5000
+sns.histplot(df_new[sel], x='n_first_tryptic_cleavage_sites', y='aa_seq_len')
+
+sns.regplot(df_new[sel], x='rAv', y='n_first_tryptic_cleavage_sites')
+
+sel = df_new['aa_seq_len'] <= 200
+sns.regplot(df_new[sel], x='cAv', y='n_first_tryptic_cleavage_sites')
+
+sns.regplot(df_new[sel], x='rAv', y='aa_seq_len')
+
+plt.plot(np.arange(len(df_new)), df_new['rAv'] - df_new['cAv'], 'k.')
+
+plt.plot(np.arange(len(df_new)), df_new['rAv'], 'k.')
+
+plt.plot(np.arange(len(df_new)), df_new['cAv'], 'k.')
+
+
+
+df_new[df_new['bait']=='LRR1']
+
+n_first_sites = [n_first_tryptic_cleavages(uid2seq[prey]) for prey in df_new['Prey']]
+df_new.loc[:, 'n_first_tryptic_cleavage_sites'] = np.array(n_first_sites)
+
+
+
+np.log(5000)
+
+# There is one sequence that is very long
+col = 'aa_seq_len'
+sel = df_new[col] < 1000
+sns.regplot(df_new.loc[sel, :], x=col, y='rAv')
+print("Conclusion - no sequence ascociation")
+
+col = 'aa_seq_len'
+xcol = 'rAv'
+sel = df_new[col] <= 500
+plt.plot((df_new.loc[sel, col].values), np.max(df_new.loc[sel, rsel].values, axis=1), 'k.')
+plt.xlabel(col)
+plt.ylabel('Max spectral counts')
+#plt.ylabel(col)
+
+col = 'exp_aa_seq_len'
+sel = df_new[col] < 1.4e217
+sns.regplot(df_new[sel], x=col, y='rAv')
+
+# +
+"""
+95 % Frequentist confidence interval
+"""
+
+x = np.arange(0, 215)
+b = 0
+m = 1.565
+y = m * x + b
+sns.regplot(x="rAv", y="rVar", data=df_new)
+plt.plot(x, y)
+plt.title("Experimental Data")
+
+# +
+x = np.arange(0, 215)
+b = 0
+m = 2.8
+y = m * x + b
+
+ax = sns.regplot(x='cAv', y="cVar", data=df_new)
+plt.plot(x, y)
+plt.title("Control Data")
+
+
+# -
+
+def model(x=None, y=None):
+    b = 0 #numpyro.sample('b', dist.Normal(0, 0.1))
+    m = numpyro.sample('m', dist.Normal(0, 1))
+    numpyro.sample('Y', dist.Normal(m * x + b), obs=y)
+
+
+
+nuts_kernal = numpyro.infer.NUTS(model)
+mcmc = numpyro.infer.MCMC(nuts_kernal, num_warmup=500, num_samples=1000)
+rng_key = jax.random.PRNGKey(13)
+mcmc.run(rng_key, x=df_new['rAv'].values, y=df_new['rVar'].values, extra_fields=('potential_energy',))
+
+mcmc.print_summary()
+
+
+# +
+def m1(df):
+    nrows = len(df)
+    hyper_prior = np.ones(nrows) * 1/5
+    Yexp = df.loc[:, rsel].values
+    Yctrl = df.loc[:, csel].values
+    
+    nexp = len(rsel)
+    nctrl = len(csel)
+    
+    kappa_ = numpyro.sample('k', dist.Exponential(rate=hyper_prior))
+    lambda_ = numpyro.sample('l', dist.Exponential(rate=hyper_prior))
+    for i in range(0, nctrl):
+        numpyro.sample(f'Ycrtl_{i}', dist.Poisson(kappa_), obs=Yctrl[:, i])
+        
+    for i in range(0, nexp):
+        numpyro.sample(f'Yexp_a{i}', dist.Poisson(lambda_), obs=Yexp[:, i])
+        numpyro.sample(f'Yexp_b{i}', dist.Poisson(kappa_), obs=Yexp[:, i])
+    
+    
+    
+# -
+
+df_test = df_new
+nuts_kernal = numpyro.infer.NUTS(m1)
+mcmc = numpyro.infer.MCMC(nuts_kernal, num_warmup=1000, num_samples=1000)
+rng_key = jax.random.PRNGKey(13)
+mcmc.run(rng_key, df_test, extra_fields=('potential_energy',))
+
+# ## Probabalistic Filter
+#
+# The model is
+# $$ p(M | D, I) \propto p(D | M, I)p(M | I) $$
+#
+# $$ D = Y_E, Y_C $$
+# $$ I = I_1, I_2 $$
+#
+#
+
+samples = mcmc.get_samples()
+
+# +
+# First create a function that reads in a vector of
+
+jax.vmap(jax.scipy.stats.poisson.pmf)
+
+
+# +
+def f1(Y, x):
+    return 
+
+def posterior_odds(samples, df):
+    theta1 = samples['l']
+    theta2 = samples['k']
+    
+    Yexp = df[rsel].values
+    f = jax.scipy.stats.poisson.pmf
+    
+    p1 = f(Yexp, mu=theta1.T)
+    p2 = f(Yexp, mu=theta2.T)
+    return p1, p2
+    
+    
+# -
+
+x1 = samples['k'].T[:, 0]
+y1 = df_new.loc[:, rsel].values
+
+
+# +
+def f(x, Yexp):
+    """
+    x as a vector, return average probability
+    """
+    return jax.vmap(jax.scipy.stats.poisson.pmf)(Yexp, x).sum(axis=1) / 4
+
+def f2(X, Yexp):
+    nrows, nsamples = X.shape
+    return jax.vmap(f, in_axes=[1, None])(X, Yexp).sum(axis=0) / nsamples
+
+def posterior_odds(samples, Yexp):
+    K = samples['k'].T
+    L = samples['l'].T
+    
+    return np.array(f2(K, Yexp)), np.array(f2(L, Yexp))
+
+Yexp = df_new.loc[:, rsel].values
+odds_kappa, odds_lambda = posterior_odds(samples, Yexp)
+
+# -
+
+odds_kappa[np.where(odds_kappa==0)] = 1e-7
+
+plt.hist(odds_kappa, bins=100)
+plt.show()
+
+plt.hist(odds_lambda, bins=100)
+plt.show()
+
+log_odds_ratio = np.log10(odds_lambda) - np.log10(odds_kappa)
+# Capped at -4 and 4
+log_odds_ratio[np.where(log_odds_ratio >= 4)] = 4
+log_odds_ratio[np.where(log_odds_ratio <= -4)] = -4
+print(np.min(log_odds_ratio), np.max(log_odds_ratio))
+
+# ?np.exp
+
+capped_odds_ratio = 10**log_odds_ratio
+
+plt.hist(capped_odds_ratio, bins=100, range=(0,10))
+plt.xlabel("Odds Ratio")
+plt.show()
+
+plt.hist(log_odds_ratio, bins=100, range=(-5, 5))
+plt.xlabel("Log Odds Ratio M1 vs M2")
+plt.show()
+
+
+# +
+# Impact of selecting a threshold
+def thresh_sel(t, x):
+    """
+    Return the number of remaining entries
+    
+    """
+    return len(x[x >= t])
+
+thresholds = np.arange(-5, 5, 0.1)
+remaining = []
+for i in thresholds:
+    remaining.append(thresh_sel(i, log_odds_ratio))
+
+remaining = np.array(remaining)
+plt.plot(thresholds, remaining)
+plt.xlabel('Log10 odds threshold')
+plt.ylabel('Data Remaining')
+
+
+# +
+def bait_box_plot(ds, var='CRL_E', preysel=True, boxkwargs={}):
+    vals = []
+    z = [('CBFB', 'PEBB'), ('ELOB', 'ELOB'), ('CUL5', 'CUL5')]#, ('LRR1', 'LLR1')]
+    for i in z:
+        if preysel:
+            arr = np.ravel(ds.sel(bait=i[0], preyu=i[1])[var].values)
+        else:
+            arr = np.ravel(ds.sel(bait=i[0])[var].values)
+        vals.append(arr)
+    
+    vals.append(arr)
+    z.append(('LRR1', 'LLR1'))
+    arr = np.ravel(ds.sel(bait='LRR1', preyu='LLR1', condition='mock')[var].values)
+    if var == 'CRL_E' and preysel==False:
+        arr = np.ravel(ds.sel(bait='ELOB')['CRL_C'].values) # Bait can be any because control is similiar
+        vals.append(arr)
+        z.append('Parent')
+        
+
+    
+    sns.boxplot(vals, **boxkwargs)#, labels=['A'] * 4)
+    plt.title("Amount of Bait in own purification across 3 conditions")
+    plt.xticks(np.arange(len(vals)), [i[0] for i in z])
+    plt.ylabel("Spectral count")
+    plt.show()
+    
+bait_box_plot(ds)
+
+# -
+
+bait_box_plot(ds, var='CRL_C')
+
+bait_box_plot(ds, preysel=False, boxkwargs={'ylim': 50})
+
+
+# +
+def slice_up_df_metric(df, thresholds, col, compare_f, action_f):
+    results = []
+    for t in thresholds:
+        sel = compare_f(df[col].values, t)
+        results.append(action_f(df[sel]))
+        
+    return results
+
+def corr_action(df, col1, col2):
+    return sp.stats.pearsonr(df[col1].values, df[col2])
+
+corr_mean_var_action = partial(corr_action, col1='rAv', col2='rVar')
+
+def n_remaining_action(df):
+    return len(df)
+
+
+thresholds = np.arange(0, 211.75, 0.1)
+
+corr = slice_up_df_metric(df_new, thresholds, 'rAv', operator.le, corr_mean_var_action)
+rcorr, pval = zip(*corr)
+n_remaining = slice_up_df_metric(df_new, thresholds, 'rAv', operator.le, n_remaining_action)
+
+
+# +
+def compare_window_f(a, N, b):
+    return (N - b < a) & (a < N + b)
+        
+        
+def simple_scatter(x, y, xname, yname, title=None):
+    plt.plot(x, y, 'k.')
+    plt.xlabel(xname)
+    plt.ylabel(yname)
+    plt.title(title)
+    
+
+
+# -
+
+wf = partial(compare_window_f, b=30)
+corr_list = slice_up_df_metric(df_new, thresholds, 'rAv', wf, corr_mean_var_action)
+n_remaining_win = slice_up_df_metric(df_new, thresholds, 'rAv', wf, n_remaining_action)
+rcorr_win, pval_win = zip(*corr_list)
+
+plt.plot(n_remaining, rcorr, 'k.')
+plt.xlabel("N datapoints remaining")
+plt.ylabel("Mean variance correlation")
+
+simple_scatter(x=rcorr, y=pval, xname='Pearson R', yname='P-val')
+
+
+
+simple_scatter(x=thresholds, y=rcorr, xname='SC threshold', yname='Pearson R')
+
+# +
+# Low abundance
+sel = df_new['rAv'] <= 200
+sel2 = df_new['bait'] != 'LRR1'
+sel = sel & sel2
+x = df_new.loc[sel, 'rAv'].values
+y = df_new.loc[sel, 'rVar'].values
+
+simple_scatter(x, y, xname='rAv', yname='rVar')
+# -
+
+df_new.loc[:, 'rMax'] = np.max(df_new.loc[:, rsel].values, axis=1)
+df_new.loc[:, 'rMin'] = np.min(df_new.loc[:, rsel].values, axis=1)
+df_new.loc[:, 'cMax'] = np.max(df_new.loc[:, csel].values, axis=1)
+df_new.loc[:, 'cMin'] = np.min(df_new.loc[:, csel].values, axis=1)
+
+df_new.loc[:, 'cMa']
+
+# +
+sns.regplot(df_new, x='rAv', y='rMax')
+m=1.15
+y = df_new['rAv'].values * m
+x=df_new['rAv'].values
+
+plt.plot(x, y, 'r')
+# -
+
+sns.regplot(df_new, x='rAv', y='rMin')
+
+sns.regplot(df_new, x='cAv', y='cMax')
+
+sns.regplot(df_new, x='cAv', y='cMin')
+
+sns.regplot(df_new, x='rMin', y='rMax')
+
+
+plt.plot(df_new['rAv'], df_new['rMax'].values - df_new['rMin'], 'k.')
+
+sns.regplot(df_new, x='cMin', y='cMax')
+
+
+
+sel = df_new['rAv'] <= 12
+sns.regplot(df_new[sel], x='rAv', y='rMax')
+
+sel1 = df_new['cAv'] <=10
+sel2 = df_new['bait'] != 'LRR1'
+sel = sel1 & sel2
+sns.regplot(df_new[sel], x='cAv', y='cVar')
+
+df_new.loc[sel, csel + ['cAv']].sort_values('cAv', ascending=False).iloc[150:200, :]
+
+plt.plot(np.arange(0, 30), jax.scipy.stats.poisson.pmf(np.arange(0, 30), 15))
+
+# +
+sel2 = df_new['cAv'] <= 5
+sns.regplot(df_new[sel2], x='cAv', y='cMax')
+x=df_new.loc[sel2, 'cAv']
+m=4
+y = m * x
+
+plt.plot(x, y, 'r')
+# -
+
+y2 = np.max(df_new.loc[sel, rsel].values, axis=1)
+simple_scatter(x, y2, xname='rAv', yname='rMax')
+m=1
+y = m * x
+plt.plot(x, y, 'r')
+
+y2
+
+df_new
+
+simple_scatter(x=thresholds, y=n_remaining, xname='SC threshold', yname='N remaining')
+
+plt.hist(pval_win, bins=50)
+plt.show()
+
+simple_scatter(x=thresholds, y=rcorr_win, xname='SC threshold', yname='Win R')
+
+simple_scatter(x=thresholds, y=n_remaining_win, xname='SC threshold', yname='N remaining')
+
+
+
+sp.stats.pearsonr
+
+operator.lt(df_new['rAv'].values, 2)
+
+bait_box_plot(ds, preysel=False, var='CRL_C')
+
+
+def abundance_over_all_conditions(ds):
+    vals = []
+    for 
+
+
+# +
+def model2(ds, N=3062):
+    mu_Nc = np.ones((5, 3))
+    mu_alpha = np.ones((N, 5, 3))
+    alpha = numpyro.sample('a', dist.Normal(mu_alpha, 0.1))
+    Nc = numpyro.sample('Nc', dist.Normal(mu_Nc, 0.1))
+    A = alpha * Nc
+    
+print(f"N free parameters {5 * 3 + 5 * 3 * 3062}")  
+# -
+
+nuts_kernal = numpyro.infer.NUTS(model2)
+mcmc = numpyro.infer.MCMC(nuts_kernal, num_warmup=500, num_samples=1000)
+rng_key = jax.random.PRNGKey(13)
+mcmc.run(rng_key, ds=ds, extra_fields=('potential_energy',))
+
+posterior_samples = mcmc.get_samples()
+
+posterior_predictive = numpyro.infer.Predictive(model2, posterior_samples)(jax.random.PRNGKey(1), ds)
+
+prior = numpyro.infer.Predictive(model2, num_samples=500)(jax.random.PRNGKey(2), ds)
+
+numpyro_data = az.from_numpyro(mcmc, prior=prior, posterior_predictive=posterior_predictive,
+                              coords={"protein": ds.preyu.values, "cell": np.arange(5), "infection": np.arange(3)},
+                              dims={"a": ["protein", "cell", "infection"]})
+
+az.plot_trace(numpyro_data['sample_stats'], var_names=['lp'])
+
+numpyro_data
+
+
+
+a = jnp.ones((5,3)) * 2
+b = jnp.arange(3062 * 5 * 3).reshape((3062, 5, 3))
+
+(a * b)[:, :, 0]
+
+samples = mcmc.get_samples()
+
+import arviz as av
+
+
+def condition_box_plot(ds, var=''):
+    
+
+
+ds.sel(preyu='ELOC')['CRL_C']
+
+(ds.sel(bait=['ELOB', 'CBFB', 'CUL5'])['CRL_E'].sum('rrep') / 4 - ds['CRL_C'].sum('crep') / 12)
+
+df_new.loc[:, 'log_odds_ratio'] = log_odds_ratio
+
+df_new.loc[:, 'odds_ratio'] = odds_ratio
+
+sns.scatterplot(df_new, x='log_odds_ratio', y='SaintScore')
+plt.hlines(0.6, -3, 4, 'k')
+plt.vlines(0, 0, 1, 'r')
+
+# +
+a = np.ravel(df_new.loc[:, [f"c{i}" for i in range(1, 5)]])
+b = np.ravel(df_new.loc[:, [f"c{i}" for i in range(5, 9)]])
+c = np.ravel(df_new.loc[:, [f"c{i}" for i in range(9, 13)]])
+sns.boxplot([a, b, c])
+
+sp.stats.ks_2samp(a, b)
+# -
+
+sp.stats.ks_2samp(a, a)
+
+sp.stats.ks_2samp(b, c)
+
+tmp = df_new['log_odds_ratio'].values.copy()
+np.random.shuffle(tmp)
+plt.plot(tmp, df_new['SaintScore'].values, 'k.')
+
+
+
+ # ?sns.pairplot
+
+n=600
+df_new.sort_values('cAv', ascending=False).loc[:,
+    ['rAv', 'cAv', 'rVar', 'cVar','bait', 'condition', 'SaintScore'] + rsel + csel ].iloc[n:50 + n]
+
+query = 'PEBB_HUMAN'
+
+df2[df2['PreyGene']==query]
+
+df1[df1['PreyGene']==query]
+
+df3[df3['PreyGene']==query]
+
+tmp = np.ravel(ds.sel(bait='LRR1')['CRL_E'].values)
+print(sum(tmp != 0))
+plt.hist(tmp, bins=100)
+plt.show()
+
+
+# +
+def m1(ds, preyrange=slice(0, None), 
+       bait = ['CBFB', 'ELOB', 'CUL5'],
+       conditions = ['wt', 'vif', 'mock']):
+    
+    
+    prey_sel = ds.preyu[preyrange]
+    
+    d = ds.sel(bait=bait, condition=conditions, preyu=prey_sel, preyv=prey_sel)
+    
+    
+    
+# -
+
+ds.sel(condition='mock', bait='CBFB')['CRL_E']
+
+m1(ds)
+
+ds.sel(bait=["CBFB", 'ELOB', 'CUL5'])
+
+ds.sel(bait=['CBFB', 'ELOB', 'CUL5'])
+
+ds.preyu[slice(0, None)]
+
+ds.sel(bait=['LRR1', 'CBFB', 'CUL5', 'ELOB'], condition='mock')
+
+df1[df1['Bait']=='CUL5wt_MG132'].sort_values('SaintScore', ascending=False).iloc[0:20, :]
+
+bait_box_plot(ds, 'CRL_C')
+
+ds.sel
+
+
+def m2(ds):
+    cbfb_preyname = 'Q13951'
+    
+
+
+ds.sel(condition='CBFB', preyu='CBFB')
+
+df_new[df_new['bait'] == 'CBFB'].sort_values('SaintScore', ascending=False).iloc[0:20, :]
+
+# +
+# What values should we exclude from the analysis?
+
+thresh_sel(0, log_odds_ratio)
+# -
+
+np.sum(odds_lambda == 0)
+
+log_odds_ratio = np.log(odds_lambda) - np.log(odds_kappa)
+
+plt.hist(np.array(odds_ratio), bins=100)
+plt.show()
+
+np.isnan(samples['k']).sum()
+
+np.isnan(samples['l']).sum()
+
+# +
+# Vectorize loops
+# -
+
+a = np.array([[1, 2, 3],
+              [5, 5, 5]])
+b = np.array([10, 20])
+
+
+
+jax.vmap(np.sum)(a, b.T)
+
+jax.vmap(np.sum)(np.sum(a), b)
+
+
+
+p1, p2 = posterior_odds(samples, df_new)
+
+jax.scipy.stats.poisson.pmf(df_new[rsel].iloc[:, 0].values, 1)
+
+jax.scipy.stats.poisson.pmf()
+
+plt.hist(np.ravel(samples['l']), bins=100)
+plt.show()
+
+plt.hist(np.ravel(samples['k']), bins=100)
+plt.show()
+
+
+
+
+
+# +
+def model(Yexp=None, Yctrl=None):
+    
+    numpyro.sample("C", dist.Poisson(kappa_), C=Yctrl)
+    numpyro.sample("E", dist.Poisson(lambda_), E=Yexp)
+    
+    
+    
+# -
+
+key = jax.random.PRNGKey(13)
+ppc = jax.random.exponential(key)
+
+# ?jax.random.exponential
 
 df_new_all_json = df_new2json(df_new)
 import json
