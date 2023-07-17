@@ -1354,20 +1354,444 @@ def abundance_over_all_conditions(ds):
 
 
 # +
+# Check the double counting of the condition
+x = ds['CRL_C']
+k = 'CUL5'
+k2 = 'ELOB'
+x2 = x.sel(bait=k, condition='wt')
+
+x2[np.any((x.sel(bait=k, condition='vif').values != x.sel(bait=k2, condition='wt').values), axis=1)]
+# -
+
+x.sel(bait='CUL5')
+
+
+# +
 def model2(ds, N=3062):
-    mu_Nc = np.ones((5, 3))
-    mu_alpha = np.ones((N, 5, 3))
-    alpha = numpyro.sample('a', dist.Normal(mu_alpha, 0.1))
-    Nc = numpyro.sample('Nc', dist.Normal(mu_Nc, 0.1))
-    A = alpha * Nc
+    
+    # wt, vif, mock
+    # 
+    # [condition, bait, prey, rrep]
+    
+    ELOB_wt = ds.sel(condition='wt', bait='ELOB')['CRL_E'].values
+    CUL5_wt = ds.sel(condition='wt', bait='CUL5')['CRL_E'].values
+    CBFB_wt = ds.sel(condition='wt', bait='CBFB')['CRL_E'].values
+    
+    ELOB_vif = ds.sel(condition='vif', bait='ELOB')['CRL_E'].values
+    CUL5_vif = ds.sel(condition='vif', bait='CUL5')['CRL_E'].values
+    CBFB_vif = ds.sel(condition='vif', bait='CBFB')['CRL_E'].values
+    
+    ELOB_mock = ds.sel(condition='mock', bait='ELOB')['CRL_E'].values
+    CUL5_mock = ds.sel(condition='mock', bait='CUL5')['CRL_E'].values
+    CBFB_mock = ds.sel(condition='mock', bait='CBFB')['CRL_E'].values
+    
+    LRR1_mock = ds.sel(condition='mock', bait='LRR1')['CRL_E'].values
+    
+    ctrl_ELOB_wt = ds.sel(condition='wt', bait='ELOB')['CRL_C'].values
+    ctrl_CUL5_wt = ds.sel(condition='wt', bait='CUL5')['CRL_C'].values
+    ctrl_CBFB_wt = ds.sel(condition='wt', bait='CBFB')['CRL_C'].values
+    
+    ctrl_ELOB_vif = ds.sel(condition='vif', bait='ELOB')['CRL_C'].values
+    ctrl_CUL5_vif = ds.sel(condition='vif', bait='CUL5')['CRL_C'].values
+    ctrl_CBFB_vif = ds.sel(condition='vif', bait='CBFB')['CRL_C'].values
+    
+    ctrl_ELOB_mock = ds.sel(condition='mock', bait='ELOB')['CRL_C'].values
+    ctrl_CUL5_mock = ds.sel(condition='mock', bait='CUL5')['CRL_C'].values
+    ctrl_CBFB_mock = ds.sel(condition='mock', bait='CBFB')['CRL_C'].values
+    
+    ctrl_LRR1_mock = ds.sel(condition='mock', bait='LRR1')['CRL_C'].values
+    
+    
+   # max_val = ds['CRL_E'].max('rrep')
+    
+   # mu_Nc = np.ones((5, 3))
+   # mu_alpha = np.ones((N, 5, 3))
+    
+
+    
+    #N = numpyro.sample('N', dist.Normal(np.zeros(3), 5))
+    #mu = numpyro.sample('mu', dist.Normal(max_val.sel(bait='ELOB').values.T, 50), sample_shape=(3062, 3))
+    #numpyro.sample('sc', dist.Normal(N * mu), obs=max_val.sel(bait='ELOB').values.T)
+    
+    
+    
+    
+    #N1 = numpyro.sample('N1', dist.Normal(0, 1))
+    #N2 = numpyro.sample('N2', dist.Normal(0, 1))
+    
+    #mu_elob = numpyro.sample('mu_elob', dist.Normal(np.mean(ELOB_wt, axis=1), np.var(ELOB_wt, axis=1)))
+    #mu_cul5 = numpyro.sample('mu_cul5', dist.Normal(np.mean(CUL5_wt, axis=1), np.var(ELOB_wt, axis=1)))
+    
+    #numpyro.sample('ELOB_wt', dist.Normal(mu_elob * N1, 5), obs=ELOB_wt)
+    #numpyro.sample('CUL5_wt', dist.Normal(mu_cul5 * N2, 5), obs=CUL5_wt)
+    
+    
+    #cell_abundance = numpyro.sample(dist.Normal(jnp.ones((3, 5))), 1)
+    
+    assert ELOB_wt.shape == (3062, 4)
+    
+    mu_hyper_prior = np.ones((3062, 1)) / 50
+    sig_hyper_prior = np.ones((3062, 1)) / 2
+    
+    
+    mu = numpyro.sample('mu', dist.Exponential(mu_hyper_prior))
+    sigma = numpyro.sample('s', dist.Exponential(sig_hyper_prior))
+    
+    Ncells = numpyro.sample('Nc', dist.Normal(np.ones((1, 4)), 0.5))
+    
+    Ncells_rep = jnp.repeat(Ncells, 3062, axis=0)
+    
+    
+    numpyro.sample('sc', dist.Normal(mu * Ncells_rep, sigma), obs=ELOB_wt)
+    
+    #Ncells = cell_abundance * 1e7 
+    
+    #gamma_i = numpyro.sample('gamma', dist.Beta(0.5, 0.5), sample_shape=(3062,))
+    #mu_ctrl = numpyro.sample('mu0', dist.Uniform(0, 250), sample_shape=(3062,))
+    #mu_wt = numpyro.sample('mu_wt', dist.Uniform(0, 250), sample_shape=(3062,))
+    
+    #numpyro.sample('ELOB_wt', dist.Normal(mu_wt, 10), obs=ELOB_wt)
+    #numpyro.sample('ctrl_ELOB_wt', dist.Normal(mu_ctrl * gamma_i, 10), obs=ctrl_ELOB_wt)
+    
     
 print(f"N free parameters {5 * 3 + 5 * 3 * 3062}")  
 # -
 
+df
+
+x = np.arange(0, 1, 0.01)
+y = jax.scipy.stats.beta.pdf(x, a=2 ,b=6)
+y = jax.scipy.stats.expon.pdf(x* 250, 100)
+plt.plot(x * 300, y, 'k.')
+
+# +
+plt.hist(np.ravel(np.std(df_new[rsel].values, axis=1)), bins=50, density=True)
+
+x = np.arange(0, 30, 0.1)
+y = np.exp(dist.Exponential(1/2).log_prob(x)) * 1.3
+plt.plot(x, y, 'r')
+# -
+
+# ?dist.Normal
+
+x = np.arange(0, 300)
+plt.plot(x, np.exp(dist.Exponential(1/50).log_prob(x)))
+
+sum(df_new['Av_diff'] < -10)
+
+sns.scatterplot(df_new, x='Av_diff', y='SaintScore')
+
+plt.hist(np.ravel(ds.sel(bait=["CBFB", "ELOB", "CUL5"])['CRL_E'].values), bins=100)
+plt.show()
+
+plt.hist(np.ravel(ds.sel(bait=["CBFB", "ELOB", "CUL5"])['CRL_C'].values), bins=100)
+plt.show()
+
+
+def model4(e_data=None, ctrl_data=None, a=None, b=None):
+
+    
+    # Prior around 1/5
+    if a is None:
+        a = numpyro.sample('a', dist.Uniform(0.0001, 1))
+    if b is None:
+        b = numpyro.sample('b', dist.Uniform(0.0001, 1))
+    
+    
+    numpyro.sample('y_e', dist.Exponential(a), obs=e_data)
+    numpyro.sample('y_c', dist.Exponential(b), obs=ctrl_data)
+
+# +
+dsel = ds.sel(bait=['CBFB', 'ELOB', 'CUL5'])
+ctrl_data = np.ravel(dsel['CRL_C'].values)
+e_data = np.ravel(dsel['CRL_E'].values)
+
+nuts_kernal = numpyro.infer.NUTS(model4)
+mcmc = numpyro.infer.MCMC(nuts_kernal, num_warmup=1000, num_samples=10000, thinning=2)
+rng_key = jax.random.PRNGKey(13)
+mcmc.run(rng_key, e_data=e_data, ctrl_data=ctrl_data, extra_fields=('potential_energy',))
+# -
+
+mcmc.print_summary()
+
+posterior_samples = mcmc.get_samples()
+
+posterior_predictive = numpyro.infer.Predictive(model4, posterior_samples)(jax.random.PRNGKey(1))
+
+
+
+posterior_predictive['y_c'].shape
+
+prior = numpyro.infer.Predictive(model4, num_samples=1000)(jax.random.PRNGKey(2))
+
+m4_data = az.from_numpyro(mcmc, prior=prior, posterior_predictive=posterior_predictive)
+
+az.plot_trace(m4_data['sample_stats'], var_names=['lp'])
+
+prior.keys()
+
+prior['y_c'].shape
+
+plt.hist(prior['y_c'], bins=100, label='prior control', alpha=0.5)
+plt.hist(prior['y_e'], bins=100, label='prior experiment', alpha=0.5)
+plt.hist(posterior_predictive['y_c'], bins=100, label='posterior control')
+plt.hist(posterior_predictive['y_e'], bins=100, label='posterior experiment', alpha=0.5)
+plt.show()
+
+
+
+plt.hist(posterior_samples['a'], bins=50, label='Experiment')
+plt.hist(posterior_samples['b'], bins=50, label='Control')
+#plt.hist(prior['a'], bins=50)
+plt.title(f"Posterior N={len(posterior_samples['a'])}")
+plt.xlabel("Exponential rate")
+plt.legend()
+plt.show()
+
+# +
+# Rate 
+
+x = np.arange(0, 300)
+y = np.exp(dist.Exponential(1/80).log_prob(x))
+plt.scatter(x, y)
+# -
+
+x = np.arange(0, 400)
+y = np.exp(dist.HalfNormal(200).log_prob(x))
+sns.scatterplot(x=x, y=y)
+plt.show()
+
+
+def model5(a=None, b=None, y_c=None, y_e=None, poisson_sparse=True, batch_shape=()):
+    """
+    a:  experimental rate
+    b:  control rate
+    
+    y_e: experimental obs
+    y_c: control obs
+    """
+    
+    hyper = np.ones(batch_shape) * 200
+    
+    if a is None:
+        a = numpyro.sample('a', dist.HalfNormal(hyper))
+    if b is None:
+        b = numpyro.sample('b', dist.HalfNormal(hyper))
+    
+    # predictive checks
+    nrows, ncols = batch_shape
+    
+    if y_c is None:
+        b = jnp.ones((nrows, 12)) * b
+    
+    if y_e is None:
+        a = jnp.ones((nrows, 4)) * a
+        
+    
+    numpyro.sample('y_c', dist.Poisson(b, is_sparse=poisson_sparse), obs=y_c)
+    numpyro.sample('y_e', dist.Poisson(a, is_sparse=poisson_sparse), obs=y_e)
+
+np.arange(10).reshape((10, 1)) * np.ones((10, 4))
+
+nuts_kernal = numpyro.infer.NUTS(model4)
+mcmc = numpyro.infer.MCMC(nuts_kernal, num_warmup=1000, num_samples=10000, thinning=2)
+rng_key = jax.random.PRNGKey(13)
+mcmc.run(rng_key, e_data=e_data, ctrl_data=ctrl_data, extra_fields=('potential_energy',))
+
+
+def do_mcmc(model, rng_seed, 
+            model_kwargs, 
+            Kernel=numpyro.infer.NUTS,
+            Search=numpyro.infer.MCMC, 
+            num_warmup=500,
+            num_samples=1000,
+            thinning=1,
+            extra_fields=('potential_energy',)):
+    
+
+    search_kwargs = {'num_warmup': num_warmup, 
+                    'num_samples': num_samples,
+                    'thinning': thinning}
+    
+    run_kwargs = {'extra_fields': extra_fields}
+    
+    search_kwargs = {} if search_kwargs is None else search_kwargs
+    run_kwargs = {} if run_kwargs is None else run_kwargs
+    
+    kernel = Kernel(model)
+    search = Search(kernel, **search_kwargs)
+    
+    rng_key = jax.random.PRNGKey(rng_seed)
+    
+    
+    search.run(rng_key, **model_kwargs, **run_kwargs)
+    
+    
+    return search
+
+model = model5
+n = 0
+y_c = np.array(df_new.iloc[n, :][csel].values, dtype=int)
+y_e = np.array(df_new.iloc[n, :][rsel].values, dtype=int)
+model_kwargs={'y_c': y_c, 'y_e': y_e}
+search = do_mcmc(model5, 1, model_kwargs, num_warmup=1000, num_samples=5000)
+
+search.print_summary()
+
+posterior_samples = search.get_samples()
+
+prior = numpyro.infer.Predictive(model5, num_samples=500)
+
+posterior_predictive = numpyro.infer.Predictive(model5, posterior_samples)
+
+
+def multi_hist(hists, bins, labels, alphas, xlabel):
+    for i in range(len(hists)):
+        plt.hist(hists[i], bins=bins, label=labels[i], alpha=alphas[i])
+    plt.xlabel(xlabel)
+    plt.legend()
+    plt.show()
+
+
+from numpyro.diagnostics import hpdi, summary
+
+# +
+hists = [posterior_samples['a'], posterior_samples['b'], posterior_samples['a'] - posterior_samples['b']]
+labels = ['Experiment', 'Control', 'Difference']
+alphas = [0.8, 0.8, 0.3]
+
+multi_hist(hists, bins=50, labels=labels, alphas=alphas, xlabel='Poisson rate')
+# -
+
+posterior_samples['a'].shape
+
+# +
+start = 0
+end = 100
+n = slice(start, end)
+dsel = df_new.iloc[n, :]
+l = len(dsel)
+
+model = partial(model5, batch_shape=(l, 1)) # partial apply for prior and post pred checks
+                
+y_c = np.array(dsel[csel].values, dtype=int)
+y_e = np.array(dsel[rsel].values, dtype=int)
+model_kwargs={'y_c': y_c, 'y_e': y_e}
+search = do_mcmc(model, 1, model_kwargs, num_warmup=1000, num_samples=5000)
+samples = search.get_samples()
+summary_dict = summary(samples, group_by_chain=False)
+prior = numpyro.infer.Predictive(model, num_samples=1000)(jax.random.PRNGKey(2))
+pp = numpyro.infer.Predictive(model, samples)(jax.random.PRNGKey(1))
+
+# +
+coords = {'irow': np.arange(start, end), 'col': np.array([0]),
+          'rrep': np.arange(4), 'crep': np.arange(12)}
+dims = {'a': ['chain', 'draw', 'irow', 'col'],
+        'b': ['chain', 'draw', 'irow', 'col'],
+        'y_e': ['irow', 'rrep'], 
+        'y_c':['irow', 'crep']}
+
+pred_dims = {'y_c': ['chain', 'draw', 'irow', 'col'],
+             'y_e': ['chain', 'draw', 'irow', 'col']}
+m_data = az.from_numpyro(search, prior=prior, posterior_predictive=pp, 
+                         coords=coords, dims=dims, pred_dims=pred_dims)
+
+# +
+a_rhat = summary_dict['a']['r_hat'][:, 0]
+a_neff = summary_dict['a']['n_eff'][:, 0]
+b_rhat = summary_dict['b']['r_hat'][:, 0]
+b_neff = summary_dict['b']['n_eff'][:, 0]
+tmp_df = pd.DataFrame({'a_rhat': a_rhat, 'a_neff': a_neff, 'b_rhat':b_rhat, 'b_neff': b_neff})
+m_data['posterior']['stats'] = xr.DataArray(tmp_df.values, 
+                                            coords={'irow': np.arange(start, end),
+                                            'stat': np.array(tmp_df.columns)})
+
+
+# -
+
+m_data.posterior.stats.sel(stat=)
+
+xr.DataArray(tmp_df.values)
+
+m_data
+
+neff_rhat = {'a_r_hat': summary_dict['a']['r_hat']}
+
+xr.Dataset.from_dataframe
+
+# ?xr.DataArray
+
+len(summary_dict['a']['r_hat'])
+
+summary_dict['a']['r_hat']
+
+m_data
+
+
+
+m_data
+
+m_data
+
+m_data
+
+samples = search.get_samples()
+
+summary_dict = summary(samples, group_by_chain=False)
+
+summary_dict['a'].keys()
+
+
+def mcmc_rank_plot(summary_dict, stat='r_hat'):
+    rhats = []
+    for key in summary_dict:
+        r = list(np.ravel(summary_dict[key][stat]))
+        rhats = rhats + r
+    
+    rhats = sorted(rhats, reverse=True)
+    plt.scatter(np.arange(len(rhats)), rhats)
+    plt.ylabel(stat)
+    plt.xlabel('Param Rank')
+    
+
+
+mcmc_rank_plot(summary_dict, stat='n_eff')
+
+mcmc_rank_plot(summary_dict)
+
+hpdi(posterior_samples['a'] - posterior_samples['b'])
+
+plt.hist(posterior_samples['a'], bins=100, label='Experimental rate')
+plt.hist(posterior_samples['b'], bins=100, label='Control rate')
+plt.hist(posterior_samples['a'] - posterior_samples['b'], bins=100, label='Rate difference')
+plt.legend()
+plt.show()
+
+# +
+
+y= np.exp(dist.HalfCauchy(200).log_prob(x))
+sns.scatterplot(x=x, y=y)
+plt.show()
+# -
+
+posterior_predictive['y_c'][-5]
+
+m4_data = az.from_numpyro(mcmc, prior=prior, posterior_predictive=posterior_predictive)
+
+
+
+df_new.sort_values('Av_diff')
+
+df_new.loc[:, rsel].mean()
+
+ds.sel(bait=["CUL5", "ELOB", "CBFB", "LRR1"])['CRL_E'].mean(['rrep', 'preyu'])
+
 nuts_kernal = numpyro.infer.NUTS(model2)
-mcmc = numpyro.infer.MCMC(nuts_kernal, num_warmup=500, num_samples=1000)
+mcmc = numpyro.infer.MCMC(nuts_kernal, num_warmup=1000, num_samples=50000, thinning=10)
 rng_key = jax.random.PRNGKey(13)
 mcmc.run(rng_key, ds=ds, extra_fields=('potential_energy',))
+
+df1
 
 posterior_samples = mcmc.get_samples()
 
@@ -1381,7 +1805,108 @@ numpyro_data = az.from_numpyro(mcmc, prior=prior, posterior_predictive=posterior
 
 az.plot_trace(numpyro_data['sample_stats'], var_names=['lp'])
 
+az.plot_trace(numpyro_data['posterior'], var_names=['Nc'])
+
+post = numpyro_data['posterior']
+
+az.plot_trace(post.sel(mu_dim_0=np.arange(0, 2)), var_names=['s'])
+
+post
+
 numpyro_data
+
+numpyro_data['posterior']
+
+
+def model3(ds, N=3062):
+    
+    # wt, vif, mock
+    # 
+    # [condition, bait, prey, rrep]
+    
+    ELOB_wt = ds.sel(condition='wt', bait='ELOB')['CRL_E'].values
+    CUL5_wt = ds.sel(condition='wt', bait='CUL5')['CRL_E'].values
+    CBFB_wt = ds.sel(condition='wt', bait='CBFB')['CRL_E'].values
+    
+    ELOB_vif = ds.sel(condition='vif', bait='ELOB')['CRL_E'].values
+    CUL5_vif = ds.sel(condition='vif', bait='CUL5')['CRL_E'].values
+    CBFB_vif = ds.sel(condition='vif', bait='CBFB')['CRL_E'].values
+    
+    ELOB_mock = ds.sel(condition='mock', bait='ELOB')['CRL_E'].values
+    CUL5_mock = ds.sel(condition='mock', bait='CUL5')['CRL_E'].values
+    CBFB_mock = ds.sel(condition='mock', bait='CBFB')['CRL_E'].values
+    
+    LRR1_mock = ds.sel(condition='mock', bait='LRR1')['CRL_E'].values
+    
+    ctrl_ELOB_wt = ds.sel(condition='wt', bait='ELOB')['CRL_C'].values
+    ctrl_CUL5_wt = ds.sel(condition='wt', bait='CUL5')['CRL_C'].values
+    ctrl_CBFB_wt = ds.sel(condition='wt', bait='CBFB')['CRL_C'].values
+    
+    ctrl_ELOB_vif = ds.sel(condition='vif', bait='ELOB')['CRL_C'].values
+    ctrl_CUL5_vif = ds.sel(condition='vif', bait='CUL5')['CRL_C'].values
+    ctrl_CBFB_vif = ds.sel(condition='vif', bait='CBFB')['CRL_C'].values
+    
+    ctrl_ELOB_mock = ds.sel(condition='mock', bait='ELOB')['CRL_C'].values
+    ctrl_CUL5_mock = ds.sel(condition='mock', bait='CUL5')['CRL_C'].values
+    ctrl_CBFB_mock = ds.sel(condition='mock', bait='CBFB')['CRL_C'].values
+    
+    ctrl_LRR1_mock = ds.sel(condition='mock', bait='LRR1')['CRL_C'].values
+    
+    
+   # max_val = ds['CRL_E'].max('rrep')
+    
+   # mu_Nc = np.ones((5, 3))
+   # mu_alpha = np.ones((N, 5, 3))
+    
+
+    
+    #N = numpyro.sample('N', dist.Normal(np.zeros(3), 5))
+    #mu = numpyro.sample('mu', dist.Normal(max_val.sel(bait='ELOB').values.T, 50), sample_shape=(3062, 3))
+    #numpyro.sample('sc', dist.Normal(N * mu), obs=max_val.sel(bait='ELOB').values.T)
+    
+    
+    
+    
+    #N1 = numpyro.sample('N1', dist.Normal(0, 1))
+    #N2 = numpyro.sample('N2', dist.Normal(0, 1))
+    
+    #mu_elob = numpyro.sample('mu_elob', dist.Normal(np.mean(ELOB_wt, axis=1), np.var(ELOB_wt, axis=1)))
+    #mu_cul5 = numpyro.sample('mu_cul5', dist.Normal(np.mean(CUL5_wt, axis=1), np.var(ELOB_wt, axis=1)))
+    
+    #numpyro.sample('ELOB_wt', dist.Normal(mu_elob * N1, 5), obs=ELOB_wt)
+    #numpyro.sample('CUL5_wt', dist.Normal(mu_cul5 * N2, 5), obs=CUL5_wt)
+    
+    
+    #cell_abundance = numpyro.sample(dist.Normal(jnp.ones((3, 5))), 1)
+    
+    assert ELOB_wt.shape == (3062, 4)
+    
+    mu_hyper_prior = np.ones((3062, 1)) / 50
+    sig_hyper_prior = np.ones((3062, 1)) / 2
+    
+    
+    mu = numpyro.sample('mu', dist.Exponential(mu_hyper_prior))
+    sigma = numpyro.sample('s', dist.Exponential(sig_hyper_prior))
+    
+    Ncells = numpyro.sample('Nc', dist.Normal(np.ones((1, 4)), 0.5))
+    
+    Ncells_rep = jnp.repeat(Ncells, 3062, axis=0)
+    
+    
+    numpyro.sample('sc', dist.Normal(mu * Ncells_rep, sigma), obs=ELOB_wt)
+    
+    #Ncells = cell_abundance * 1e7 
+    
+    #gamma_i = numpyro.sample('gamma', dist.Beta(0.5, 0.5), sample_shape=(3062,))
+    #mu_ctrl = numpyro.sample('mu0', dist.Uniform(0, 250), sample_shape=(3062,))
+    #mu_wt = numpyro.sample('mu_wt', dist.Uniform(0, 250), sample_shape=(3062,))
+    
+    #numpyro.sample('ELOB_wt', dist.Normal(mu_wt, 10), obs=ELOB_wt)
+    #numpyro.sample('ctrl_ELOB_wt', dist.Normal(mu_ctrl * gamma_i, 10), obs=ctrl_ELOB_wt)
+
+az.plot_forest(numpyro_data, var_names="N")
+
+az.plot_trace(numpyro_data['posterior'], var_names=['N'])
 
 
 
