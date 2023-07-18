@@ -30,6 +30,7 @@ import numpyro.distributions as dist
 import biotite.sequence.io
 import jax.numpy as jnp
 import jax
+from numpyro.diagnostics import hpdi, summary
 
 
 # +
@@ -926,8 +927,11 @@ df_new.loc[:, 'exp_aa_seq_len'] = np.exp(seq_lens)
 def n_tryptic_cleavages(aa_seq):
     assert aa_seq.isupper()
     aa_seq = np.array(list(aa_seq))
-    n_sites = np.sum(aa_seq == 'K')
-    if aa_seq[-1] == 'K':
+    Ksites = aa_seq == 'K'
+    Rsites = aa_seq == 'R'
+    Allsites = Ksites | Rsites
+    n_sites = np.sum(Allsites)
+    if (aa_seq[-1] == 'K') or (aa_seq[-1] == 'R'):
         n_sites -= 1
     
     return n_sites
@@ -940,6 +944,10 @@ def n_first_typtic_cleavage_peptides(aa_seq):
 
 
 # -
+
+n_first_sites = [n_first_tryptic_cleavages(uid2seq[prey]) for prey in df_new['Prey']]
+df_new.loc[:, 'n_first_tryptic_cleavage_sites'] = np.array(n_first_sites)
+df_new.loc[:, 'n_possible_first_tryptic_peptides'] = df_new.loc[:, 'n_first_tryptic_cleavage_sites'] + 1
 
 sel = df_new['aa_seq_len'] <= 5000
 sns.histplot(df_new[sel], x='n_first_tryptic_cleavage_sites', y='aa_seq_len')
@@ -957,22 +965,38 @@ plt.plot(np.arange(len(df_new)), df_new['rAv'], 'k.')
 
 plt.plot(np.arange(len(df_new)), df_new['cAv'], 'k.')
 
+# +
+nbins=30
+aa_max_len=2000
+xlabel='n_possible_first_tryptic_peptides'
+#xlabel='aa_seq_len'
+sns.histplot(df_new[df_new['aa_seq_len'] <=aa_max_len], x=xlabel, y='rAv',
+            bins=(nbins, nbins), cbar=True, cmap='hot')
+
+print("The sequence length appears to set the upper bound on Spectral Count")
+print("The protein spectral count is the sum of peptide spectral count")
+print(f"Proteins are well sampled in the {np.min(df_new[xlabel].values), np.mean(df_new[xlabel].values)} {xlabel} range")
+print(f"At least two possibilities")
+print(f"1. Longer sequences are cleaved into more peptides")
+print("2. Longer sequences fragment into more fragment ions")
+print(f"3. Both")
+print(f"The result of this effect is that longer sequences are more detectable")
+print(f"Therefore longer sequences may be have lower abundance at lower abundance ")
+# -
+
+sns.histplot(df_new[df_new['aa_seq_len'] <=aa_max_len], x=xlabel, y='cAv',
+            bins=(nbins, nbins), cbar=True, cmap='hot')
+
+sns.histplot(df_new[df_new['aa_seq_len'] <=aa_max_len], x=xlabel, y='rMin',
+            bins=(nbins, nbins), cbar=True, cmap='hot')
 
 
-df_new[df_new['bait']=='LRR1']
-
-n_first_sites = [n_first_tryptic_cleavages(uid2seq[prey]) for prey in df_new['Prey']]
-df_new.loc[:, 'n_first_tryptic_cleavage_sites'] = np.array(n_first_sites)
-
-
-
-np.log(5000)
 
 # There is one sequence that is very long
 col = 'aa_seq_len'
-sel = df_new[col] < 1000
+sel = df_new[col] < 5000
 sns.regplot(df_new.loc[sel, :], x=col, y='rAv')
-print("Conclusion - no sequence ascociation")
+print("It appears like the sequence length places an upper bound on the spectral counts")
 
 col = 'aa_seq_len'
 xcol = 'rAv'
@@ -1132,8 +1156,6 @@ log_odds_ratio[np.where(log_odds_ratio >= 4)] = 4
 log_odds_ratio[np.where(log_odds_ratio <= -4)] = -4
 print(np.min(log_odds_ratio), np.max(log_odds_ratio))
 
-# ?np.exp
-
 capped_odds_ratio = 10**log_odds_ratio
 
 plt.hist(capped_odds_ratio, bins=100, range=(0,10))
@@ -1272,7 +1294,23 @@ df_new.loc[:, 'rMin'] = np.min(df_new.loc[:, rsel].values, axis=1)
 df_new.loc[:, 'cMax'] = np.max(df_new.loc[:, csel].values, axis=1)
 df_new.loc[:, 'cMin'] = np.min(df_new.loc[:, csel].values, axis=1)
 
-df_new.loc[:, 'cMa']
+# +
+aa_max_len = 1000
+sns.histplot(df_new[df_new['aa_seq_len'] <= aa_max_len], 
+             x='n_possible_first_tryptic_peptides', 
+             y='cMax',
+             cmap='hot')
+
+print("This plot can be used to formulate a data likelihood")
+print("The likelihood of the Max spectral count | n_first_tryptic_peptides")
+print("We are interested in protein abundance")
+print("We need p(Max SC | abundance, n_first_tryptic_peptides)")
+print("Specifically we are interested in the abundance at a specific time")
+print("Not the abundance at the detector")
+print("We are interested in the abundance of the peptide in the mixture")
+print("If we assume an unkown abundance distribution (can place a prior)")
+print("That is indpendent of N possible first tryptic peptides")
+print("")
 
 # +
 sns.regplot(df_new, x='rAv', y='rMax')
@@ -1571,7 +1609,9 @@ def model5(a=None, b=None, y_c=None, y_e=None, poisson_sparse=True, batch_shape=
     y_c: control obs
     """
     
-    hyper = np.ones(batch_shape) * 200
+    max_val = np.max([np.max(y_c), np.max(y_e)])
+    
+    hyper = np.ones(batch_shape) * max_val
     
     if a is None:
         a = numpyro.sample('a', dist.HalfNormal(hyper))
@@ -1591,15 +1631,13 @@ def model5(a=None, b=None, y_c=None, y_e=None, poisson_sparse=True, batch_shape=
     numpyro.sample('y_c', dist.Poisson(b, is_sparse=poisson_sparse), obs=y_c)
     numpyro.sample('y_e', dist.Poisson(a, is_sparse=poisson_sparse), obs=y_e)
 
-np.arange(10).reshape((10, 1)) * np.ones((10, 4))
-
 nuts_kernal = numpyro.infer.NUTS(model4)
 mcmc = numpyro.infer.MCMC(nuts_kernal, num_warmup=1000, num_samples=10000, thinning=2)
 rng_key = jax.random.PRNGKey(13)
 mcmc.run(rng_key, e_data=e_data, ctrl_data=ctrl_data, extra_fields=('potential_energy',))
 
 
-def do_mcmc(model, rng_seed, 
+def do_mcmc(model, rng_key, 
             model_kwargs, 
             Kernel=numpyro.infer.NUTS,
             Search=numpyro.infer.MCMC, 
@@ -1620,8 +1658,6 @@ def do_mcmc(model, rng_seed,
     
     kernel = Kernel(model)
     search = Search(kernel, **search_kwargs)
-    
-    rng_key = jax.random.PRNGKey(rng_seed)
     
     
     search.run(rng_key, **model_kwargs, **run_kwargs)
@@ -1665,65 +1701,687 @@ multi_hist(hists, bins=50, labels=labels, alphas=alphas, xlabel='Poisson rate')
 
 posterior_samples['a'].shape
 
+from collections import namedtuple
+
+
+def outer_f(x):
+    def inner_r(x):
+        return _secret_f(x)
+    
+    def _secret_f(x):
+        print(f"Hello, {x}!")
+        
+    return inner_r
+
+
+inner_r = outer_f(None)
+
 # +
+
 start = 0
 end = 100
-n = slice(start, end)
-dsel = df_new.iloc[n, :]
-l = len(dsel)
 
-model = partial(model5, batch_shape=(l, 1)) # partial apply for prior and post pred checks
-                
-y_c = np.array(dsel[csel].values, dtype=int)
-y_e = np.array(dsel[rsel].values, dtype=int)
-model_kwargs={'y_c': y_c, 'y_e': y_e}
-search = do_mcmc(model, 1, model_kwargs, num_warmup=1000, num_samples=5000)
-samples = search.get_samples()
-summary_dict = summary(samples, group_by_chain=False)
-prior = numpyro.infer.Predictive(model, num_samples=1000)(jax.random.PRNGKey(2))
-pp = numpyro.infer.Predictive(model, samples)(jax.random.PRNGKey(1))
+def center_and_scale_predictor(y, shift=2):
+    assert y.ndim == 2
+    col_shape = (len(y), 1)
+    mean, var = np.mean(y, axis=1).reshape(col_shape), np.var(y, axis=1).reshape(col_shape)
+    var[var==0] = 1
+    
+    y = ((y - mean) / var) + shift
+    return namedtuple('ParamScale', 'y mean var shift col_shape')(
+        y, mean, var, shift, col_shape
+    )
 
-# +
-coords = {'irow': np.arange(start, end), 'col': np.array([0]),
-          'rrep': np.arange(4), 'crep': np.arange(12)}
-dims = {'a': ['chain', 'draw', 'irow', 'col'],
-        'b': ['chain', 'draw', 'irow', 'col'],
-        'y_e': ['irow', 'rrep'], 
-        'y_c':['irow', 'crep']}
+def un_center_and_scale_predictor(x, param_scale):
+    assert x.shape == param_scale.col_shape
+    return ((x - param_scale.shift) * param_scale.var ) / param_scale.mean
 
-pred_dims = {'y_c': ['chain', 'draw', 'irow', 'col'],
-             'y_e': ['chain', 'draw', 'irow', 'col']}
-m_data = az.from_numpyro(search, prior=prior, posterior_predictive=pp, 
-                         coords=coords, dims=dims, pred_dims=pred_dims)
 
-# +
-a_rhat = summary_dict['a']['r_hat'][:, 0]
-a_neff = summary_dict['a']['n_eff'][:, 0]
-b_rhat = summary_dict['b']['r_hat'][:, 0]
-b_neff = summary_dict['b']['n_eff'][:, 0]
-tmp_df = pd.DataFrame({'a_rhat': a_rhat, 'a_neff': a_neff, 'b_rhat':b_rhat, 'b_neff': b_neff})
-m_data['posterior']['stats'] = xr.DataArray(tmp_df.values, 
-                                            coords={'irow': np.arange(start, end),
-                                            'stat': np.array(tmp_df.columns)})
+def model52_f(df_new, start, end):
+    def init_kernel(rescale_model=True):
+        n = slice(start, end)
+        dsel = df_new.iloc[n, :]
+        l = len(dsel)
+
+        y_c = np.array(dsel[csel].values, dtype=int)
+        y_e = np.array(dsel[rsel].values, dtype=int)
+
+        #col_shape = (l, 1)
+
+        # Scale and shift predictors
+        #mean_c, var_c = np.mean(y_c, axis=1).reshape(col_shape), np.var(y_c, axis=1).reshape(col_shape)
+        #mean_e, var_e = np.mean(y_e, axis=1).reshape(col_shape), np.var(y_e, axis=1).reshape(col_shape)
+
+
+        #var_c[var_c==0]=1
+        #var_e[var_e==0]=1
+
+        #y_c = ((y_c - mean_c) / var_c) + 2.
+        #y_e = ((y_e - mean_e) / var_e) + 2.
+        
+        if rescale_model:
+            y_c_param_scale = center_and_scale_predictor(y_c)
+            y_e_param_scale = center_and_scale_predictor(y_e)
+            model_kwargs={'y_c': y_c_param_scale.y, 'y_e': y_e_param_scale.y}
+            
+        else:
+            model_kwargs={'y_c': y_c, 'y_e': y_e}
+            y_c_param_scale = None
+            y_e_param_scale = None
+            
+        model_meta={'y_c': y_c_param_scale, 'y_e': y_e_param_scale}
+        model = partial(model5, batch_shape=(l, 1)) # partial apply for prior and post pred checks
+        return namedtuple('Init', 'model kwargs meta')(model, model_kwargs, model_meta)
+    
+    def init_sampling(rng_key, num_warmup, num_samples):
+        return namedtuple('Init', 'rng_key num_warmup num_samples')(rng_key, num_warmup, num_samples)
+    
+    def sample(model_init, sample_init):
+        search = do_mcmc(model_init.model, 
+                         sample_init.rng_key, 
+                         model_init.kwargs,
+                         num_warmup = sample_init.num_warmup,
+                         num_samples = sample_init.num_samples)
+        #samples = search.get_samples()
+        #summary_dict = summary(samples, group_by_chain=False)
+        return search
+    
+    
+    #k1, k2, k3 = jax.random.split(rng_key, 3)
+    #search = do_mcmc(model, k1, model_kwargs, num_warmup=1000, num_samples=5000)
+    #samples = search.get_samples()
+    #summary_dict = summary(samples, group_by_chain=False)
+    
+    def sample_pp(model_init, sample_init):
+        """
+        Sample from the prior predictive distribution
+        """
+        return numpyro.infer.Predictive(
+            model_init.model, 
+            sample_init.num_samples
+        )(sample_init.rng_key)
+    
+    def sample_Pp(model_init, samples, sample_init):
+        return numpyro.infer.Predictive(
+            model_init.model, 
+            samples
+        )(sample_init.rng_krey)
+    
+    def _pre_init_InferenceData(
+        search,
+        pp,
+        Pp,
+        model_meta
+    ):
+    
+    
+
+        coords = {'irow': np.arange(start, end), 'col': np.array([0]),
+                  'rrep': np.arange(4), 'crep': np.arange(12)}
+
+        dims = {'a': ['chain', 'draw', 'irow', 'col'],
+                'b': ['chain', 'draw', 'irow', 'col'],
+                'y_e': ['irow', 'rrep'], 
+                'y_c':['irow', 'crep']}
+        
+
+        pred_dims = {'y_c': ['chain', 'draw', 'irow', 'col'],
+                     'y_e': ['chain', 'draw', 'irow', 'col']}
+            
+        
+        inf_data = az.from_numpyro(search, prior=pp, posterior_predictive=Pp, 
+                                 coords=coords, dims=dims, pred_dims=pred_dims)
+        
+    def rescale_model(model_meta, inf_data):
+
+        # Scale Observed
+        yobs = inf_data['observed_data']
+        yobs.y_c = un_center_and_scale_predictor(
+            yobs.y_c, model_meta.yc_param_scale)
+        yobs.y_e = un_center_and_scale_predictor(
+            yobs.y_e, model_meta.ye_param_scale)
+
+        inf_data['observed_data'] = yobs
+        return inf_data
+    
+    
+    def _append_posterior_statistics(
+        inf_data, 
+        search, 
+        group_by_chain=False
+    ):
+        summary_dict = summary(search, group_by_chain=group_by_chain)
+        
+        a_rhat = summary_dict['a']['r_hat'][:, 0]
+        a_neff = summary_dict['a']['n_eff'][:, 0]
+        b_rhat = summary_dict['b']['r_hat'][:, 0]
+        b_neff = summary_dict['b']['n_eff'][:, 0]
+        
+        tmp_df = pd.DataFrame({'a_rhat': a_rhat, 'a_neff': a_neff, 'b_rhat':b_rhat, 'b_neff': b_neff})
+        inf_data['posterior']['stats'] = xr.DataArray(tmp_df.values, 
+                                                    coords={'irow': np.arange(start, end),
+                                                    'stat': np.array(tmp_df.columns)})
+        return inf_data
+    
+    def init_InferenceData(
+        search,
+        pp,
+        Pp,
+        model_meta,
+        rescale=True,
+        append_sample_stats=True,
+        group_by_chain=False
+    ):
+        inf_data = _pre_init_InferenceData(search, pp, Pp, model_meta)
+        
+        if rescale:
+            inf_data = rescale_model(model_meta, inf_data)
+        if append_sample_stats:
+            inf_data = _append_posterior_statistics(inf_data, search, group_by_chain=group_by_chain)
+            
+        return inf_data
+    
+    return namedtuple(
+        "M5F", "init_kernel init_sampling sample sample_pp sample_Pp rescale_model init_InferenceData")(
+            init_kernel = init_kernel,
+            init_sampling = init_sampling,
+            sample = sample,
+            sample_pp = sample_pp,
+            sample_Pp = sample_Pp,
+            rescale_model = rescale_model,
+            init_InferenceData = init_InferenceData
+        )
+
+def run_and_merge_models(df_new, from_, to, step, rng_key):
+    posterior = []
+    prior = []
+    observed = []
+    prior_p = []
+    post_p = []
+    log_like = []
+    sample_stats = []
+    
+    
+    intervals = list(range(from_, to, step))
+    for i in range(len(intervals)):
+        start = intervals[i]
+        end = start + step
+        print(start ,end)
+        rng_key, k1 = jax.random.split(rng_key)
+        
+        m_data = model52m_data(df_new, start, end, k1)
+        
+        posterior.append(m_data.posterior)
+        prior.append(m_data.prior)
+        observed.append(m_data.observed_data)
+        prior_p.append(m_data.prior_predictive)
+        log_like.append(m_data.log_likelihood)
+        sample_stats.append(m_data.sample_stats)
+    
+    posterior = xr.merge(posterior)
+    prior = xr.merge(prior)
+    observed = xr.merge(observed)
+    prior_p = xr.merge(prior_p)
+    post_p = xr.merge(post_p)
+    log_like = xr.merge(log_like)
+    sample_stats = xr.merge(sample_stats)
+    
+    
+    return av.InferenceData({'posterior': posterior, 'prior': prior, 'posterior_predictive': post_p,
+                            'prior_predictive': prior_p, 'log_likelihood': log_like,
+                            'observed_data': observed})
+    
+    
 
 
 # -
 
-m_data.posterior.stats.sel(stat=)
+import arviz as az
 
-xr.DataArray(tmp_df.values)
+# +
+start=0
+end=10#len(df_new)
 
-m_data
+m5f = model52_f(df_new, start=0, end=10)
+kernel = m5f.init_kernel(rescale_model=False)
+# -
+
+do_mcmc(kernel.model,
+       sample_init.rng_key,
+       kernel.kwargs,
+       num_warmup=sample_init.num_warmup,
+       num_samples=sample_init.num_samples)
+
+sample_init = m5f.init_sampling(jax.random.PRNGKey(13), num_warmup=1000, num_samples=5000)
+search = m5f.sample(kernel, sample_init)
+
+do_mcmc(kernel.model, sample_init.rng_key, kernel.kwargs)
+
+kernel.model
+
+m5f.sample
+
+# +
+rng_key = jax.random.PRNGKey(13)
+
+models = model52m_data(df_new, start, end, rng_key)
+# -
+
+models
+
+models = run_and_merge_models(df_new, 0, 20, 10, jax.random.PRNGKey(13))
+
+"""
+Let's say you have roughly 20,000 independant parameters.
+How many should fall outside the prior and posterior predictive checks
+
+"""
+
+key = jax.random.PRNGKey(13)
+m_data = model52m_data(df_new, 0, len(df_new), key)
+
+
+# +
+# Analysis
+def summary_stats(m_data):
+    data = m_data.posterior.stats.sel(stat=['a_rhat', 'b_rhat', 'a_neff', 'b_neff'])
+    max_ = data.max('irow').values
+    min_ = data.min('irow').values
+    
+    std = data.std(dim='irow').values
+    med = data.median('irow').values
+    
+    return pd.DataFrame([max_, min_, med, std], 
+                        index=['max', 'min', 'med', 'std'], 
+                        columns=data.stat.values)
+
+def plot_lp(m_data):
+    az.plot_trace(m_data.sample_stats['lp'])
+
+def plot_prior(m_data, start=0, end=10):
+    az.plot_trace(m_data.prior.sel(irow=np.arange(start, end)))
+    
+def predictive_check(m_data, T='max', 
+                     map_axis_pair=('y_e', 'rrep')):
+    
+    var, dim = map_axis_pair
+    Tobs = (m_data.observed_data[var]).max(dim).values
+    Tprior = (m_data.prior_predictive[var]).max(dim).values
+    Tpost = (m_data.posterior_predictive[var]).max(dim).values
+    
+    prior_n, *_ = plt.hist(np.ravel(Tprior), bins=10, label='Prior predictive', alpha=0.8)
+    post_n, *_ = plt.hist(np.ravel(Tpost), bins=10, label='Posterior predictive', alpha=0.8)
+    ymax = max(np.mean(prior_n), np.mean(post_n))
+    plt.vlines(Tobs.item(), 0, ymax, 'k', label='observed')
+    plt.xlabel(f"T(y) : {T} spectral count")
+    
+    plt.legend()
+
+summary_stats(m_data)
+plot_lp(m_data)
+# -
+
+plot_prior(m_data, start=0, end=10)
+
+# +
+# Compute the HDPI 
+# -
+
+predictive_check(m_data.sel(irow=0))
+
+# +
+q = np.array([0.1, 0.5, 0.9])
+q_func = partial(np.quantile, q=q, axis=0)
+q_func(m_data.prior_predictive.sel(chain=0)['y_c'].reduce(np.max, dim='crep')).T
+
+
+# Prior predictive
+# min, max, var, median
+# prior, post, obs
+
+test_stats = {'min': np.min, 'max': np.max, 'var': np.var, 'med': np.median}
+
+data_sets = {'pp': m_data.prior_predictive, 'Pp': m_data.posterior_predictive, 'o': m_data.observed_data}
+
+summary_stats = {}
+
+
+for Tname, T in test_stats.items():
+    for dname, data_set in data_sets.items():
+        if dname != 'o':
+            s = data_set.sel(chain=0).reduce(T, dim=['crep', 'rrep'])
+        else:
+            s = data_set.reduce(T, dim=['crep', 'rrep'])
+        for key in ['y_e', 'y_c']:
+            skey = dname + "_" + Tname + "_" + key
+            if dname != 'o':
+                summary_stats[skey] = q_func(s[key])
+            else:
+                summary_stats[skey] = s[key].values
+        
+
+
+# -
+
+def out_of_distribution_score(upper, lower, observed):
+    length = upper - lower
+    a = np.min([lower, observed], axis=0) - lower
+    b = np.max([upper, observed], axis=0) - upper
+    
+    return np.abs(a + b)# / length
+
+
+def ood_from_summary_stats(summary_stats, T = 'min', pred='post', y_i='y_c'):
+    if pred == 'post':
+        p = 'Pp_'
+    elif pred == 'prior':
+        p = 'pp_'
+    else:
+        raise ValueError
+    
+    key = p + T + "_" + y_i
+    okey = 'o_' + T + "_" + y_i
+    x = summary_stats[key].T
+    lower, median, upper = x[:, 0], x[:, 1], x[:, 2]
+    observed = summary_stats[okey]
+    y = out_of_distribution_score(upper, lower, observed)
+    return y
+
+
+def plot_from_summary_stats(summary_stats, T, pred, y_i):
+    y = ood_from_summary_stats(summary_stats, T, pred, y_i)
+    x = np.arange(len(y))
+    plt.plot(x, y, 'k.')
+    plt.ylabel('Out distr')
+
+
+plot_from_summary_stats(summary_stats, 'var', 'prior', 'y_c')
+
+plt.errorbar(np.arange(len(median)), median)
+
+"""
+20,000 samples
+"""
+
+# +
+min_o = m_data.observed_data.reduce(np.min, dim=['crep', 'rrep'])
+min_pp = m_data.prior_predictive.reduce(np.min, dim=['crep', 'rrep']).sel(chain=0).min(dim='draw')
+
+
+# -
+
+x = np.arange(1000)
+plt.plot(x, (min_o - min_pp).sortby('y_c')['y_c'].values, '.', label='Prior Predictive Control')
+plt.plot(x,)
+#plt.plot(x, (min_o - min_pp).sortby('y_c')['y_e'].values, '.', label='Preior Predictive AP')
+plt.ylim(-4, 4)
+plt.ylabel("Min Obs - min D")
+plt.grid()
+
+# +
+min_o = m_data.observed_data.reduce(np.min, dim=['crep', 'rrep'])
+#max_o = m_data.observed_data.reduce(np.max, dim=['crep', 'rrep'])
+
+min_pp = m_data.prior_predictive.reduce(np.min, dim=['crep', 'rrep']).sel(chain=0).min(dim='draw')
+min_Pp = m_data.posterior_predictive.reduce(np.min, dim=['crep', 'rrep']).sel(chain=0).min(dim='draw')
+
+a = (min_o - min_pp).sortby('y_c')['y_c'].values
+b = (min_o - min_pp).sortby('y_c')['y_e'].values
+c = (min_o - min_Pp)['y_c'].values
+d = (min_o - min_Pp)['y_e'].values
+
+
+
+def ppc_boxen(boxes, 
+              labels=['ppc control', 'ppc AP', 'PpC control', 'PpC AP'], font_dict = {'size': 16},
+              title=f"T(y) - T({y_tilde})"):
+
+    y_tilde = '\u1EF9'
+    sns.boxenplot(boxes)
+    plt.xticks(np.arange(len(boxes)),labels , **font_dict)
+    plt.title(title, **font_dict)
+    plt.ylabel("Spectral Count Difference", **font_dict)
+    #plt.text(2.5, 50, "T: Min", **font_dict)
+    plt.grid()
+ppc_boxen([a, b, c, d])
+#plt.ylim(-1, 1)
+
+# +
+"""
+HPDI: Narrowest Interval with probability mass of prob
+
+
+Is it in the narrowest interval with 0.9 probability mass?
+Is it in the narrowest interval 
+
+1. Apply Test statistic
+2. Compute HPDI at row
+3. Check 
+
+"""
+
+def in_hpdi(x, arr, prob, hpdi_fun=hpdi):
+    i = hpdi_fun(arr, prob)
+    if i[0] < x < i[1]:
+        return True
+    else:
+        return False
+
+
+# +
+def in_hpdi(prob, m_data, dataset, ysel, repsel, chainsel, t):
+    T_of_pp = m_data[dataset][ysel].sel(chain=chainsel).reduce(t, dim=repsel)
+    hpdi_of_T = hpdi(T_of_pp, prob=prob, axis=0).T
+    T_obs = m_data.observed_data[ysel].reduce(t, dim=repsel)
+    a = hpdi_of_T[:, 0] <= T_obs
+    b = T_obs < hpdi_of_T[:, 1]
+    in_interval = a & b
+    return in_interval
+
+
+def hpdi_check(interval_probs, m_data, dataset, ysel, repsel, chainsel, t):
+    """
+    Return the Highest Posterior Density Interval with the smallest probability mass
+    """
+    shape = (m_data[dataset].dims['irow'], len(interval_probs))
+    results = np.ones(shape) * 2
+    for i in range(shape[1]):
+        in_intervals = in_hpdi(prob=interval_probs[i], m_data=m_data, dataset=dataset,
+                              ysel=ysel, repsel=repsel, chainsel=chainsel,
+                              t=t)
+        
+        results[in_intervals, i] = interval_probs[i]
+    results = np.min(results, axis=1)
+    results[results==2] = -0.1
+    return results
+
+
+
+# +
+thresholds = np.arange(0.999, 0.01, -0.005)
+results = hpdi_check(thresholds, m_data, 'prior_predictive', 'y_c', 'crep', 0, np.max)
+
+def hpdi_cdf(results, title, hist_kwargs={}):
+    results[results==[-0.1]]=1.2
+    plt.title(title)
+    plt.hist(results, cumulative=True, bins=100, density=True, **hist_kwargs)
+    plt.yticks(np.arange(0, 1.05, 0.05))
+    plt.grid(which='both')
+    plt.xlim(0, np.max(results[results <= 1]))
+    plt.xlabel("Minimal HPDI")
+    plt.ylabel("Probability Mass")
+    
+hpdi_cdf(results, title="Prior Predictive T(x): Max")
+# -
+
+results = hpdi_check(thresholds, m_data, 'prior_predictive', 'y_c', 'crep', 0, np.min)
+
+hpdi_cdf(results, title='Prior Predictive T(x): Min')
+
+# +
+results = hpdi_check(thresholds, m_data, 'prior_predictive', 'y_c', 'crep', 0, np.var)
+
+r2 = hpdi_check(thresholds, m_data, 'prior_predictive', 'y_e', 'rrep', 0, np.var)
+# -
+
+hpdi_cdf(results, title='Prior Predictive T(x): Var', hist_kwargs={'label': 'control'})
+plt.hist(r2, label='AP', cumulative=True, density=True, alpha=0.5, bins=100)
+plt.xlim(0, 0.8)
+plt.legend()
+plt.show()
+
+results = hpdi_check(thresholds, m_data, 'posterior_predictive', 'y_c', 'crep', 0, np.var)
+
+r2 =      hpdi_check(thresholds, m_data, 'posterior_predictive', 'y_e', 'rrep', 0, np.var)
+
+hpdi_cdf(results, title='Prior Predictive T(x): Var', hist_kwargs={'label': 'control'})
+plt.hist(r2, label='AP', cumulative=True, density=True, alpha=0.5, bins=100)
+plt.xlim(0, 0.8)
+plt.legend()
+plt.show()
+
+"""
+Conclusions
+
+
+"""
+
+results = hpdi_check(thresholds, m_data, 'prior_predictive', 'y_c', 'crep', 0, np.mean)
+
+results[results==[-0.1]]=1.2
+plt.title(f"T: Mean")
+plt.hist(results, cumulative=True, bins=100, density=True)
+plt.grid()
+plt.xlim(0, np.max(results[results <= 1]))
+plt.xlabel("Minimal HPDI")
+plt.ylabel("Probability Mass")
+
+plt.plot(np.arange(1000), sorted(results, reverse=False), 'k.')
+
+# ?np.sort
+
+a = in_hpdi(0.9999, m_data, dataset='prior_predictive', ysel='y_c', repsel='crep', chainsel=0, t=np.max)
+
+m_data['posterior'].dims['irow']
+
+
+
+in_interval
+
+m_data.observed_data.reduce(lambda x, axis: hpdi(x, axis=axis), dim=['crep', 'rrep'])
+
+hpdi(m_data.observed_data['y_c'].values, axis=1)
+
+
+
+# What decile does the data fall in?
+hpdi()
+
+# +
+max_o = m_data.observed_data.reduce(np.max, dim=['crep', 'rrep'])
+#max_o = m_data.observed_data.reduce(np.max, dim=['crep', 'rrep'])
+
+max_pp = m_data.prior_predictive.reduce(np.max, dim=['crep', 'rrep']).sel(chain=0).max(dim='draw')
+max_Pp = m_data.posterior_predictive.reduce(np.max, dim=['crep', 'rrep']).sel(chain=0).max(dim='draw')
+
+a = (max_pp - max_o).sortby('y_c')['y_c'].values
+b = (max_pp - max_o).sortby('y_c')['y_e'].values
+c = (max_Pp - max_o)['y_c'].values
+d = (max_Pp - max_o)['y_e'].values
+# -
+
+ppc_boxen([a, b], ['Control', 'AP'], title="Max: T(y~) - T(y)")
+
+ppc_boxen([c, d], ['Control', 'AP'])
+
+# +
+# Magnitude of the deviation outside the 
+# -
+
+ticks = np.hstack([np.arange(i) for i in [4, 4]]).reshape((2, 4))
+
+"$y \sim $"
+
+# ?min_o.sortby
+
+m_data.reduce(np.min, dim=['crep', 'rrep'])
+
+plt.plot(np.arange(20000), np.arange(20000), 'k.')
+
+# +
+
+plt.plot(np.arange(len(y)), sorted(y, reverse=True), 'k.')
+plt.ylabel('Out of distribution score')
+# -
+
+np.min([lower, observed], axis=0).
+
+# ?np.min
+
+
+
+# +
+#1 Does the observed value fall within the 1st and 9th decile of the prior?
+#2 Does the observed value fall within the 1st and 9th decile of the posterior pred?
+#3 How much did the model learn?
+
+# What are the most uncertain distributions?
+
+
+summary_stats['pp_min_y_e'].T - summary_stats['o_min_y_e'].reshape((1000, 1))
+# -
+
+summary_stats['pp_min_y_e'].T
+
+summary_stats['o_min_y_e'].reshape((1000, 1))
+
+q_func(s[key])
+
+m_data.prior_predictive.sel(chain=0).reduce(np.min, dim=['crep', 'rrep'])
+
+q_func(m_data.prior_predictive.sel(chain=0)['y_c'].reduce(np.min, dim='crep')).T
+
+m_data.observed_data.reduce(np.min, dim=['crep', 'rrep'])
+
+
+
+# ?np.mean
+
+# +
+
+#m_data.posterior_predictive.sel(chain=0)['y_c'].reduce(np.mean, dim='crep').reduce(q_func, dim='draw')
+# -
+
+np.quantile(np.arange(10), [0.3, 0.6])
+
+# ?np.quantile
+
+m_data.posterior_predictive
+
+hpdi(m_data.posterior['a'].values, axis=1)
+
+predictive_check(m_data.sel(irow=0))
+
+# +
+
+
+
+
+# -
+
+m_data.posterior_predictive['y_c'].mean('crep')
+
+xr.apply_ufunc(np.mean, m_data.posterior)
+
+# ?xr.apply_ufunc
+
+m_data.prior_predictive
+
+m_data.prior_predictive['y_c'].shape
 
 neff_rhat = {'a_r_hat': summary_dict['a']['r_hat']}
 
-xr.Dataset.from_dataframe
 
-# ?xr.DataArray
-
-len(summary_dict['a']['r_hat'])
-
-summary_dict['a']['r_hat']
 
 m_data
 
