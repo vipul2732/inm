@@ -1609,9 +1609,13 @@ def model5(a=None, b=None, y_c=None, y_e=None, poisson_sparse=True, batch_shape=
     y_c: control obs
     """
     
-    max_val = np.max([np.max(y_c), np.max(y_e)])
+    #max_val = np.max([np.max(y_c), np.max(y_e)])
     
-    hyper = np.ones(batch_shape) * max_val
+    # Assum the true rates are within 10 + 2 * max observed value
+    
+    
+    
+    hyper = np.ones(batch_shape) * 200 #* max_val
     
     if a is None:
         a = numpyro.sample('a', dist.HalfNormal(hyper))
@@ -1732,13 +1736,32 @@ def center_and_scale_predictor(y, shift=2):
         y, mean, var, shift, col_shape
     )
 
-def un_center_and_scale_predictor(x, param_scale):
-    assert x.shape == param_scale.col_shape
-    return ((x - param_scale.shift) * param_scale.var ) / param_scale.mean
+def un_center_and_scale_predictor(x, param_scale, min_value=1e-8, safe=True):
+    if safe:
+        assert x.shape[0] == param_scale.col_shape[0], (x.shape, param_scale.col_shape)
+    x = np.array(x)
+    var = param_scale.var
+    var[var==0] = 1
+    
+    x = (x - param_scale.shift) * var + param_scale.mean
+    x[np.where(x <= min_value)] = 0.
+    return x
+    
+    
+
+    
 
 
-def model52_f(df_new, start, end):
-    def init_kernel(rescale_model=True):
+def model52_f(df_new, 
+              start, 
+              end, 
+              numpyro_model = model5,
+              numpyro_model_kwargs = None):
+    
+    if numpyro_model_kwargs is None:
+        numpyro_model_kwargs = {}
+    
+    def init_kernel(rescale_model=False):
         n = slice(start, end)
         dsel = df_new.iloc[n, :]
         l = len(dsel)
@@ -1770,7 +1793,12 @@ def model52_f(df_new, start, end):
             y_e_param_scale = None
             
         model_meta={'y_c': y_c_param_scale, 'y_e': y_e_param_scale}
-        model = partial(model5, batch_shape=(l, 1)) # partial apply for prior and post pred checks
+        
+        model = partial(
+            numpyro_model, 
+            batch_shape=(l, 1),
+            **numpyro_model_kwargs) # partial apply for prior and post pred checks
+        
         return namedtuple('Init', 'model kwargs meta')(model, model_kwargs, model_meta)
     
     def init_sampling(rng_key, num_warmup, num_samples):
@@ -1797,15 +1825,15 @@ def model52_f(df_new, start, end):
         Sample from the prior predictive distribution
         """
         return numpyro.infer.Predictive(
-            model_init.model, 
-            sample_init.num_samples
+            model = model_init.model, 
+            num_samples = sample_init.num_samples
         )(sample_init.rng_key)
     
     def sample_Pp(model_init, samples, sample_init):
         return numpyro.infer.Predictive(
-            model_init.model, 
-            samples
-        )(sample_init.rng_krey)
+            model = model_init.model, 
+            posterior_samples = samples
+        )(rng_key = sample_init.rng_key)
     
     def _pre_init_InferenceData(
         search,
@@ -1814,8 +1842,6 @@ def model52_f(df_new, start, end):
         model_meta
     ):
     
-    
-
         coords = {'irow': np.arange(start, end), 'col': np.array([0]),
                   'rrep': np.arange(4), 'crep': np.arange(12)}
 
@@ -1829,28 +1855,44 @@ def model52_f(df_new, start, end):
                      'y_e': ['chain', 'draw', 'irow', 'col']}
             
         
-        inf_data = az.from_numpyro(search, prior=pp, posterior_predictive=Pp, 
-                                 coords=coords, dims=dims, pred_dims=pred_dims)
+        inf_data = az.from_numpyro(search, 
+            prior=pp, posterior_predictive=Pp, coords=coords, dims=dims, pred_dims=pred_dims)
+        assert inf_data is not None
+        return inf_data
         
     def rescale_model(model_meta, inf_data):
 
         # Scale Observed
         yobs = inf_data['observed_data']
-        yobs.y_c = un_center_and_scale_predictor(
-            yobs.y_c, model_meta.yc_param_scale)
-        yobs.y_e = un_center_and_scale_predictor(
-            yobs.y_e, model_meta.ye_param_scale)
+        
+        inf_data.observed_data['y_c'].values = un_center_and_scale_predictor(
+            yobs.y_c, model_meta['y_c'])
+        
+        inf_data.observed_data['y_e'].values = un_center_and_scale_predictor(
+            yobs.y_e, model_meta['y_e'])
+        
+        # Scale Posterior
+        
+        ufunc = parital(un_center_and_scale_predictor, param_scale=model_meta['y_e'])
+        
+        inf_data.posterior.a = xr.apply_ufunc(
+            ufunc, inf_data.posterior.a)
+        
+        
+        
+        inf_data.posterior.a.values = un_center_and_scale_predictor(
+            inf_data.posterior.a)
 
-        inf_data['observed_data'] = yobs
+
         return inf_data
     
     
     def _append_posterior_statistics(
         inf_data, 
-        search, 
+        samples, 
         group_by_chain=False
     ):
-        summary_dict = summary(search, group_by_chain=group_by_chain)
+        summary_dict = summary(samples, group_by_chain=group_by_chain)
         
         a_rhat = summary_dict['a']['r_hat'][:, 0]
         a_neff = summary_dict['a']['n_eff'][:, 0]
@@ -1875,9 +1917,9 @@ def model52_f(df_new, start, end):
         inf_data = _pre_init_InferenceData(search, pp, Pp, model_meta)
         
         if rescale:
-            inf_data = rescale_model(model_meta, inf_data)
+            inf_data = rescale_model(model_meta = model_meta, inf_data = inf_data)
         if append_sample_stats:
-            inf_data = _append_posterior_statistics(inf_data, search, group_by_chain=group_by_chain)
+            inf_data = _append_posterior_statistics(inf_data, search.get_samples(), group_by_chain=group_by_chain)
             
         return inf_data
     
@@ -1936,49 +1978,84 @@ def run_and_merge_models(df_new, from_, to, step, rng_key):
 
 # -
 
+def model6(hyper_a, hyper_b, a=None, b=None, y_c=None, y_e=None, poisson_sparse=True, batch_shape=()):
+    """
+    Similiar to model 5 however we place stronger priors on Poisson
+    rates in the hopes of speeding up HMC
+    """
+    
+    if a is None:
+        a = numpyro.sample('a', dist.HalfNormal(hyper_a))
+    if b is None:
+        b = numpyro.sample('b', dist.HalfNormal(hyper_b))
+    
+    # predictive checks
+    nrows, ncols = batch_shape
+    
+    if y_c is None:
+        b = jnp.ones((nrows, 12)) * b
+    
+    if y_e is None:
+        a = jnp.ones((nrows, 4)) * a
+        
+    
+    numpyro.sample('y_c', dist.Poisson(b, is_sparse=poisson_sparse), obs=y_c)
+    numpyro.sample('y_e', dist.Poisson(a, is_sparse=poisson_sparse), obs=y_e)
+
 import arviz as az
 
 # +
+# Variants - number of chains
+# Keep the model as a variable
 start=0
-end=10#len(df_new)
+end=1000#len(df_new)
+l = end - start
+y_c = df_new.iloc[start:end, :][csel].values
+y_e = df_new.iloc[start:end, :][rsel].values
 
-m5f = model52_f(df_new, start=0, end=10)
+kd = {'hyper_a': (np.mean(y_e, axis=1).reshape((l, 1)) + 10) * 1.5,
+      'hyper_b': (np.mean(y_c, axis=1).reshape((l, 1)) + 10) * 1.5}
+
+# +
+m5f = model52_f(df_new, start=start, end=end, numpyro_model=model6,
+               numpyro_model_kwargs=kd)
+
 kernel = m5f.init_kernel(rescale_model=False)
-# -
 
-do_mcmc(kernel.model,
-       sample_init.rng_key,
-       kernel.kwargs,
-       num_warmup=sample_init.num_warmup,
-       num_samples=sample_init.num_samples)
 
 sample_init = m5f.init_sampling(jax.random.PRNGKey(13), num_warmup=1000, num_samples=5000)
 search = m5f.sample(kernel, sample_init)
 
-do_mcmc(kernel.model, sample_init.rng_key, kernel.kwargs)
-
-kernel.model
-
-m5f.sample
-
 # +
-rng_key = jax.random.PRNGKey(13)
+sample_init = m5f.init_sampling(PRNGKey(12), num_warmup=1000, num_samples=1000)
+pp = m5f.sample_pp(kernel, sample_init)
+sample_init = m5f.init_sampling(PRNGKey(11), num_warmup = 1000, num_samples = 1000)
+Pp = m5f.sample_Pp(kernel, search.get_samples(), sample_init)
 
-models = model52m_data(df_new, start, end, rng_key)
+inf_data = m5f.init_InferenceData(search, pp, Pp, kernel.meta, rescale=False, append_sample_stats=True)
 # -
 
-models
+inf_data
 
-models = run_and_merge_models(df_new, 0, 20, 10, jax.random.PRNGKey(13))
+# +
+#ufunc = partial(un_center_and_scale_predictor, param_scale = kernel.meta['y_e'], safe=False)
+#inf_data.posterior['a'] = xr.apply_ufunc(ufunc, inf_data.posterior.a)
+
+# +
+#az.plot_trace(inf_data, var_names=['a'], plot_kwargs={'xlim': (0, 10)})
+
+# +
+#yobs = inf_data.observed_data
+
+# +
+#models = run_and_merge_models(df_new, 0, 20, 10, jax.random.PRNGKey(13))
+# -
 
 """
 Let's say you have roughly 20,000 independant parameters.
 How many should fall outside the prior and posterior predictive checks
 
 """
-
-key = jax.random.PRNGKey(13)
-m_data = model52m_data(df_new, 0, len(df_new), key)
 
 
 # +
@@ -2017,9 +2094,126 @@ def predictive_check(m_data, T='max',
     
     plt.legend()
 
-summary_stats(m_data)
-plot_lp(m_data)
+summary_stats(inf_data)
+plot_lp(inf_data)
+
+# +
+axes = az.plot_trace(inf_data.sample_stats['lp'])
+ax = axes[:, 0].item()
+ax.hist(np.ravel(inf_data.sample_stats['lp'].values), bins=100, color='C1', alpha=0.5)
+ax.grid()
+ax.set_ylabel("Frequency")
+
+plt.show()
+
+# +
+fig, axs = plt.subplots(nrows=1, ncols=2)
+alphas = [0.2, 0.2]
+for i, key in enumerate(['a', 'b']):
+    axs[i].plot(inf_data.posterior.stats.sel(stat=f"{key}_rhat").values,
+                inf_data.posterior.stats.sel(stat=f"{key}_neff").values, 'k.', alpha=alphas[i])
+    axs[i].set_xlabel(f"{key} Rhat")
+    axs[i].set_ylabel(f"{key} Neff")
+    axs[i].set_ylim((3000, 8000))
+    axs[i].set_xlim((0.999, 1.001))
+fig.tight_layout()
+
+
+#inf_data.posterior.stat
+
+# +
+def satisfaction(inf_data):
+    """
+    Define Data Satisfaction in a simple way
+
+    - a dataset satifies the model if
+      - the obs mean is within the sample mean
+      - the obs variance is within the sample variance
+      - the sim min value <= obs min value
+      - the sim max value >= obs max value
+    """
+    
+    y_pp_sim = inf_data.prior_predictive.sel(chain=0)
+    y_Pp_sim = inf_data.posterior_predictive.sel(chain=0)
+    
+    dims = ['rrep', 'crep']
+    
+    def _get_stats(y_sim, dims=dims):
+        return namedtuple('A', "mean min max var")(
+                y_sim.mean(dim=dims),
+                y_sim.min(dim=dims),
+                y_sim.max(dim=dims),
+                y_sim.var(dim=dims))
+    
+    pp_stats = _get_stats(y_pp_sim)
+    Pp_stats = _get_stats(y_Pp_sim)
+    obs_stats = _get_stats(inf_data.observed_data)
+    
+    
+    
+    def _satisfaction(sym, obs):
+        a = sym.min <= obs.min
+        b = sym.max >= obs.max
+        return (a, b)
+    
+
+    
+    return _satisfaction(pp_stats, obs_stats), _satisfaction(Pp_stats, obs_stats)
+
+
+def ds_hdi(x: xr.Dataset, var_names, dim_name, prob=0.9):
+    
+    axes = [x[name].get_axis_num(dim_name) for name in var_names]
+    assert len(np.unique(axes)) == 1, axes
+    axis_num = axes[0]
+    f = partial(da_hpdi, dim_name=dim_name, prob=prob)
+    return x.map(f)
+    
+
+def da_hdi(x: xr.DataArray, dim_name, prob):
+    axis_num = x.get_axis_num(dim_name)
+    y = hpdi(x.values, axis=axis_num, prob=prob)
+    hdi = np.array(['min', 'max'])
+    coords = {'hdi': hdi, 'irow': x.coords['irow']}
+    return xr.DataArray(data=y, coords=coords, dims=['hdi', 'irow'])
+
+
 # -
+
+ds_hpdi(inf_data.posterior_predictive.sel(chain=0).mean(dim=['crep', 'rrep']), 
+        var_names=['y_c', 'y_e'], dim_name='draw')
+
+
+
+# ?np.unique
+
+np.unique([1, 2, 1, 1])
+
+# ?xr.DataArray
+
+inf_data.posterior_predictive.sel(chain=0).mean(dim=['crep', 'rrep']).map(f)
+
+f(inf_data.posterior_predictive.sel(chain=0).mean(dim=['crep', 'rrep']).y_c, dim_name='draw')
+
+# ?inf_data.posterior.map
+
+hpdi(np.arange(0, 100).reshape((20, 5)), axis=1)
+
+inf_data.posterior_predictive.sel(chain=0).mean(dim=['rrep', 'crep']).reduce(hpdi, dim=['draw'])
+
+inf_data.posterior_predictive.sel(chain=0).mean(dim=['rrep', 'crep']).coords
+
+# ?hpdi
+
+pps, Pps = satisfaction(inf_data)
+
+pps[0].mean(dim=['draw'])
+
+pp_stats, Pp_stats, obs_stats = satisfaction(inf_data)
+
+pp_stats.mean - obs_stats.mean
+
+inf_data.observed_data.mean(dim=['crep', 'rrep'])
 
 plot_prior(m_data, start=0, end=10)
 
