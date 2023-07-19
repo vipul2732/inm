@@ -2122,7 +2122,52 @@ fig.tight_layout()
 #inf_data.posterior.stat
 
 # +
-def satisfaction(inf_data):
+def _get_summary_stats(y_sim, dims=('rrep', 'crep')):
+    return namedtuple('T', "mean min max var")(
+            y_sim.mean(dim=dims),
+            y_sim.min(dim=dims),
+            y_sim.max(dim=dims),
+            y_sim.var(dim=dims))
+
+def ds_get_summary_stats(ds, dims=('rrep', 'crep')):
+    return _get_summary_stats(ds, dims=dims)
+
+def inf_get_summary_stats(inf_data, chain_num=0):
+    return (ds_get_summary_stats(inf_data.prior_predictive.sel(chain=chain_num)),
+            ds_get_summary_stats(inf_data.posterior_predictive.sel(chain=chain_num)),
+            ds_get_summary_stats(inf_data.observed_data))
+
+def check_satisfaction(sym_s, obs_s, prob=0.9, 
+    var_names=['y_c', 'y_e'],
+    dim='draw'):
+
+    """
+    Does the distribution satisfy the observed data?
+    """
+
+    a = sym_s.min <= obs_s.min
+    b = sym_s.max >= obs_s.max
+
+    hdi_mean = ds_hdi(sym_s.mean, prob = prob, var_names = var_names, dim = dim)
+    hdi_var  = ds_hdi(sym_s.var,  prob = prob, var_names = var_names, dim = dim)
+    
+    s1 = hdi_mean.sel(hdi='min') <= obs_s.mean
+    s2 = hdi_mean.sel(hdi='max') >= obs_s.mean
+    
+    mean_sat = s1 & s2
+    
+    s1 = hdi_var.sel(hdi='min') <= obs_s.var
+    s2 = hdi_var.sel(hdi='max') >= obs_s.var
+    
+    var_sat = s1 & s2
+
+
+
+    return namedtuple('satisfaction', 'min max mean var')(
+        a, b, mean_sat, var_sat
+    )
+
+def satisfaction(inf_data, chain_num=0, dims=('rrep', 'crep')):
     """
     Define Data Satisfaction in a simple way
 
@@ -2133,52 +2178,92 @@ def satisfaction(inf_data):
       - the sim max value >= obs max value
     """
     
-    y_pp_sim = inf_data.prior_predictive.sel(chain=0)
-    y_Pp_sim = inf_data.posterior_predictive.sel(chain=0)
+    y_pp_sim = inf_data.prior_predictive.sel(chain=chain_num)
+    y_Pp_sim = inf_data.posterior_predictive.sel(chain=chain_num)
     
-    dims = ['rrep', 'crep']
-    
-    def _get_stats(y_sim, dims=dims):
-        return namedtuple('A', "mean min max var")(
-                y_sim.mean(dim=dims),
-                y_sim.min(dim=dims),
-                y_sim.max(dim=dims),
-                y_sim.var(dim=dims))
-    
-    pp_stats = _get_stats(y_pp_sim)
-    Pp_stats = _get_stats(y_Pp_sim)
-    obs_stats = _get_stats(inf_data.observed_data)
+    pp_s, Pp_s, o_s = inf_get_summary_stats(inf_data, chain_num=chain_num)
     
     
-    
-    def _satisfaction(sym, obs):
-        a = sym.min <= obs.min
-        b = sym.max >= obs.max
-        return (a, b)
-    
-
-    
-    return _satisfaction(pp_stats, obs_stats), _satisfaction(Pp_stats, obs_stats)
+    return namedtuple("pc", "pp Pp obs")(
+        check_satisfaction(pp_stats, obs_stats), 
+        check_satisfaction(Pp_stats, obs_stats),
+        obs_stats
+    )
 
 
-def ds_hdi(x: xr.Dataset, var_names, dim_name, prob=0.9):
+def ds_hdi(x: xr.Dataset, var_names, dim, prob=0.9):
     
-    axes = [x[name].get_axis_num(dim_name) for name in var_names]
+    axes = [x[name].get_axis_num(dim) for name in var_names]
     assert len(np.unique(axes)) == 1, axes
     axis_num = axes[0]
-    f = partial(da_hpdi, dim_name=dim_name, prob=prob)
+    f = partial(da_hdi, dim=dim, prob=prob)
     return x.map(f)
     
 
-def da_hdi(x: xr.DataArray, dim_name, prob):
-    axis_num = x.get_axis_num(dim_name)
+def da_hdi(x: xr.DataArray, dim, prob):
+    axis_num = x.get_axis_num(dim)
     y = hpdi(x.values, axis=axis_num, prob=prob)
     hdi = np.array(['min', 'max'])
     coords = {'hdi': hdi, 'irow': x.coords['irow']}
     return xr.DataArray(data=y, coords=coords, dims=['hdi', 'irow'])
 
 
+# Shared dimensions: irow
+# Shared variable names, y_c 
+
+# Passing Frame
+
+def to_satisfaction_frame(p_c):
+    """
+    sat tup: A tuple from check_satsifaction
+    """
+    
+    df = pd.DataFrame(index=p_c.mean.coords['irow'], data={
+        'mean_c': p_c.mean.y_c,
+        'mean_e': p_c.mean.y_e,
+        'var_e':  p_c.var.y_e,
+        'var_c':  p_c.var.y_c
+    })
+    df.loc[:, 'all_e'] = np.alltrue(df.loc[:, ['mean_e', 'var_e']], axis=1)
+    df.loc[:, 'all_c'] = np.alltrue(df.loc[:, ['mean_c', 'var_c']], axis=1)
+    return df.loc[:, ['mean_c', 'var_c', 'all_c', 'mean_e', 'var_e', 'all_e']]
+
+
+# +
+# Data Satisfaction
 # -
+
+sat = satisfaction(inf_data)
+
+prior_sat = to_satisfaction_frame(sat.pp)
+post_sat = to_satisfaction_frame(sat.Pp)
+
+alpha=0.9
+(prior_sat.sum() / len(prior_sat)).plot(kind='bar', label='prior', alpha=alpha)
+(post_sat.sum() / len(post_sat)).plot(kind='bar', label='posterior', color='C1', alpha=alpha)
+plt.title("Data satisfaction of predicted checks")
+plt.grid()
+plt.legend()
+
+# ?sns.barplot
+
+prior_sat
+
+pc = satisfaction(inf_data)
+
+sat.pp.mean
+
+ppc = pd.DataFrame(index=inf_data.posterior.coords['irow'].values, columns=['min', 'max', 'var', 'mean'])
+
+ppc
+
+sat = satisfaction(inf_data)
+
+sat.pp.min.y_c
+
+sat.pp
+
+tmp[0][0]
 
 ds_hpdi(inf_data.posterior_predictive.sel(chain=0).mean(dim=['crep', 'rrep']), 
         var_names=['y_c', 'y_e'], dim_name='draw')
