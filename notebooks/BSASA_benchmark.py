@@ -2007,8 +2007,8 @@ import arviz as az
 # +
 # Variants - number of chains
 # Keep the model as a variable
-start=0
-end=1000#len(df_new)
+start=10
+end=20#len(df_new)
 l = end - start
 y_c = df_new.iloc[start:end, :][csel].values
 y_e = df_new.iloc[start:end, :][rsel].values
@@ -2023,19 +2023,125 @@ m5f = model52_f(df_new, start=start, end=end, numpyro_model=model6,
 kernel = m5f.init_kernel(rescale_model=False)
 
 
-sample_init = m5f.init_sampling(jax.random.PRNGKey(13), num_warmup=1000, num_samples=5000)
+sample_init = m5f.init_sampling(jax.random.PRNGKey(13), num_warmup=1000, num_samples=1000)
 search = m5f.sample(kernel, sample_init)
-
-# +
-sample_init = m5f.init_sampling(PRNGKey(12), num_warmup=1000, num_samples=1000)
-pp = m5f.sample_pp(kernel, sample_init)
-sample_init = m5f.init_sampling(PRNGKey(11), num_warmup = 1000, num_samples = 1000)
-Pp = m5f.sample_Pp(kernel, search.get_samples(), sample_init)
-
-inf_data = m5f.init_InferenceData(search, pp, Pp, kernel.meta, rescale=False, append_sample_stats=True)
 # -
 
-inf_data
+sample_init = m5f.init_sampling(PRNGKey(12), num_warmup=500, num_samples=500)
+pp = m5f.sample_pp(kernel, sample_init)
+
+sample_init = m5f.init_sampling(PRNGKey(11), num_warmup = 500, num_samples = 500)
+Pp = m5f.sample_Pp(kernel, search.get_samples(), sample_init)
+
+inf_data10_20 = m5f.init_InferenceData(search, pp, Pp, kernel.meta, rescale=False, append_sample_stats=True)
+
+
+def m5crop2idata(rng_key, df, start, end, rsel = None, csel = None, rescale_model=False,
+                num_warmup=1000, num_samples=1000, num_pred_samples=500, num_pred_warmup=None,
+                 append_sample_stats=True):
+    if rsel is None:
+        rsel = [f"r{i}" for i in range(1,5)]
+    if csel is None:
+        csel = [f"c{i}" for i in range(1, 13)]
+        
+    if num_pred_warmup is None:
+        num_pred_warmup = num_warmup
+        
+    l = end - start
+    y_c = df.iloc[start:end, :][csel].values
+    y_e = df.iloc[start:end, :][rsel].values
+
+    kd = {'hyper_a': (np.mean(y_e, axis=1).reshape((l, 1)) + 10) * 1.5,
+          'hyper_b': (np.mean(y_c, axis=1).reshape((l, 1)) + 10) * 1.5}
+    
+    m5f = model52_f(df_new, start=start, end=end, numpyro_model=model6,
+               numpyro_model_kwargs=kd)
+
+    kernel = m5f.init_kernel(rescale_model=rescale_model)
+    
+    k1, k2, k3 = jax.random.split(rng_key, 3)
+    
+    # Sample model
+    sample_init = m5f.init_sampling(k1, num_warmup=num_warmup, num_samples=num_samples)
+    search = m5f.sample(kernel, sample_init)
+    
+    # Prior predictive check
+    sample_init = m5f.init_sampling(k2, num_warmup=num_pred_warmup, num_samples=num_pred_samples)
+    pp = m5f.sample_pp(kernel, sample_init)
+    
+    # posterior predictive check
+    sample_init = m5f.init_sampling(k3, num_warmup = num_pred_warmup, num_samples = num_pred_samples)
+    Pp = m5f.sample_Pp(kernel, search.get_samples(), sample_init)
+    
+    idata = m5f.init_InferenceData(
+        search, pp, Pp, kernel.meta, rescale=rescale_model, append_sample_stats=append_sample_stats)
+    return idata
+
+
+# +
+def concat_inf(i1, i2, dim='irow', sample_stats = True):
+    assert i1 is not None
+    assert i2 is not None
+    inference_data = [i1, i2]
+    dim_concat = lambda key: xr.concat([i[key] for i in inference_data], dim=dim)
+    
+    post = dim_concat('posterior')
+    Pp   = dim_concat('posterior_predictive')
+    ll   = dim_concat('log_likelihood')
+    pp   = dim_concat('prior_predictive')
+    prior= dim_concat('prior')
+    obs  = dim_concat('observed_data')
+    
+    if sample_stats:
+        ss   = dim_concat('sample_stats')
+        return az.InferenceData(posterior=post, posterior_predictive=Pp, log_likelihood=ll,
+                           sample_stats=ss, prior_predictive=pp, prior=prior, observed_data=obs)
+    
+    else:
+        raise ValueError('Sample stats not implemented')
+    
+        
+    
+
+# +
+tmp = df_new.iloc[:, :]
+keys = jax.random.PRNGKey(13)
+step = 10
+crops = range(0, len(tmp), 1000)
+start = 0
+
+
+
+def action_f(rng_key, df, start, stop):
+    print(start, stop)
+    return m5crop2idata(rng_key, df, start, stop)
+    
+    
+for stop in crops:
+    if stop == 0:
+        continue
+    k1, rng_key = jax.random.split(rng_key)
+    
+    i_now = action_f(k1, tmp, start, stop)
+    
+    
+    if start == 0:
+        idata = i_now
+    else:
+        idata = concat_inf(idata, i_now)
+    start = stop
+        
+stop = len(tmp)
+k1, rng_key = jax.random.split(rng_key)
+i_now = action_f(k1, tmp, start, stop)
+idata = concat_inf(idata, i_now)
+
+
+# -
+
+idata['posterior']
+
+concat_inf(inf_data10, inf_data10_20)
 
 # +
 #ufunc = partial(un_center_and_scale_predictor, param_scale = kernel.meta['y_e'], safe=False)
@@ -2114,8 +2220,8 @@ for i, key in enumerate(['a', 'b']):
                 inf_data.posterior.stats.sel(stat=f"{key}_neff").values, 'k.', alpha=alphas[i])
     axs[i].set_xlabel(f"{key} Rhat")
     axs[i].set_ylabel(f"{key} Neff")
-    axs[i].set_ylim((3000, 8000))
-    axs[i].set_xlim((0.999, 1.001))
+    axs[i].set_ylim((800, 3000))
+    axs[i].set_xlim((0.998, 1.005))
 fig.tight_layout()
 
 
@@ -2185,9 +2291,9 @@ def satisfaction(inf_data, chain_num=0, dims=('rrep', 'crep')):
     
     
     return namedtuple("pc", "pp Pp obs")(
-        check_satisfaction(pp_stats, obs_stats), 
-        check_satisfaction(Pp_stats, obs_stats),
-        obs_stats
+        check_satisfaction(pp_s, o_s), 
+        check_satisfaction(Pp_s, o_s),
+        o_s
     )
 
 
@@ -2229,8 +2335,6 @@ def to_satisfaction_frame(p_c):
     return df.loc[:, ['mean_c', 'var_c', 'all_c', 'mean_e', 'var_e', 'all_e']]
 
 
-# +
-# Data Satisfaction
 # -
 
 sat = satisfaction(inf_data)
@@ -2238,14 +2342,379 @@ sat = satisfaction(inf_data)
 prior_sat = to_satisfaction_frame(sat.pp)
 post_sat = to_satisfaction_frame(sat.Pp)
 
+# +
 alpha=0.9
-(prior_sat.sum() / len(prior_sat)).plot(kind='bar', label='prior', alpha=alpha)
-(post_sat.sum() / len(post_sat)).plot(kind='bar', label='posterior', color='C1', alpha=alpha)
-plt.title("Data satisfaction of predicted checks")
-plt.grid()
-plt.legend()
 
-# ?sns.barplot
+blue = np.array([70, 90, 220, 255]) / 255
+black = np.array([0., 0., 0., 0.])
+gray = np.array([55, 55, 55, 255]) / 255
+red = np.array([197, 45, 15, 255]) / 255
+green = np.array([50, 180, 0, 255])
+yellow = np.array([255, 204, 0, 255]) / 255
+
+
+#fig, axs = plt.subplots(nrows=1, nc)
+(prior_sat.sum() / len(prior_sat)).plot(kind='bar', label='prior', color=black, alpha=0.8)
+(post_sat.sum() / len(post_sat)).plot(kind='bar', label='posterior', color=blue, alpha=0.6)
+nsamples = 1000
+nobs = 5000
+plt.title(f"Data satisfaction of predicted checks\nN samples {nsamples}\nN Obs {nobs}")
+plt.grid()
+plt.legend(loc=(1.05, .88))
+plt.savefig(f"O{nobs}N{nsamples}.png", dpi=200)
+
+# +
+# Let's look at the data in the control that so are not satisfied
+# -
+
+not_satisfied = inf_data.sel(irow=~post_sat['all_c'].values)
+satisfied = inf_data.sel(irow=post_sat['all_c'].values)
+
+len(post_sat['all_e'].values)
+
+inf_data.sel(irow=~post_sat['all_e'].values)['observed_data']['y_e']
+
+# +
+fig, axs = plt.subplots(1, 2)
+sns.boxenplot([not_satisfied.observed_data.var(dim=['crep', 'rrep']).y_e,
+               satisfied.observed_data.var(dim=['crep', 'rrep']).y_e
+              ], ax=axs[0])
+axs[0].set_title("Experiment")
+axs[0].set_ylabel("Sample variance")
+axs[0].set_xticks([0, 1], [f'Not satisfied', 'Satisfied'])
+
+
+sns.boxenplot([not_satisfied.observed_data.var(dim=['crep', 'rrep']).y_c,
+               satisfied.observed_data.var(dim=['crep', 'rrep']).y_c
+              ], ax=axs[1])
+axs[1].set_title("Control")
+#axs[1].set_ylabel("Sample variance")
+axs[1].set_xticks([0, 1], [f'Not satisfied', 'Satisfied'])
+fig.tight_layout()
+
+# +
+# Sometimes 
+
+
+
+# +
+tmp = df_new.sort_values('cVar', ascending=False)
+
+tmp.plot(x='rVar', y='cVar', style='k.', alpha=0.1)
+
+# +
+tmpr = df_new.sort_values('rVar', ascending=False)
+
+#tmp.plot(x='rVar', y='cVar', style='k.', alpha=0.1)
+tmpr.iloc[0:10][['bait', 'condition'] + rsel + ['rVar']]
+# -
+
+"""
+mock have the same controls
+vif + wt have sample controls
+Each control is processed in parallel with 
+"""
+
+sel = df_new['bait'] == 'ELOB'
+plt.hist(np.ravel(df_new.loc[sel, rsel].values - df_new.loc[sel, ['c1', 'c2', 'c3', 'c4']].values) - 20,
+        bins=200, alpha=0.2)
+plt.hist(np.ravel(df_new.loc[sel, rsel].values - df_new.loc[sel, ['c5', 'c6', 'c7', 'c8']].values),
+        bins=200, alpha=0.2)
+plt.hist(np.ravel(df_new.loc[sel, rsel].values - df_new.loc[sel, ['c9', 'c10', 'c11', 'c12']].values) + 20,
+        bins=200, alpha=0.2)
+plt.xlim(-50, 50)
+plt.show()
+
+sel = df_new['bait'] == 'CUL5'
+plt.hist(np.ravel(df_new.loc[sel, rsel].values - df_new.loc[sel, ['c1', 'c2', 'c3', 'c4']].values) - 20,
+        bins=400, alpha=0.2)
+plt.hist(np.ravel(df_new.loc[sel, rsel].values - df_new.loc[sel, ['c5', 'c6', 'c7', 'c8']].values),
+        bins=400, alpha=0.2)
+plt.hist(np.ravel(df_new.loc[sel, rsel].values - df_new.loc[sel, ['c9', 'c10', 'c11', 'c12']].values) + 20,
+        bins=400, alpha=0.2)
+plt.xlim(-50, 50)
+plt.show()
+
+sel = df_new['bait'] == 'CBFB'
+plt.hist(np.ravel(df_new.loc[sel, rsel].values - df_new.loc[sel, ['c1', 'c2', 'c3', 'c4']].values) - 20,
+        bins=200, alpha=0.2)
+plt.hist(np.ravel(df_new.loc[sel, rsel].values - df_new.loc[sel, ['c5', 'c6', 'c7', 'c8']].values),
+        bins=200, alpha=0.2)
+plt.hist(np.ravel(df_new.loc[sel, rsel].values - df_new.loc[sel, ['c9', 'c10', 'c11', 'c12']].values) + 20,
+        bins=200, alpha=0.2)
+plt.xlim(-50, 50)
+plt.show()
+
+# +
+#sel1 = df_new['r1'] == 0
+#$sel2 = df_new['c1'] == 0
+
+sel3 = df_new['bait'] == 'CBFB'
+
+sel4 = sel3 #sel1 & sel2
+sel5 = sel4 & sel3
+sel6 = np.sum(df_new[csel], axis=1) != 0
+sel7 = sel5 & sel6
+
+
+c1 = csel[0:4]
+c2 = csel[4:8]
+c3 = csel[8:12]
+
+df_new.loc[sel7, ['rVar'] + rsel + c1].sort_values('rVar', ascending=False).iloc[0:50]
+
+# +
+# Batch effects
+# Some replicates simply drop 
+
+
+
+df_new.sort_values('cVar', ascending=False).iloc[0:50].loc[:, c1 + ['condition'] + c2 + ['condition'] + c3 + ['bait'] + rsel]
+# -
+
+from typing import Set, FrozenSet
+
+"""
+Compare 
+"""
+a = df_new[rsel].values
+b = df_new[c1].values
+(a @ b.T).shape
+
+
+
+# ?np.dot
+
+# +
+"""
+Some functions to benchmark AP-MS scoring functions
+"""
+
+def two_col_union(df, a, b):
+    """
+    The union of unique values from two columns
+    """
+    bait = set(df[a].values)
+    prey = set(df[b])
+    return bait | prey
+
+def ref_df2ref_set(df, a, b):
+    return set([frozenset(i) for i in df.loc[:, [a, b]].values])
+
+
+def set2frozen_pairs(s):
+    """
+    s[a] -> s[f[a1, a2], ...]
+    
+    The set of unordered pairs 
+    """
+    return set([frozenset(i) for i in combinations(s, 2)])
+
+
+def tp(ref_set, pred_set):
+    return len(ref_set.intersection(pred_set))
+
+def tp_over_pp_score(ref_set, pred_set):
+    tp_ = tp(ref_set, pred_set)
+    pp_ = len(pred_set)
+    
+    if pp_ != 0:
+        return tp_ / pp_
+    else:
+        return 0
+
+def predicted_positives(pred_set):
+    return len(pred_set)
+
+def known_positives(ref_set):
+    return len(ref_set)
+
+
+def score_from_df(pred_df, ref_set, a, b, score_fun):
+    """
+    pred_df: prediction dataframe
+    ref_set: reference set
+    a: column
+    b: column
+    score_fun :: (ref_set -> pred_set -> int)
+    """
+    pred_set = set2frozen_pairs(two_col_union(pred_df, a, b))
+    return score_fun(ref_set, pred_set)
+
+tp_over_pp_score_from_df = partial(score_from_df, score_fun=tp_over_pp_score)
+tp_from_df = partial(score_from_df, score_fun=tp)
+
+
+def scores_from_df(pred_df, 
+                   thresholds, 
+                   sel_col_name: str, 
+                   ref_set,
+                   score_from_df_fun):
+    """
+    pred_df : DataFrame
+    thresholds : iterable[...]
+    sel_col_name: column to apply thresholds
+    ref_set: set
+    score_from_df_fun :: (pred_df -> ref_set -> int)
+    """
+    
+    return [score_from_df_fun(df, ref_set) for df in [pred_df.loc[pred_df[sel_col_name]>=t] for t in thresholds]]
+
+
+# -
+
+def scores_from_df_fast(pred_df, thresholds, sel_col_name, ref_set, score_funs):
+    """
+    1. Select the subframe
+    2. Compute tp
+    3. Compute pp
+    4. return
+    """
+    
+    nrows = len(thresholds)
+    ncols = len(score_funs)
+    
+    scores = np.zeros((nrows, ncols))
+    for i, sub_df in enumerate((pred_df.loc[pred_df[sel_col_name] >= t] for t in thresholds)):
+        scores[i, :] = [score_fun(sub_df, ref_set) for score_fun in score_funs]
+    return scores
+
+
+# +
+ref_set = ref_df2ref_set(bsasa_ref, 'Prey1Name', 'Prey2Name')
+tmp = df_new
+f1 = partial(tp_from_df, a='bait', b='PreyName')
+f2 = partial(tp_over_pp_score_from_df, a='bait', b='PreyName')
+f3 = lambda sub_df, ref_set: len(sub_df)
+t = np.arange(0, 1, 0.01)
+col = 'SaintScore'
+
+#tp_scores = scores_from_df(tmp, t, col, ref_set, f1)
+#tp_over_pp_scores = scores_from_df(tmp, t, col, ref_set, f2)
+
+scores = scores_from_df_fast(tmp, t, col, ref_set, [f1, f3])
+# -
+
+bsasa_ref
+
+# +
+from_scores = True
+log_scale = True
+yl1 = 'TP'
+yl2 = 'PP'
+if from_scores:
+    tp_scores = scores[:, 0]
+    tp_over_pp_scores = np.divide(scores[:, 0], scores[:, 1] ** 2, where=scores[:, 1] != 0)
+    pp_ = scores[:, 1]
+    unk = scores[:, 1] - scores[:, 0]
+    
+
+
+if log_scale:
+    tp_scores = np.log10(tp_scores)
+    pp_ = np.log10(pp_)
+    
+    yl1 = 'log10 ' + yl1
+    yl2 = 'log10 ' + yl2
+    
+
+    
+fig, axs = plt.subplots(nrows=1, ncols=2)
+axs[0].plot(t, tp_scores, label=yl1)
+axs[0].plot(t, pp_, label=yl2)
+axs[0].set_xlabel(col)
+
+axs[0].legend()
+axs[1].plot(t, tp_over_pp_scores, label='TP / PP^2', color='C2')
+axs[1].set_xlabel(col)
+axs[1].legend()
+fig.tight_layout()
+
+# -
+
+
+
+plt.plot(scores[:, 0], unk, 'k.', alpha=0.1)
+plt.xlabel('TP')
+plt.ylabel('Unknown (PP - TP)')
+plt.xlim(0, 100)
+plt.ylim
+
+np.log10(len(df_new[df_new['SaintScore']==1]))
+
+"""
+A smarter algorithm for computing intersections
+
+1. Map pairs to integers
+2. 
+"""
+
+tp(set2frozen_pairs(two_col_union(df_new, 'bait', 'PreyName')), ref_set)
+
+
+
+bsasa_ref
+
+bsasa_ref.loc[:, ['PreyName1']]
+
+df_new
+
+
+
+df_new.loc[:, 'SaintScore']
+
+composite_pairs(df_new.iloc[0:10]).intersection(composite_pairs(df_new.iloc[0:4]))
+
+set(combinations(set([1, 2, 3]) | set([4, 5]), 2))
+
+elob_av = df_new.loc[df_new['bait']=='ELOB', rsel + csel].mean()
+cul5_av = df_new.loc[df_new['bait'] == 'CUL5', rsel + csel].mean()
+cbfb_av = df_new.loc[df_new['bait'] == 'CBFB', rsel + csel].mean()
+lrr1_av = df_new.loc[df_new['bait'] == 'LRR1', rsel + csel].mean()
+
+d = cbfb_av
+plt.plot(d[rsel], d[c1], 'k.')
+plt.plot(d[rsel], d[c2], 'r.')
+plt.plot(d[rsel], d[c3], 'b.')
+
+plt.plot(elob_av[rsel], elob_av[c1], 'k.')
+plt.plot(elob_av[rsel], elob_av[c2], 'r.')
+plt.plot(elob_av[rsel], elob_av[c3], 'b.')
+
+elob_av
+
+c2
+
+tmp[['bait', 'condition'] + rsel + ['cVar'] + csel].loc['MYH9'].sort_values('bait')
+
+tmp[csel].iloc[0: 50]
+
+# +
+# Batch effects 
+# -
+
+df_new.sort_values('rVar', ascending=False).iloc[0:50, :]
+
+# +
+# Plot the observed variance to satisfaction
+# -
+
+pp_s, Pp_s, o_s = inf_get_summary_stats(inf_data)
+
+inf_data
+
+Pp_s.var
+
+"""
+1. 
+
+"""
+
+np.min(inf_data.observed_data.y_c.var(dim=('crep')))
+
+inf_data.posterior
+
+plt.savefig("N1000.png", dpi=200)
 
 prior_sat
 
