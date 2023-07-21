@@ -2139,9 +2139,7 @@ idata = concat_inf(idata, i_now)
 
 # -
 
-idata['posterior']
-
-concat_inf(inf_data10, inf_data10_20)
+idata
 
 # +
 #ufunc = partial(un_center_and_scale_predictor, param_scale = kernel.meta['y_e'], safe=False)
@@ -2200,11 +2198,11 @@ def predictive_check(m_data, T='max',
     
     plt.legend()
 
-summary_stats(inf_data)
-plot_lp(inf_data)
+summary_stats(idata)
+plot_lp(idata)
 
 # +
-axes = az.plot_trace(inf_data.sample_stats['lp'])
+axes = az.plot_trace(idata.sample_stats['lp'])
 ax = axes[:, 0].item()
 ax.hist(np.ravel(inf_data.sample_stats['lp'].values), bins=100, color='C1', alpha=0.5)
 ax.grid()
@@ -2214,14 +2212,14 @@ plt.show()
 
 # +
 fig, axs = plt.subplots(nrows=1, ncols=2)
-alphas = [0.2, 0.2]
+alphas = [0.1, 0.1]
 for i, key in enumerate(['a', 'b']):
-    axs[i].plot(inf_data.posterior.stats.sel(stat=f"{key}_rhat").values,
-                inf_data.posterior.stats.sel(stat=f"{key}_neff").values, 'k.', alpha=alphas[i])
+    axs[i].plot(idata.posterior.stats.sel(stat=f"{key}_rhat").values,
+                idata.posterior.stats.sel(stat=f"{key}_neff").values, 'k.', alpha=alphas[i])
     axs[i].set_xlabel(f"{key} Rhat")
     axs[i].set_ylabel(f"{key} Neff")
-    axs[i].set_ylim((800, 3000))
-    axs[i].set_xlim((0.998, 1.005))
+    axs[i].set_ylim((500, 6000))
+    axs[i].set_xlim((0.998, 1.02))
 fig.tight_layout()
 
 
@@ -2337,10 +2335,58 @@ def to_satisfaction_frame(p_c):
 
 # -
 
-sat = satisfaction(inf_data)
+sat = satisfaction(idata)
 
 prior_sat = to_satisfaction_frame(sat.pp)
 post_sat = to_satisfaction_frame(sat.Pp)
+
+# +
+# Prior and posterior predictive check example
+# Checks of simulation
+
+
+irow_sel = 9000 #8432
+
+
+
+fig, axs = plt.subplots(nrows = 1, ncols=2)
+dsel = idata.prior_predictive.sel(irow=irow_sel)
+dobs = idata.observed_data.sel(irow=irow_sel)
+
+xrange = (0, 80)
+x1 = np.ravel(dsel['y_e'].var(dim='rrep').values)
+
+hdi_x1 = hpdi(x1)
+
+axs[0].fill_betweenx([0, 200], hdi_x1[0], hdi_x1[1], alpha=0.3, interpolate=True, label='90% HDI')
+axs[0].hist(x1, bins=20, color=grey, range=xrange)
+
+axs[0].set_title("Prior Predictive")
+#axs[0].vlines(dobs['y_e'].values, 0, 200, 'r', label='observed')
+axs[0].vlines(dobs['y_e'].var(dim='rrep').values, 0, 150, color=red, label='Var(observed)')
+
+xlabel = "$D_{i}^2$"
+axs[1].set_title("Posterior Predictive")
+axs[0].set_xlabel(xlabel)
+axs[1].set_xlabel(xlabel)
+
+
+dsel = idata.posterior_predictive.sel(irow=irow_sel)
+x1 = np.ravel(dsel['y_e'].var(dim='rrep').values)
+hdi_x1 = hpdi(x1)
+axs[1].fill_betweenx([0, 250], hdi_x1[0], hdi_x1[1], alpha=0.3, interpolate=True, label='90% HDI')
+axs[1].hist(x1, bins=20, color='k', alpha=0.5, range=(0, 20),
+           label='Simulated variance')
+
+#axs[1].vlines(dobs['y_e'].values, 0, 700, 'r', label='Observed data')
+
+axs[1].vlines(dobs['y_e'].var(dim='rrep').values, 0, 200, color=red, label='observed variance')
+axs[1].legend()
+axs[0].set_ylabel("counts")
+
+plt.suptitle("Predicted variance of $i^{th}$ bait-prey pair")
+plt.savefig("ExamplePC.png", dpi=300)
+plt.show()
 
 # +
 alpha=0.9
@@ -2354,48 +2400,230 @@ yellow = np.array([255, 204, 0, 255]) / 255
 
 
 #fig, axs = plt.subplots(nrows=1, nc)
-(prior_sat.sum() / len(prior_sat)).plot(kind='bar', label='prior', color=black, alpha=0.8)
-(post_sat.sum() / len(post_sat)).plot(kind='bar', label='posterior', color=blue, alpha=0.6)
+(prior_sat.sum() / len(prior_sat)).plot(kind='bar', label='prior predictive', color=red)
+(post_sat.sum() / len(post_sat)).plot(kind='bar', label='posterior predictive', color=blue, alpha=0.9)
+plt.ylabel("Proportion satisfied")
 nsamples = 1000
-nobs = 5000
-plt.title(f"Data satisfaction of predicted checks\nN samples {nsamples}\nN Obs {nobs}")
+nobs = len(tmp)
+plt.title(f"Data satisfaction of predicted checks\nN MCMC samples {nsamples}\nN Obs {nobs}")
 plt.grid()
-plt.legend(loc=(1.05, .88))
-plt.savefig(f"O{nobs}N{nsamples}.png", dpi=200)
+plt.legend(loc=(0, 0.4))
+plt.savefig(f"O{nobs}N{nsamples}.png", dpi=300)
+
+
+# +
+def phase_space_of_protein_interactions(ax):
+    N = 4000
+    Imax = math.comb(N, 2)
+    
+    
+    #x = np.arange(1, N, 1)
+    #y = sp.special.comb(x, 2)
+    
+    x = np.arange(1, N)
+    y0 = sp.special.comb(x, 2)
+    yl = 0.004 * y0
+    yu = 0.014 * y0
+    
+    
+    
+    #ax.plot(x, y, 'k')
+    ax.plot(x, np.log10(y0))
+    ax.plot(x, np.log10(yl))
+    ax.plot(x, np.log10(yu))
+    #ax.plot(x, yl)
+    ax.set_xlabel("N unique proteins")
+    ax.set_ylabel("log10 N pairs")
+    return ax
+
+fig, ax = plt.subplots(1, 1)
+phase_space_of_protein_interactions(ax)
 
 # +
 # Let's look at the data in the control that so are not satisfied
+
+# +
+#not_satisfied = idata.sel(irow=~post_sat['all_c'].values)
+#satisfied = idata.sel(irow=post_sat['all_c'].values)
 # -
 
-not_satisfied = inf_data.sel(irow=~post_sat['all_c'].values)
-satisfied = inf_data.sel(irow=post_sat['all_c'].values)
+cvar = idata['posterior_predictive'].sel(chain=0).var(dim=['crep', 'rrep'])
+av_var = cvar.mean('draw')
+av_var_std = cvar.std('draw')
 
-len(post_sat['all_e'].values)
 
-inf_data.sel(irow=~post_sat['all_e'].values)['observed_data']['y_e']
+observed_var = idata.observed_data.var(dim=['rrep', 'crep'])
+plt.plot(observed_var['y_c'], av_var['y_c'], 'k.', alpha=0.1, label='control')
+#plt.plot(df_new['cVar'].values, df_new['cVar'].values, 'b.', alpha=0.1, label='Equality')
+plt.plot(observed_var['y_e'], av_var['y_e'], 'r.', alpha=0.1, label='AP')
+x = np.arange(0, 200)
+y = x
+plt.plot(x, y, 'b-', label='equality')
+plt.xlabel("Observed variance")
+plt.ylabel("Average simulated variance")
+plt.title("Posterior predictive variances")
+#plt.xlim((0, 600))
+plt.legend()
+plt.savefig("PosteriorPredictiveVariances.png", dpi=notebook_dpi)
+
 
 # +
-fig, axs = plt.subplots(1, 2)
-sns.boxenplot([not_satisfied.observed_data.var(dim=['crep', 'rrep']).y_e,
-               satisfied.observed_data.var(dim=['crep', 'rrep']).y_e
-              ], ax=axs[0])
-axs[0].set_title("Experiment")
-axs[0].set_ylabel("Sample variance")
-axs[0].set_xticks([0, 1], [f'Not satisfied', 'Satisfied'])
+cav = idata['posterior_predictive'].sel(chain=0).mean(dim=['crep', 'rrep'])
+pav = idata['prior_predictive'].sel(chain=0).mean(dim=['crep', 'rrep'])
+av_var = cav.mean('draw')
+av_var_std = cav.std('draw')
+observed_mean = idata.observed_data.mean(dim=['rrep', 'crep'])
+
+plt.plot(observed_mean['y_c'], av_var['y_c'], 'k.', alpha=0.1, label='control')
+#plt.plot(df_new['cVar'].values, df_new['cVar'].values, 'b.', alpha=0.1, label='Equality')
+plt.plot(observed_mean['y_e'], av_var['y_e'], 'r.', alpha=0.1, label='AP')
+plt.plot(observed_mean['y_e'], pav.mean('draw')['y_e'].values, 'b.', alpha=0.1, label='Prior')
+x = np.arange(0, 200)
+y = x
+plt.plot(x, y, 'b-', label='equality')
+plt.xlabel("Observed average")
+plt.ylabel("Average simulated mean")
+plt.title("Predictive Means")
+plt.savefig("PredictiveMeans.png", dpi=notebook_dpi)
+#plt.xlim((0, 600))
+plt.legend()
+# -
+
+idata.observed_data
+
+df_new['nprVar']
+
+df_new.sort_values('nprVar', ascending=False).loc[:, ['bait'] + rsel + ['nprVar'] + c2]
+
+df_new.loc[~post_sat['var_c'].values, rsel + csel + ['bait']]
 
 
-sns.boxenplot([not_satisfied.observed_data.var(dim=['crep', 'rrep']).y_c,
-               satisfied.observed_data.var(dim=['crep', 'rrep']).y_c
-              ], ax=axs[1])
-axs[1].set_title("Control")
-#axs[1].set_ylabel("Sample variance")
-axs[1].set_xticks([0, 1], [f'Not satisfied', 'Satisfied'])
-fig.tight_layout()
+def boxen_pair(ax, vals, title, xticks, xticklabels, rc_context, ylim, ylabel=None):
+    sns.boxenplot(vals, ax=ax)
+    with mpl.rc_context(rc_context):
+        ax.set_title(title)
+        ax.set_ylabel(ylabel)
+        ax.set_xticks(xticks, xticklabels)
+        ax.set_ylim(ylim)
+        return ax
+
 
 # +
-# Sometimes 
+# Plot posterior shrinkage
+
+rc_dict = {'text.usetex': True,
+           'font.family': 'sans-serif'}
+
+with mpl.rc_context(rc_dict):
+    fig, axs = plt.subplots(1, 2) # The original figure must share the rc_dict
+    ylim = (0, 300)
+    tmp = idata#.sel(irow=np.arange(20))
+
+    a = np.ravel(tmp.posterior.sel(chain=0)['a'])
+    b = np.ravel(tmp.posterior.sel(chain=0)['b'])
+
+    xlabels = ["$$ \\alpha $$", "$$ \\beta $$"]
+    #xlabels = ['a', 'b']
+
+    boxen_pair(axs[1], [a, b], "Posterior", [0, 1], xlabels, rc_dict, ylim)
+
+    a = np.ravel(tmp.prior.sel(chain=0)['a'])
+    b = np.ravel(tmp.prior.sel(chain=0)['b'])
+
+    boxen_pair(axs[0], [a, b], "Prior", [0, 1], xlabels, rc_dict, ylim, ylabel="Poisson rate")
+    plt.savefig("PosteriorShrinkage.png", dpi=300)
+    plt.close()
 
 
+# -
+
+def hists(ax, xs, labels, colors, alphas, bins, hist_kwargs = None):
+    if hist_kwargs is None:
+        hist_kwargs  = {}
+    for i in range(len(xs)):
+        ax.hist(xs[i], color=colors[i], alpha=alphas[i], bins=bins[i],
+               label=labels[i], **hist_kwargs)
+    return ax
+
+
+notebook_dpi = 300
+with mpl.rc_context(mpl.rcParams):
+    fig, ax = plt.subplots(1, 1)
+    x1 = (idata.posterior['a'] - idata.posterior['b']).sel(chain=0, irow=3)
+    x2 = (idata.prior['a'] - idata.prior['b']).sel(chain=0, irow=3)
+    xs = [x2, x1]
+    labels = ['Prior', 'Posterior']
+    colors = [None, None]
+    alphas = [0.7, 0.7]
+    bins = [30] * len(xs)
+    hists(ax, xs, labels, colors, alphas, bins)
+    ax.legend()
+    ax.set_xlabel("Poisson Rate Difference")
+    ax.set_ylabel("Counts")
+    plt.savefig("RateDifference", dpi=notebook_dpi)
+
+
+# +
+# Posterior Certainty - cumulative probability mass above 0
+
+def certainty_score(ds):
+    """
+    The cumulative probabilty of a variable above 
+    """
+    return (ds > 0).sum(dim="draw") / idata.posterior.dims['draw']
+    
+    
+    
+# -
+
+posterior_certainties = certainty_score((idata.posterior['a'] - idata.posterior['b']).sel(chain=0, col=0))
+prior_certainties = certainty_score((idata.prior['a'] - idata.prior['b']).sel(chain=0, col=0))
+
+# +
+fig, ax = plt.subplots(1, 1)
+hists(ax, [prior_certainties, posterior_certainties, df_new['SaintScore'].values], 
+      labels=['Prior certainty score', 'Posterior certainty score', 'Saint score'],
+      colors = [None, None, 'k'],
+      alphas = [0.6, 0.9, 0.9],
+      bins = [500, 500, 500], 
+      hist_kwargs = None)#{'cumulative': True})
+
+ax.set_ylim(0, 2500)
+ax.set_xlabel("Score")
+ax.vlines(0.6, 0, 2000, red, linestyles='dashed', label='typical Saint threshold')
+ax.legend()
+ax.set_ylabel("Count")
+#plt.savefig("ScoreDistFar.png", dpi=notebook_dpi)
+plt.savefig("ScoreDistNear.png", dpi=notebook_dpi)
+
+
+# -
+
+# ?xy_from
+
+# +
+def xy_plot(ax, x, y, fmt_str="", xlabel=None, ylabel=None, alpha=1, label=None, kwargs=None,
+           title=None):
+    if kwargs is None:
+        kwargs = {}
+    ax.plot(x, y, fmt_str, alpha=alpha, label=label, **kwargs)
+
+    if xlabel:
+        ax.set_xlabel(xlabel)
+    if ylabel:
+        ax.set_ylabel(ylabel)
+    if title:
+        ax.set_title(title)
+fig, ax = plt.subplots(1, 2)
+#ax[0].plot(prior_certainties, df_new['SaintScore'].values, 'b.', alpha=0.1)
+
+xy_plot(ax[0], prior_certainties, df_new['SaintScore'].values, 'b.',
+       xlabel="Certainty score", ylabel="Saint score", alpha=0.05, title="Prior")
+
+xy_plot(ax[1], posterior_certainties, df_new['SaintScore'].values, 'C1.',
+       xlabel="Certainty score", alpha=0.05, title="Posterior")
+
+plt.savefig("SaintPostComparison.png", dpi=notebook_dpi)
 
 # +
 tmp = df_new.sort_values('cVar', ascending=False)
@@ -2481,10 +2709,6 @@ a = df_new[rsel].values
 b = df_new[c1].values
 (a @ b.T).shape
 
-
-
-# ?np.dot
-
 # +
 """
 Some functions to benchmark AP-MS scoring functions
@@ -2523,7 +2747,7 @@ def tp_over_pp_score(ref_set, pred_set):
     else:
         return 0
 
-def predicted_positives(pred_set):
+def predicted_positives(ref_set, pred_set):
     return len(pred_set)
 
 def known_positives(ref_set):
@@ -2595,7 +2819,544 @@ col = 'SaintScore'
 scores = scores_from_df_fast(tmp, t, col, ref_set, [f1, f3])
 # -
 
-bsasa_ref
+df_new.loc[:, "PostCertainty"] = posterior_certainties.values
+df_new.loc[:, "PriorCertainty"] = prior_certainties.values
+
+# +
+# N direct interactions
+n_possible_interactions = math.comb(len(set(df_new['PreyName'].values)),2)
+n_direct = len(set(bsasa_ref_pairs))
+
+
+
+# +
+thresholds = np.arange(0, 1, 0.05)
+saint_predictions = []
+posterior_predictions = []
+prior_predictions = []
+
+
+def tp_from_df(df, ref_set):
+    prey_set = set(df['bait'].values).intersection(df)
+    
+def df2pp_tp(sub_df, threshold):
+    prey_set = set(sub_df['bait']).union(sub_df['PreyName'])
+    prey_pairs = set2frozen_pairs(prey_set)
+    
+    n_predicted_positives = len(prey_pairs)
+    n_tp = tp(ref_set, prey_pairs)
+    return n_predicted_positives, n_tp
+
+for threshold in thresholds:
+    saint_subdf = df_new.loc[df_new['SaintScore'] >= threshold]
+    prior_subdf = df_new.loc[df_new['PriorCertainty'] >= threshold]
+    post_subdf  = df_new.loc[df_new['PostCertainty'] >= threshold]
+    
+    saint_predictions.append(df2pp_tp(saint_subdf, threshold))
+    prior_predictions.append(df2pp_tp(prior_subdf, threshold))
+    posterior_predictions.append(df2pp_tp(post_subdf, threshold))
+    
+
+    print(threshold)
+
+
+
+
+# +
+saint_predictions_arr = np.array(saint_predictions)
+prior_predictions_arr = np.array(prior_predictions)
+postr_predictions_arr = np.array(posterior_predictions)
+
+
+#saint_predictions[:, 0] = sp.special.comb(saint_predictions[:, 0], 2)
+# -
+
+postr_predictions_arr
+
+# +
+fig, ax = plt.subplots(1, 1)
+step = 1000
+xend = n_possible_interactions
+xstart=0
+every = 1e4
+x = np.arange(0, xend, every)
+y = sp.stats.hypergeom.median(M=n_possible_interactions,
+                           n=n_direct, N=x)
+
+Null = sp.stats.hypergeom(M=n_possible_interactions, n=n_direct, N=x)
+#ylower = Null.ppf(0.1)
+#yupper = Null.ppf(0.9)
+#yerr = np.array([ylower, yupper])
+yerr = Null.var()
+y = Null.median()
+ax.errorbar(x, y, yerr=yerr, alpha=0.2, label='Hypergeometric Null')
+ax.set_xlabel("Predicted prey pairs")
+ax.set_ylabel("Recovered PDB direct Interactions")
+
+#xy_plot(ax, x, y, '.', alpha=0.4, xlabel="$n$ predicited positives", ylabel="Recovered PDBs")
+ax.plot(saint_predictions_arr[:, 0], saint_predictions_arr[:, 1], label='Saint All Prey')
+ax.plot(prior_predictions_arr[:, 0], prior_predictions_arr[:, 1], label='Prior certainty')
+ax.plot(postr_predictions_arr[:, 0], postr_predictions_arr[:, 1], label="Posterior certainty")
+ax.legend()
+ax.set_xlim((xstart, xend))
+#ax.set_ylim((0, 500))
+plt.savefig("null_benchmark.png", dpi=notebook_dpi)
+
+
+# -
+
+def model5(a=None, b=None, y_c=None, y_e=None, poisson_sparse=True, batch_shape=()):
+    """
+    a:  experimental rate
+    b:  control rate
+    
+    y_e: experimental obs
+    y_c: control obs
+    """
+    
+    #max_val = np.max([np.max(y_c), np.max(y_e)])
+    
+    # Assum the true rates are within 10 + 2 * max observed value
+    
+    
+    
+    hyper = np.ones(batch_shape) * 200 #* max_val
+    
+    if a is None:
+        a = numpyro.sample('a', dist.HalfNormal(hyper))
+    if b is None:
+        b = numpyro.sample('b', dist.HalfNormal(hyper))
+    
+    # predictive checks
+    nrows, ncols = batch_shape
+    
+    if y_c is None:
+        b = jnp.ones((nrows, 12)) * b
+    
+    if y_e is None:
+        a = jnp.ones((nrows, 4)) * a
+        
+    
+    numpyro.sample('y_c', dist.Poisson(b, is_sparse=poisson_sparse), obs=y_c)
+    numpyro.sample('y_e', dist.Poisson(a, is_sparse=poisson_sparse), obs=y_e)
+
+# +
+# Two Unknowns - it isn't known how manuy of these true interactions are supported by the data
+# May need another benchmark criteria for indirect bait prey interactions
+
+
+# Model the protein abundance parameters
+
+def model7(cul5_e, elob_e, cbfb_e, cul5_ctrl, elob_ctrl, cbfb_ctrl,
+           lrr1_e, purification_shape,):
+    
+    nrows, ncols = purification_shape
+    
+    # alphas - replicate specific abundance factors
+    alpha_hyper = np.ones((4, 4)) * 5
+    beta_hyper = np.ones(purification_shape) * 200
+    
+    # Batch the alphas over the number of pulldowns
+    
+    alpha = numpyro.sample('a', dist.Normal(alpha_hyper, 1))
+    
+    cul5_beta = numpyro.sample('cb', dist.HalfNormal(beta_hyper))
+    elob_beta = numpryo.sample('eb', dist.HalfNormal(beta_hyper))
+    cbfb_beta = numpyro.sample('bb', dist.HalfNormal(beta_hyper))
+    lrr1_beta = numpryo.sample('lb', dist.HalfNormal(beta_hyper))
+    
+    numypro.sample('y_cul_e', dist.Poisson(cul5_beta * alpha[0, :]), obs=cul_e)
+
+
+# -
+
+def model8(ds, prey_max=None):
+    """
+    
+    
+    """
+    if prey_max is None:
+        prey_max = len(ds['preyu'].values)
+    
+    n_bait = len(ds['bait'])
+    n_infections = len(ds['condition'])
+    n_replicates = len(ds['rrep'])
+    alpha_batch_shape = (n_bait, n_infections, n_replicates)
+    n_prey = len(ds['preyu'])
+    
+    obs = ds['CRL_E'].transpose('preyu', 'bait', 'condition', 'rrep')
+    obs_c = ds['CRL_C'].transpose('preyu', 'bait', 'condition', 'crep')
+    
+    obs_bait_counts = np.zeros(alpha_batch_shape)
+    
+    n_control_replicates = 4 # Global domain knowledge
+    
+    control_counts = np.zeros((n_prey, n_bait, n_infections, n_control_replicates))
+    
+    # CBFB 1:4, CUL5 5:8, ELOB 9:12
+    
+    csel_map = {'CBFB': [0, 1, 2, 3],
+            'CUL5': [4, 5, 6, 7],
+            'ELOB': [8, 9, 10, 11]}
+
+    for i, bait in enumerate(ds.bait):
+        if bait == 'CBFB':
+            prey_sel = 'PEBB'
+        else:
+            prey_sel = bait
+        
+        obs_bait_counts[i, :, :] = obs.sel(bait=bait, preyu=prey_sel).values
+        
+        columns = csel_map[bait.item()]
+        control_counts[:, i, :, :] = obs_c.sel(bait=bait, crep=columns).values
+    
+    
+    obs_bait_counts = jnp.array(obs_bait_counts, dtype=int)
+    
+    obs_c = jnp.array(control_counts[0:prey_max, :, :, :], dtype=int)
+    
+    if prey_max:
+        obs = obs.sel(preyu=obs.preyu[0:prey_max])
+        
+    # epsilon: control counts
+    
+
+    # Sample Bait alphas: bait rate
+    max_obs = jnp.max(obs_bait_counts)
+    #alpha_hyper_prior = jnp.ones(obs_bait_counts.shape) * max_obs
+    
+    alpha_hyper_prior = jnp.ones(obs_bait_counts.shape) * obs_bait_counts.mean(axis=2)
+    
+    alpha = numpyro.sample('alpha', dist.HalfNormal(alpha_hyper_prior, 20)) # rate
+    numpyro.sample('bait_obs', dist.Poisson(alpha), obs=obs_bait_counts)
+    
+    # Sample betas: prey coefficient
+    n_prey = len(obs.preyu)
+    beta_batch_shape = (n_prey, n_bait, n_infections, n_replicates)
+    
+    beta_hyper_prior = jnp.ones(beta_batch_shape) # HalfNormal Scale
+    beta = numpyro.sample('beta', dist.HalfNormal(scale=beta_hyper_prior)) # Unitless
+    numpyro.sample('obs_exp', dist.Poisson(beta * alpha), obs=obs.values)
+    
+    max_control_obs = jnp.max(obs_c)
+    
+    epsilon_hyper_prior = jnp.ones(beta_batch_shape) * max_control_obs # Prior over rates
+    epsilon = numpyro.sample('epsilon', dist.HalfNormal(epsilon_hyper_prior)) # Same prior as alpha
+    numpyro.sample('obs_ctrl', dist.Poisson(epsilon), obs=obs_c) # Independant of alpha * beta
+    
+
+jnp.ones((10, 7, 3)) * jnp.mean(jnp.ones((10, 7, 3)), axis=2)
+
+jnp.mean(jnp.ones((10, 7, 3)), axis=2).repeat(3)
+
+# +
+# Compare control counts
+tmp = ds.sel(bait=['CBFB', 'CUL5', 'ELOB'])
+for bait_test in ['CBFB', 'CUL5', 'ELOB']:
+    for p1, p2 in combinations(['wt', 'vif', 'mock'], 2):
+        
+        csel_map = {'CBFB': [0, 1, 2, 3],
+                    'CUL5': [4, 5, 6, 7],
+                    'ELOB': [8, 9, 10, 11]}
+        
+        columns = csel_map[bait_test]
+
+        compare = tmp['CRL_C'].sel(
+            condition=p1, bait=bait_test).values[:, columns] == tmp['CRL_C'].sel(
+            condition=p2, bait=bait_test).values[:, columns]
+
+        assert np.alltrue(~np.isnan(compare))
+        # How many rows are False?
+        # 96% of the controls between 
+        print(f"{bait_test} {p1} {p2} : {np.sum(np.alltrue(compare, axis=1)) / len(compare[:, 0])}")
+        #break
+
+# WT & VIF Share most control
+# -
+
+jnp.ones((100, 5, 3, 4)) * jnp.ones((3, 5, 4))
+
+ds_sel = ds.sel(bait=['CBFB', 'CUL5', 'ELOB'])#, preyu=['PEBB', 'CUL5', 'ELOB', 'vifprotein'])
+
+rng_key = PRNGKey(13)
+prey_max=1000
+model = partial(model8, prey_max=prey_max)
+#model = model8
+nuts_kernal = numpyro.infer.NUTS(model)
+mcmc = numpyro.infer.MCMC(nuts_kernal, num_warmup=1000, num_samples=1000, thinning=1)
+rng_key = jax.random.PRNGKey(13)
+mcmc.run(rng_key, ds=ds_sel, extra_fields=('potential_energy',))
+
+import pickle
+
+pickle.dump(model, open("model_test.p", "wb"))
+
+m = pickle.load(open("model_test.p", "rb"))
+
+m
+
+# ?pickle.load
+
+# +
+samples = mcmc.get_samples(group_by_chain=False)
+summary_dict = summary(mcmc.get_samples(group_by_chain=True))
+posterior_predictive = numpyro.infer.Predictive(model, samples)(jax.random.PRNGKey(1),
+                                                                ds_sel)
+prior_predictive = numpyro.infer.Predictive(model, 
+                                            num_samples=1000)(PRNGKey(2), ds_sel)
+
+i8data = az.from_numpyro(mcmc, 
+        coords={'bait': ['CBFB', 'CUL5', 'ELOB'], 'condition': ds_sel.condition.values,
+                'rrep': ds_sel.rrep.values,
+                'preyu': ds_sel.preyu.values[0:prey_max]},
+        dims={'alpha': ['bait', 'condition', 'rrep'],
+              'beta': ['preyu', 'bait', 'condition', 'rrep'],
+              'epsilon': ['preyu', 'bait', 'condition', 'rrep']})
+# -
+
+az.plot_trace(i8data.sample_stats['lp'])
+
+i8data.sel(bait='CBFB', preyu='PEBB', condition='wt')
+
+bait = 'CUL5'
+preyu='PEBB'
+condition = 'wt'
+az.plot_trace(i8data.posterior.sel(bait=bait, condition=condition, preyu='CUL5'), 
+              var_names=['epsilon', 'alpha', 'beta'])
+
+az.plot_trace((i8data.posterior['alpha'] * i8data.posterior['beta']).sel(condition=condition, preyu='CUL5',
+            bait=bait))
+
+az.plot_trace(i8data.posterior['beta'].sel(bait='CBFB', preyu='vifprotein', condition='wt'))
+
+ds_sel.sel(preyu=ds_sel.preyu[0:prey_max])
+
+x = np.arange(0, 3, 0.1)
+plt.plot(x, np.exp(dist.HalfNormal(scale=1).log_prob(x)))
+
+df_new.sort_values('rMax', ascending=False).loc[:,['bait']+ rsel + csel].iloc[0:50]
+
+i8data.posterior
+
+nuts_kernal = numpyro.infer.NUTS(model8)
+mcmc = numpyro.infer.MCMC(nuts_kernal, num_warmup=1000, num_samples=1000, thinning=1)
+rng_key = jax.random.PRNGKey(13)
+mcmc.run(rng_key, purification=cul5_e, control=cul5_c, extra_fields=('potential_energy',))
+
+samples = mcmc.get_samples(group_by_chain=True)
+
+summary_dict = summary(samples)
+
+posterior_predictive = numpyro.infer.Predictive(model8, samples)(jax.random.PRNGKey(1), cul5_e, cul5_c)
+
+posterior_predictive['y_c'].shape
+
+# ?numpyro.infer.Predictive
+
+# ?numpyro.infer.Predictive
+
+m8data = az.from_numpyro(mcmc)
+
+az.plot_trace(m8data.sample_stats['lp'])
+
+# Background on Mass Spectrometry data analysis
+# - RawFile: Each RawFile corresponds to an individual experimental / technical replicate / run
+# - Condition: CBFB_mock, CBFB_wt, CUL5_vif are examples of conditions. A condition can be a mix of bait and 
+# infection. 
+# - The Experiemntal Design tables from https://ftp.pride.ebi.ac.uk/pride/data/archive/2019/04/PXD009012/ displayed in the cell below.
+# - Based on these table
+# - The MaxQuant evidence.txt -> spectral counts
+# - Based on the artMS github page https://github.com/biodavidjm/artMS/blob/9fca962bc5c36926d9eeeda1a32a8210ce665f7a/R/evidenceToSaintExpressFormat.R#L6 artMS uses the MS/MS count column to obtain the spectral counts
+# - One could use MS/MS Count, or MS1 Intensity
+# - artMS filters for potential contaminants.
+# - For
+#
+#
+# ## Key conclusions for modeling
+#
+
+base = "../../benchmark/data/cullin/PRIDE/PXD009012/"
+evidence = pd.concat(
+    [pd.read_csv(i, sep="\t") for i in [
+        base + "MaxQuant_results_CBFB_HIV_APMS/RH022_evidence.txt"]])#,
+        #base + "MaxQuant_results_CUL5_HIV_APMS/evidence.txt",
+        #base + "MaxQuant_results_ELOB_HIV_APMS/evidence.txt"]])
+
+proteinGroups = pd.read_csv(base + "MaxQuant_results_CBFB_HIV_APMS/proteinGroups.txt", sep="\t")
+
+proteinGroups.columns
+
+proteinGroups[proteinGroups['Protein IDs'] == 'vifprotein'].iloc[:, [0, 2, 3, 8, 9, 
+                                        10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 25, 33]]
+
+df_new.loc['vifprotein'][rsel]
+
+len(set(df_new[df_new['bait']=='CBFB']['Prey'].values))
+
+evidence[evidence['Proteins'] == 'A0FGR8']
+
+plt.hist(evidence['Length'].values, bins=45)
+plt.show()
+
+plt.hist(evidence['MS/MS Count'].values, bins=40)
+plt.xlabel("MS/MS Count")
+plt.show()
+print(f"Min Max {np.min(evidence['MS/MS Count'].values), np.max(evidence['MS/MS Count'].values)}")
+
+sel = evidence['Raw file'] == 'FU20151020-04'
+evidence[evidence['Proteins']=='vifprotein'].loc[sel, 
+            ['Peptide ID', 'MS/MS Count', 'Number of scans', 'Raw file']]
+
+evidence.columns
+
+plt.plot(evidence['Length'].values, evidence['MS/MS Count'].values, 'b.', alpha=0.01)
+plt.show()
+
+evidence.columns
+
+"""
+What is a protein's spectral count? The sum of peptide spectral counts.
+What is a peptide spectral count? The number of MS/MS spectra that map to the peptide.
+
+0 to 17, often 1 MS/MS spectra match to a peptide.
+
+"""
+
+"""
+Evidence.txt feature
+- Sequence - coverage
+- Length
+- Missed cleavages
+- RawFile - match the condition / experimental design
+
+"""
+
+
+plt.hist(evidence['Intensity'].values, bins=100, range=(0, 1e8))
+plt.show()
+
+
+
+
+evidence[evidence['Peptide ID']==0]['Intensity']
+
+del evidence
+
+len(set(df_new['Prey'].values))
+
+"""
+Raw             Condition   Replicate
+FU20151013-21	CBFB_HIVvif	1
+FU20151013-26	CBFB_HIVvif	2
+FU20151030-02	CBFB_HIVvif	3
+FU20151030-04	CBFB_HIVvif	4
+FU20151013-28	CBFB_HIVvif_MG132	1
+FU20151013-30	CBFB_HIVvif_MG132	2
+FU20151030-06	CBFB_HIVvif_MG132	3
+FU20151030-08	CBFB_HIVvif_MG132	4
+FU20151020-06	CBFB_HIVwt	1
+FU20151013-38	CBFB_HIVwt	2
+FU20151030-11	CBFB_HIVwt	3
+FU20151030-13	CBFB_HIVwt	4
+FU20151013-42	CBFB_HIVwt_MG132	1
+FU20151020-04	CBFB_HIVwt_MG132	2
+FU20151030-15	CBFB_HIVwt_MG132	3
+FU20151030-17	CBFB_HIVwt_MG132	4
+FU20151013-11	CBFB_mock	1
+FU20151013-13	CBFB_mock	2
+FU20151030-24	CBFB_mock	3
+FU20151030-26	CBFB_mock	4
+FU20151013-15	CBFB_mock_MG132	1
+FU20151013-17	CBFB_mock_MG132	2
+FU20151030-28	CBFB_mock_MG132	3
+FU20151030-30	CBFB_mock_MG132	4
+FU20151013-03	JPmock	1
+FU20151013-05	JPmock_MG132	1
+FU20151013-07	JPwt	1
+FU20151013-09	JPwt_MG132	1
+
+FU20151005-05	control_mock	1
+FU20151005-09	control_HIVwt	1
+FU20160111-03	control_mock	2
+FU20160111-07	control_HIVwt	2
+FU20151005-07	control_mock_MG132	1
+FU20151005-11	control_HIVwt_MG132	1
+FU20160111-05	control_mock_MG132	2
+FU20160111-09	control_HIVwt_MG132	2
+FU20151005-26	CUL5_HIVvif	1
+FU20151005-28	CUL5_HIVvif	2
+FU20160111-19	CUL5_HIVvif	3
+FU20160111-21	CUL5_HIVvif	4
+FU20151005-30	CUL5_HIVvif_MG132	1
+FU20151005-32	CUL5_HIVvif_MG132	2
+FU20160111-23	CUL5_HIVvif_MG132	3
+FU20160111-25	CUL5_HIVvif_MG132	4
+FU20151005-42	CUL5_HIVwt	1
+FU20151005-44	CUL5_HIVwt	2
+FU20160111-27	CUL5_HIVwt	3
+FU20160111-29	CUL5_HIVwt	4
+FU20151005-46	CUL5_HIVwt_MG132	1
+FU20151005-48	CUL5_HIVwt_MG132	2
+FU20160111-31	CUL5_HIVwt_MG132	3
+FU20160111-33	CUL5_HIVwt_MG132	4
+FU20151005-13	CUL5_mock	1
+FU20151005-15	CUL5_mock	2
+FU20160111-11	CUL5_mock	3
+FU20160111-13	CUL5_mock	4
+FU20151005-21	CUL5_mock_MG132	1
+FU20151005-23	CUL5_mock_MG132	2
+FU20160111-15	CUL5_mock_MG132	3
+FU20160111-17	CUL5_mock_MG132	4
+
+FU20170905-33	control_mock_MG132	1
+FU20170905-37	control_mock_MG132	2
+FU20170905-67	control_mock_MG132	3
+FU20170905-71	control_mock_MG132	4
+FU20170905-35	control_wt_MG132	1
+FU20170905-39	control_wt_MG132	2
+FU20170905-69	control_wt_MG132	3
+FU20170905-73	control_wt_MG132	4
+FU20170905-09	ELOB_HIVvif_MG132	1
+FU20170905-22	ELOB_HIVvif_MG132	2
+FU20170905-43	ELOB_HIVvif_MG132	3
+FU20170905-56	ELOB_HIVvif_MG132	4
+FU20170905-11	ELOB_HIVwt_MG132	1
+FU20170905-24	ELOB_HIVwt_MG132	2
+FU20170905-45	ELOB_HIVwt_MG132	3
+FU20170905-58	ELOB_HIVwt_MG132	4
+FU20170905-07	ELOB_mock_MG132	1
+FU20170905-20	ELOB_mock_MG132	2
+FU20170905-41	ELOB_mock_MG132	3
+FU20170905-54	ELOB_mock_MG132	4
+"""
+
+# +
+# (prey, cell_type, infection, replicates)
+# prey : 0...
+# bait : CBFB, CUL5, ELOB, LRR1, Parent
+# condition: wt, dvif, mock
+
+# Do bait share the same controls accross conditions?
+# wt & mock no
+# wt & vif yes
+# 
+
+# -
+
+dist.Poisson(jnp.ones((3000, 4, 3, 4))).batch_shape
+
+df_new[df_new['bait'] == 'ELOB'].loc['vifprotein',['bait', 'condition'] + csel]
+
+df_new[d]
+
+key = PRNGKey(13)
+dist.MultivariateNormal(jnp.array([1, 10, 4]), jnp.eye(3)).log_prob(jnp.array([1, 2, 3]).reshape((1, 3)))
+
+dist.Mu
+
+(1, 2) + (3,)
+
+df_new[df_new['PreyName']=='LLR1'].loc[:, csel]
 
 # +
 from_scores = True
@@ -2631,8 +3392,6 @@ axs[1].legend()
 fig.tight_layout()
 
 # -
-
-
 
 plt.plot(scores[:, 0], unk, 'k.', alpha=0.1)
 plt.xlabel('TP')
