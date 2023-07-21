@@ -3227,9 +3227,13 @@ def model_data_from_ds(ds):
     return data
     
     
+# -
+
+len(data.test)
+
 
 # +
-def zero_inflated_poisson(model_data):
+def zero_inflated_poisson(model_data, observed=True):
     
     # Place replicates on leftmost
     data = model_data.transpose('rep', 'preyu', 'bait', 'condition', 'test')
@@ -3240,85 +3244,266 @@ def zero_inflated_poisson(model_data):
     n_rep = len(data.rep)
     n_test = len(data.test)
     
-    batch_shape = (n_prey, n_bait, n_infect, n_test)
+    batch_shape =         (n_prey, n_bait, n_infect, n_test)
+    sample_shape = (n_rep, n_prey, n_bait, n_infect, n_test)
+    
     lam_hyper = jnp.ones(batch_shape) * 200
     
     beta_alpha_hyper = jnp.ones(batch_shape) * 2.3
-    beta_beta_hyper = jnp.ones(batch_shape) * 2.0
+    beta_beta_hyper =  jnp.ones(batch_shape) * 2.0
     
-    pi = numpyro.sample('pi', 
-                        dist.Beta(
-                            beta_alpha_hyper, 
-                            beta_beta_hyper
-                        )
-                       )
+    if observed:
+        data = data.values
+        assert data.shape == sample_shape
+    else:
+        data = None
     
-    
-    lambda_ = numpyro.sample('lam', 
-                             dist.HalfNormal(
-                                 lam_hyper
-                             )
-                            )
-    
-    numpyro.sample('sc', 
-                   dist.ZeroInflatedPoisson(
-                       gate=pi,
-                       rate=lambda_), 
-                   obs=data.values
-                  )
-    
-    
+    #with numpyro.plate("rep_dim", n_rep):
+    pi = numpyro.sample('pi', dist.Beta(beta_alpha_hyper, beta_beta_hyper))
+    lambda_ = numpyro.sample('lam', dist.HalfNormal(lam_hyper))
+    numpyro.sample('sc', dist.ZeroInflatedPoisson(gate=pi, rate=lambda_), 
+                   sample_shape = (n_rep,), obs=data)
     
 def run_mcmc(rng_key, model, model_data, num_samples, num_warmup, 
-             extra_fields=('potential_energy','diverging')):
+             extra_fields=('potential_energy','diverging'), thinning=1):
     kernel = numpyro.infer.NUTS(model)
-    mcmc = MCMC(kernel, num_warmup=num_warmup, num_samples=num_samples)
+    mcmc = MCMC(kernel, num_warmup=num_warmup, num_samples=num_samples, thinning=thinning)
     mcmc.run(rng_key, model_data, extra_fields=extra_fields)
     
     return mcmc
 
-def posterior_predictive_dist(rng_key, model, model_data, mcmc, num_warmup=500):
+def posterior_predictive_dist(rng_key, model, model_data, mcmc):
     samples = mcmc.get_samples()
-    return numpyro.infer.Predictive(model, samples, num_warmup=num_wamup)(rng_key, model_data)
+    return numpyro.infer.Predictive(model, samples)(rng_key, model_data)
 
-def prior_predictive_dist(rng_key, model, model_data, num_wamup=500, num_samples=1000):
-    return numpyro.infer.Predictive(model, num_samples=num_samples, num_warmup=num_warmup)(rng_key, model_data)
+def prior_predictive_dist(rng_key, model, model_data, num_samples=1000):
+    return numpyro.infer.Predictive(model, num_samples=num_samples)(rng_key, model_data)
 
+def get_summary_stats(mcmc):
+    sd = summary(mcmc.get_samples())
+    return {'n_eff': sd[key]['n_eff'] for key in sd.keys()} | {'r_hat': sd[key]['r_hat'] for key in sd}
+    
 
-
+def predictive_check(T, predictive, obs=None, vectorize=True):
+    """
+    T: mean, var, min, max, max_min_diff
+    """
+    
+    Tpred = xr.apply_ufunc(T, predictive, input_core_dims=[["rep"]], vectorize=vectorize)
+    
+    if obs is not None:
+        Tobs = xr.apply_ufunc(T, obs, input_core_dims=[["rep"]], vectorize=vectorize)
+    else:
+        Tobs = None
+    
+    return Tpred, Tobs
+    
+    
+def av_pred_hist(ax, idata, kind='post', y_key='sc'):
+    obs = idata.observed_data
+    if kind == 'post':
+        pred = idata.posterior_predictive
+    elif kind == 'prior':
+        pred = idata.prior_predictive
+        
+    ax.hist(pred[y_key])
+        
+    
+    
 
     
     
+# -
+
+data.transpose('rep', 'preyu', 'bait', 'condition', 'test')
+
+# +
+# Prior and posterior predictive check example
+# Checks of simulation
+
+
+def predictive_hist(ax, samples, observed, bins=100, vmin=0, vmax=1):
+    ax.hist(samples, bins=bins)
+    ax.vlines(observed, vmin, vmax, 'r')
+    return ax
+
+
+
+# -
+
+def gpt_model(data, observed=True):
+    
+    
+    batch_shape =     (10, 3, 3, 2)
+    sample_shape = (4, 10, 3, 3, 2)
+    assert data.shape == sample_shape
+    if not observed:
+        data = None
+        
+    with numpyro.plate('rep', 4):
+        mu = numpyro.sample('mu', dist.Beta(jnp.ones(batch_shape), jnp.ones(batch_shape)))
+        sigma = numpyro.sample('sigma', dist.HalfNormal(jnp.ones(batch_shape)))
+        numpyro.sample('y', dist.ZeroInflatedPoisson(gate=mu, rate=sigma), obs=data)
+
+
+numpyro.render_model(gpt_model, model_args=(jnp.ones((4, 10, 3, 3, 2)), False), 
+                     render_distributions=True, render_params=True)
 
 # +
 data = model_data_from_ds(ds)
+model = zero_inflated_poisson
 start=0
-end=100
+end=10
 data = data.sel(preyu=data.preyu[start:end], bait=['CBFB', 'CUL5', 'ELOB'])
 
+
+
+numpyro.render_model(model, model_args=(data, True), render_distributions=True, render_params=True)
+
+# +
 #data = model_data.sel(bait=['CBFB', 'CUL5', 'ELOB'])
+num_samples = 1000
 mcmc = run_mcmc(PRNGKey(0), 
-                zero_inflated_poisson, 
+                model, 
                 data,
-                num_samples=1000,
+                num_samples=num_samples,
                 num_warmup=500)
 
 dims = {"lam": ["preyu", "bait", "condition", "test"],
         "pi": ["preyu", "bait", "condition", "test"],
         "sc": ["rep", "preyu", "bait", "condition", "test"]}
 
+coords = {key: val for key, val in coords.items()} | {'draw': np.arange(0, num_samples)}
+# -
+
+posterior_predictive = numpyro.infer.Predictive(model,
+                        posterior_samples=mcmc.get_samples())(
+    PRNGKey(1), data, observed=False
+)
+
+posterior_predic
+
+samples = mcmc.get_samples()
+
+samples['lam'].shape
+
+posterior_predictive['sc'].shape
+
+# +
+prior_predictive = numpyro.infer.Predictive(model, num_samples=4000)(
+    PRNGKey(2), data, observed=False
+)
+
+#prior_predictive = prior_predictive_dist(PRNGKey(2), model, data)
+# -
 
 
 
 # +
-coords = data.coords
 
-izdata = az.from_numpyro(mcmc, coords=coords, dims=dims)
+izdata = az.from_numpyro(mcmc, 
+                        coords=coords, 
+                        dims=dims,
+                        pred_dims = {'sc': ['draw', 'preyu', 'bait', 'condition', 'test']},)
+                        #posterior_predictive=posterior_predictive,)
+                        #prior=prior_predictive)
 # -
 
-az.plot_trace(izdata.sample_stats['lp'])
+az.from_numpyro(posterior_predictive=posterior_predictive,
+               dims=dims,
+               coords=coords,
+               pred_dims = {'sc':['draw', 'preyu', 'bait', 'condition', 'test']})
 
-data = model_data_from_ds(ds)
+posterior_predictive['sc'].shape
+
+xr.DataArray(posterior_predictive['sc'])
+
+dims
+
+
+
+posterior_predictive['sc'].shape
+
+izdata
+
+dims
+
+az.plot_trace(izdata.sample_stats, var_names=['lp'])
+plt.tight_layout()
+
+var_pp, var_obs = predictive_check(np.var, izdata.prior_predictive['sc'].sel(chain=0), 
+                                   izdata.observed_data['sc'])
+var_Pp, _ = predictive_check(np.var, izdata.posterior_predictive['sc'].sel(chain=0))
+
+
+
+izdata.observed_data['sc'].sel(bait='CUL5',
+                                     condition='wt',
+                                     test=True, preyu=preyu[1])
+
+preyu = izdata.posterior_predictive.preyu
+izdata.posterior_predictive['sc'].sel(chain=0, bait='CUL5',
+                                     condition='wt',
+                                     test=True, preyu=preyu[1])
+
+# +
+fig, ax = plt.subplots(1, 1)
+
+ax.hist(np.ravel(izdata.sel(bait='CUL5', 
+                            preyu=izdata.posterior.preyu[0], 
+                            condition='wt', test=True).posterior_predictive['sc']))
+# -
+
+
+
+idata.preyu
+
+# +
+fig, ax = plt.subplots(1, 1)
+
+predictive_hist(ax, izdata.posterior_predictive['sc'].sel(bait='CUL5', 
+                                                  preyu=izdata.posterior_predictive.preyu[0],
+                                                  condition='wt', test=True),
+               observed=izdata.observed_data['sc'].sel)
+# -
+
+posterior_predictive
+
+order = ('preyu', 'bait', 'condition', 'test')
+plt.errorbar(np.ravel(var_obs.transpose(*order)),
+             np.ravel(var_pp.mean('draw').transpose(*order)),
+             yerr=np.ravel(var_pp.std('draw').transpose(*order)), fmt='b.', alpha=0.1)
+#plt.plot(np.ravel(var_obs.transpose(*order)),
+#         np.ravel(var_Pp.mean('draw').transpose(*order)), 'r.', alpha=0.1)
+plt.show()
+
+
+
+izdata.posterior_predictive['sc'].sel(chain=0)
+
+izdata.observed_data['sc']
+
+sd = get_summary_stats(mcmc)
+plt.plot(np.ravel(sd['n_eff']), np.ravel(sd['r_hat']), 'b.', alpha=0.5)
+plt.xlabel('N effictive samples')
+plt.ylabel("R hat")
+plt.show()
+print("")
+
+sd['n_eff']
+
+sd['lam'].keys()
+
+az.plot_trace(izdata.posterior.sel(bait='CUL5'))
+plt.tight_layout()
+
+izdata.posterior.condition
+
+sd = summary(mcmc.get_samples())
+
+xr.Dataset(summary(mcmc.get_samples()))
+
+sd['lam']['r_hat'].shape
 
 data.preyu
 
