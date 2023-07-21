@@ -3025,9 +3025,17 @@ def model8(ds, prey_max=None):
     max_obs = jnp.max(obs_bait_counts)
     #alpha_hyper_prior = jnp.ones(obs_bait_counts.shape) * max_obs
     
-    alpha_hyper_prior = jnp.ones(obs_bait_counts.shape) * obs_bait_counts.mean(axis=2)
+    mean_ = obs_bait_counts.mean(axis=2)
+    alpha_hyper_prior = jnp.zeros(alpha_batch_shape)
     
-    alpha = numpyro.sample('alpha', dist.HalfNormal(alpha_hyper_prior, 20)) # rate
+    assert mean_.shape == (n_bait, n_infections), mean_.shape
+    
+    for i in range(n_replicates):
+        alpha_hyper_prior = alpha_hyper_prior.at[:, :, i].set(mean_)
+    
+    alpha_hyper_prior = jnp.array(alpha_hyper_prior)
+    
+    alpha = numpyro.sample('alpha', dist.Normal(alpha_hyper_prior, 20)) # rate
     numpyro.sample('bait_obs', dist.Poisson(alpha), obs=obs_bait_counts)
     
     # Sample betas: prey coefficient
@@ -3044,10 +3052,6 @@ def model8(ds, prey_max=None):
     epsilon = numpyro.sample('epsilon', dist.HalfNormal(epsilon_hyper_prior)) # Same prior as alpha
     numpyro.sample('obs_ctrl', dist.Poisson(epsilon), obs=obs_c) # Independant of alpha * beta
     
-
-jnp.ones((10, 7, 3)) * jnp.mean(jnp.ones((10, 7, 3)), axis=2)
-
-jnp.mean(jnp.ones((10, 7, 3)), axis=2).repeat(3)
 
 # +
 # Compare control counts
@@ -3074,28 +3078,47 @@ for bait_test in ['CBFB', 'CUL5', 'ELOB']:
 # WT & VIF Share most control
 # -
 
-jnp.ones((100, 5, 3, 4)) * jnp.ones((3, 5, 4))
-
 ds_sel = ds.sel(bait=['CBFB', 'CUL5', 'ELOB'])#, preyu=['PEBB', 'CUL5', 'ELOB', 'vifprotein'])
 
 rng_key = PRNGKey(13)
-prey_max=1000
+prey_max=100
 model = partial(model8, prey_max=prey_max)
+
+numpyro.render_model(model8, model_args=(ds_sel, None), render_distributions=True, render_params=True)
+
+
+
 #model = model8
 nuts_kernal = numpyro.infer.NUTS(model)
 mcmc = numpyro.infer.MCMC(nuts_kernal, num_warmup=1000, num_samples=1000, thinning=1)
 rng_key = jax.random.PRNGKey(13)
-mcmc.run(rng_key, ds=ds_sel, extra_fields=('potential_energy',))
+mcmc.run(rng_key, ds_sel, extra_fields=('potential_energy',))
 
-import pickle
+# +
+# Toy mixture model with discrete enumeration
+
+     
+
+import argparse
+
+import matplotlib.pyplot as plt
+
+from jax import random
+import jax.numpy as jnp
+import optax
+
+import numpyro
+from numpyro import handlers
+from numpyro.contrib.funsor import config_enumerate
+import numpyro.distributions as dist
+from numpyro.distributions import constraints
+from numpyro.infer import SVI, TraceEnum_ELBO
+from numpyro.ops.indexing import Vindex
+# -
 
 pickle.dump(model, open("model_test.p", "wb"))
 
 m = pickle.load(open("model_test.p", "rb"))
-
-m
-
-# ?pickle.load
 
 # +
 samples = mcmc.get_samples(group_by_chain=False)
@@ -3136,7 +3159,290 @@ plt.plot(x, np.exp(dist.HalfNormal(scale=1).log_prob(x)))
 
 df_new.sort_values('rMax', ascending=False).loc[:,['bait']+ rsel + csel].iloc[0:50]
 
-i8data.posterior
+# +
+"""
+Example of Mixed Discrete and continuous HMC
+"""
+
+from numpyro.infer import MixedHMC, HMC, MCMC
+def mixed_model(probs, locs):
+    c = numpyro.sample("c", dist.Categorical(probs))
+    numpyro.sample("x", dist.Normal(locs[c], 0.5))
+
+probs = jnp.array([0.15, 0.3, 0.3, 0.25])
+locs = jnp.array([-2, 0, 2, 4])
+numpyro.render_model(mixed_model, model_args=(probs, locs), render_distributions=True, render_params=True)
+
+
+# +
+# Prepare Model Data
+
+def model_data_from_ds(ds):
+    preyu = ds.preyu # Prey Dimension
+    bait = ds.bait   # Bait dimension
+    condition = ds.condition # infection dimension
+    rep = np.arange(0, 4) # replicate dimension
+    test = [True, False]  # control vs treatment dimension
+    
+    n_prey = len(preyu)
+    n_bait = len(bait)
+    n_cond = len(condition)
+    n_rep = len(rep)
+    n_test = len(test)
+    
+    
+    coords = {'preyu': preyu, 'bait': bait, 'condition': condition,
+             'rep': rep, 'test': test}
+    
+    dims = ['preyu', 'bait', 'condition', 'rep', 'test']
+    
+    shape = (n_prey, n_bait, n_cond, n_rep, n_test)
+    data = np.zeros(shape, dtype=np.int64)
+    
+    
+    
+    data = xr.DataArray(data=data, coords=coords, dims=dims)
+    
+    # Assign the data
+    ds = ds.transpose('preyu', 'bait', 'condition', 'rrep', 'crep', 'preyv')
+    data = data.transpose('preyu', 'bait', 'condition', 'rep', 'test')
+    
+    bait2_controls = {'CBFB': [0, 1, 2, 3],
+                      'CUL5': [4, 5, 6, 7],
+                      'ELOB': [8, 9, 10, 11],
+                      'LRR1': [8, 9, 10, 11]} # Assume that ELOB and LRR1 share control based on GDE counts
+    # Don't plot these controls twice
+    
+    
+    for bait in data.bait.values:
+        for test in [True, False]:
+            key = 'CRL_E' if test else 'CRL_C'
+            rep_cols = [0, 1, 2, 3] if test else bait2_controls[bait]
+            data.loc[:, bait, :, :, test] = ds[key].loc[:, bait, :, :].values[:, :, rep_cols]
+    
+    assert np.sum(data.sel(bait='LRR1', condition=['wt', 'vif'])) == 0
+    data.loc[:, 'LRR1', 'wt', :, :] = -100   # These experiments weren't performed 
+    data.loc[:, 'LRR1', 'vif', :, :] = -100  # 
+    
+    return data
+    
+    
+
+# +
+def zero_inflated_poisson(model_data):
+    
+    # Place replicates on leftmost
+    data = model_data.transpose('rep', 'preyu', 'bait', 'condition', 'test')
+    
+    n_prey = len(data.preyu)
+    n_bait = len(data.bait)
+    n_infect = len(data.condition)
+    n_rep = len(data.rep)
+    n_test = len(data.test)
+    
+    batch_shape = (n_prey, n_bait, n_infect, n_test)
+    lam_hyper = jnp.ones(batch_shape) * 200
+    
+    beta_alpha_hyper = jnp.ones(batch_shape) * 2.3
+    beta_beta_hyper = jnp.ones(batch_shape) * 2.0
+    
+    pi = numpyro.sample('pi', 
+                        dist.Beta(
+                            beta_alpha_hyper, 
+                            beta_beta_hyper
+                        )
+                       )
+    
+    
+    lambda_ = numpyro.sample('lam', 
+                             dist.HalfNormal(
+                                 lam_hyper
+                             )
+                            )
+    
+    numpyro.sample('sc', 
+                   dist.ZeroInflatedPoisson(
+                       gate=pi,
+                       rate=lambda_), 
+                   obs=data.values
+                  )
+    
+    
+    
+def run_mcmc(rng_key, model, model_data, num_samples, num_warmup, 
+             extra_fields=('potential_energy','diverging')):
+    kernel = numpyro.infer.NUTS(model)
+    mcmc = MCMC(kernel, num_warmup=num_warmup, num_samples=num_samples)
+    mcmc.run(rng_key, model_data, extra_fields=extra_fields)
+    
+    return mcmc
+
+def posterior_predictive_dist(rng_key, model, model_data, mcmc, num_warmup=500):
+    samples = mcmc.get_samples()
+    return numpyro.infer.Predictive(model, samples, num_warmup=num_wamup)(rng_key, model_data)
+
+def prior_predictive_dist(rng_key, model, model_data, num_wamup=500, num_samples=1000):
+    return numpyro.infer.Predictive(model, num_samples=num_samples, num_warmup=num_warmup)(rng_key, model_data)
+
+
+
+
+    
+    
+
+# +
+data = model_data_from_ds(ds)
+start=0
+end=100
+data = data.sel(preyu=data.preyu[start:end], bait=['CBFB', 'CUL5', 'ELOB'])
+
+#data = model_data.sel(bait=['CBFB', 'CUL5', 'ELOB'])
+mcmc = run_mcmc(PRNGKey(0), 
+                zero_inflated_poisson, 
+                data,
+                num_samples=1000,
+                num_warmup=500)
+
+dims = {"lam": ["preyu", "bait", "condition", "test"],
+        "pi": ["preyu", "bait", "condition", "test"],
+        "sc": ["rep", "preyu", "bait", "condition", "test"]}
+
+
+
+
+# +
+coords = data.coords
+
+izdata = az.from_numpyro(mcmc, coords=coords, dims=dims)
+# -
+
+az.plot_trace(izdata.sample_stats['lp'])
+
+data = model_data_from_ds(ds)
+
+data.preyu
+
+# ?dist.HalfNormal
+
+data.sel(bait='LRR1', condition='wt')
+
+set(df_new[df_new['bait']=='LRR1']['condition'])
+
+data.sel(preyu='CUL2', bait='LRR1', condition='mock')
+
+df_new.loc['GDE',['bait', 'condition'] + rsel + csel]
+
+df_new[df_new['bait']=='LRR1'].sort_values('rVar', ascending=False)[rsel + csel].iloc[0:50]
+
+df_new['bait'] 
+
+data = model_data_from_ds(ds)
+
+for bait in data.bait.values:
+    print(bait)
+
+data.loc[:, 'CBFB', :, :, True]
+
+data.loc[:, 'ELOB', :, :, :]
+
+data.transpose('preyu', 'rep', 'test', 'condition', 'bait')
+
+# +
+plt.hist(np.ravel(ds['CRL_C'].values), bins=100, alpha=0.5, range=(0, 50))
+plt.hist(np.ravel(ds['CRL_E'].values), bins=100, alpha=0.9, range=(0, 50))
+
+plt.show()
+# -
+
+
+
+# +
+# Pi, the probability of extra zeros
+# 
+
+
+def zero_inflated_model(obs):
+    
+    pi = numpyro.sample('pi', dist.Beta(2.3, 2))
+    alpha = numpyro.sample('alpha', dist.HalfNormal(50))
+    with numpyro.plate("obs", obs.shape[0]):
+        numpyro.sample('z', dist.ZeroInflatedPoisson(pi, rate=alpha), obs=obs)
+        
+    
+    
+
+# +
+def zero_inflated_spectral_counts(obs_e, obs_c):
+    """
+    obs n prey x n replicates
+    
+    pi or gate parameter : Proportion of 
+    """
+    n_prey, n_rep  = obs_e.shape
+    assert n_rep == 4
+    assert obs_e.shape == obs_c.shape
+    
+    data = np.zeros((n_rep, n_prey, 2))
+    data[:,:, 0] = obs_c.T
+    data[:,:, 1] = obs_e.T
+    data = jnp.array(data, dtype=int)
+    
+    # observed shape: (prey, replicate, experiment)
+    pi = numpyro.sample("pi", dist.Beta(jnp.ones((n_prey, 2)) * 2.0, jnp.ones((n_prey, 2)) * 2.3))
+    #pi_e = numpyro.sample("pi_e", dist.Beta(jnp.ones(n_prey) * 2.0, jnp.ones(n_prey) * 2.3))
+    #epsilon = numpyro.sample("epsilon", dist.HalfNormal(jnp.ones(n_prey) * 50))
+    
+    lambda_hyper = np.ones((n_prey, 2)) * 100
+    lambda_hyper[:, 0] = 50
+    lambda_hyper = jnp.array(lambda_hyper)
+    
+    lambda_ = numpyro.sample("lam", dist.HalfNormal(lambda_hyper))
+    #with numpyro.plate("data", n_rep):
+    numpyro.sample("sc", dist.ZeroInflatedPoisson(gate=pi, rate=lambda_), obs=data)
+        
+        
+    
+# -
+
+
+
+numpyro.render_model(zero_inflated_spectral_counts,
+                    model_args=(obs_e, obs_c),
+                    render_params=True,
+                    render_distributions=True)
+
+obs_e = df_new.loc[:, rsel].values[0:100]
+obs_c = df_new.loc[:, c1].values[0:100]
+k = numpyro.infer.NUTS(zero_inflated_spectral_counts)
+mcmc = MCMC(k, num_warmup=500, num_samples=1000)
+mcmc.run(PRNGKey(1), obs_e, obs_c)
+
+mcmc.print_summary()
+
+samples = mcmc.get_samples()
+
+mcmc.print_summary()
+
+dist.ZeroInflatedPoisson(0.1, 5).sample(key)
+
+numpyro.render_model(zero_inflated_model, model_args=obs)
+
+x = np.arange(0, 1, 0.01)
+y = np.exp(dist.Beta(2.0, 2.3).log_prob(x))
+plt.plot(x, y)
+
+kernel = MixedHMC(HMC(mixed_model, trajectory_length=1.2), num_discrete_updates=20)
+mcmc = MCMC(kernel, num_warmup=10000, num_samples=10000)
+mcmc.run(jax.random.PRNGKey(0), probs, locs)
+
+jsp.special.expit
+
+samples_m = mcmc.get_samples()
+mcmc.print_summary()
+
+numpyro.infer.NUTS
+
+samples_m
 
 nuts_kernal = numpyro.infer.NUTS(model8)
 mcmc = numpyro.infer.MCMC(nuts_kernal, num_warmup=1000, num_samples=1000, thinning=1)
@@ -3150,10 +3456,6 @@ summary_dict = summary(samples)
 posterior_predictive = numpyro.infer.Predictive(model8, samples)(jax.random.PRNGKey(1), cul5_e, cul5_c)
 
 posterior_predictive['y_c'].shape
-
-# ?numpyro.infer.Predictive
-
-# ?numpyro.infer.Predictive
 
 m8data = az.from_numpyro(mcmc)
 
