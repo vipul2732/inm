@@ -3231,6 +3231,12 @@ def model_data_from_ds(ds):
 
 len(data.test)
 
+x = np.arange(0, 1, 0.01)
+y = np.exp(dist.Beta(1.1, 4.0).log_prob(x))
+plt.plot(x, y)
+plt.text(0.8, 2.0, "1.1 4.0")
+plt.savefig("Beta1-1_4-0.png", dpi=notebook_dpi)
+
 
 # +
 def zero_inflated_poisson(model_data, observed=True):
@@ -3247,10 +3253,10 @@ def zero_inflated_poisson(model_data, observed=True):
     batch_shape =         (n_prey, n_bait, n_infect, n_test)
     sample_shape = (n_rep, n_prey, n_bait, n_infect, n_test)
     
-    lam_hyper = jnp.ones(batch_shape) * 200
+    lam_hyper = jnp.ones(batch_shape) * 100
     
-    beta_alpha_hyper = jnp.ones(batch_shape) * 2.3
-    beta_beta_hyper =  jnp.ones(batch_shape) * 2.0
+    beta_alpha_hyper = jnp.ones(batch_shape) * 1.1
+    beta_beta_hyper =  jnp.ones(batch_shape) * 4.0
     
     if observed:
         data = data.values
@@ -3263,6 +3269,21 @@ def zero_inflated_poisson(model_data, observed=True):
     lambda_ = numpyro.sample('lam', dist.HalfNormal(lam_hyper))
     numpyro.sample('sc', dist.ZeroInflatedPoisson(gate=pi, rate=lambda_), 
                    sample_shape = (n_rep,), obs=data)
+    
+def mixture_example(data):
+    K = 2 # Two mixture components
+    weights = numpyro.sample("weights", dist.Dirichlet(0.5 * jnp.ones(K)))
+    scale = numpyro.sample("scale", dist.LogNormal(0.0, 2.0))
+    with numpyro.plate("components", K):
+        locs = numpyro.sample("locs", dist.Normal(0.0, 10))
+        
+    with numpyro.plate("data", len(data)):
+        # Local variables
+        
+        assignment = numpyro.sample("assignment", dist.Categorical(weights))
+        numpyro.sample("obs", dist.Normal(locs[assignment], scale), obs=data)
+        
+
     
 def run_mcmc(rng_key, model, model_data, num_samples, num_warmup, 
              extra_fields=('potential_energy','diverging'), thinning=1):
@@ -3313,9 +3334,6 @@ def av_pred_hist(ax, idata, kind='post', y_key='sc'):
 
     
     
-# -
-
-data.transpose('rep', 'preyu', 'bait', 'condition', 'test')
 
 # +
 # Prior and posterior predictive check example
@@ -3350,14 +3368,53 @@ numpyro.render_model(gpt_model, model_args=(jnp.ones((4, 10, 3, 3, 2)), False),
                      render_distributions=True, render_params=True)
 
 # +
+# mixture example
+mixture_data = jnp.array([0.0, 1.0, 10.0, 11.0, 12.0])
+
+numpyro.render_model(mixture_example, model_args=(mixture_data,), render_distributions=True, render_params=True)
+# -
+
+x = np.arange(0, 10, 0.1)
+y = np.exp(dist.Dirichlet(jnp.ones(1) * 0.5).log_prob(x))
+plt.plot(x, y, 'k.')
+
+dist.LogNormal(0., 2.).support
+
+y = np.exp(dist.LogNormal(0.0, 2.0).log_prob(x))
+plt.plot(x, y)
+
+mcmc = run_mcmc(rng_key, mixture_example, mixture_data, num_samples=500, num_warmup=500)
+
+mixture_samples = mcmc.get_samples()
+
+X, Y = mixture_samples['locs'].T
+
+# +
+plt.figure(figsize=(8, 8), dpi=100).set_facecolor("white")
+h, xs, ys, image = plt.hist2d(X, Y, bins=[20, 20])
+
+plt.contour(
+    jnp.log(h + 3).T,
+    extent=[xs.min(), xs.max(), ys.min(), ys.max()],
+    colors="white",
+    alpha=0.8,
+)
+plt.title("Posterior density as estimated by collapsed NUTS")
+plt.xlabel("loc of component 0")
+plt.ylabel("loc of component 1")
+plt.tight_layout()
+plt.show()
+# -
+
+# ?dist.Mixture
+
+dist.Beta(jnp.ones(2), jnp.ones(2)).to_event(1).event_shape
+
 data = model_data_from_ds(ds)
 model = zero_inflated_poisson
 start=0
-end=10
+end=1000
 data = data.sel(preyu=data.preyu[start:end], bait=['CBFB', 'CUL5', 'ELOB'])
-
-
-
 numpyro.render_model(model, model_args=(data, True), render_distributions=True, render_params=True)
 
 # +
@@ -3369,11 +3426,7 @@ mcmc = run_mcmc(PRNGKey(0),
                 num_samples=num_samples,
                 num_warmup=500)
 
-dims = {"lam": ["preyu", "bait", "condition", "test"],
-        "pi": ["preyu", "bait", "condition", "test"],
-        "sc": ["rep", "preyu", "bait", "condition", "test"]}
 
-coords = {key: val for key, val in coords.items()} | {'draw': np.arange(0, num_samples)}
 # -
 
 posterior_predictive = numpyro.infer.Predictive(model,
@@ -3381,52 +3434,26 @@ posterior_predictive = numpyro.infer.Predictive(model,
     PRNGKey(1), data, observed=False
 )
 
-posterior_predic
-
-samples = mcmc.get_samples()
-
-samples['lam'].shape
-
-posterior_predictive['sc'].shape
-
 # +
-prior_predictive = numpyro.infer.Predictive(model, num_samples=4000)(
+prior_predictive = numpyro.infer.Predictive(model, num_samples=num_samples)(
     PRNGKey(2), data, observed=False
 )
 
 #prior_predictive = prior_predictive_dist(PRNGKey(2), model, data)
-# -
-
-
 
 # +
+dims = {"lam": ["preyu", "bait", "condition", "test"],
+        "pi": ["preyu", "bait", "condition", "test"],
+        "sc": ["rep", "preyu", "bait", "condition", "test"]}
 
+coords = {key: val for key, val in data.coords.items()} | {'draw': np.arange(0, num_samples)}
 izdata = az.from_numpyro(mcmc, 
                         coords=coords, 
                         dims=dims,
-                        pred_dims = {'sc': ['draw', 'preyu', 'bait', 'condition', 'test']},)
-                        #posterior_predictive=posterior_predictive,)
-                        #prior=prior_predictive)
+                        pred_dims = {'sc': ['draw', 'preyu', 'bait', 'condition', 'test']},
+                        posterior_predictive=posterior_predictive,
+                        prior=prior_predictive)
 # -
-
-az.from_numpyro(posterior_predictive=posterior_predictive,
-               dims=dims,
-               coords=coords,
-               pred_dims = {'sc':['draw', 'preyu', 'bait', 'condition', 'test']})
-
-posterior_predictive['sc'].shape
-
-xr.DataArray(posterior_predictive['sc'])
-
-dims
-
-
-
-posterior_predictive['sc'].shape
-
-izdata
-
-dims
 
 az.plot_trace(izdata.sample_stats, var_names=['lp'])
 plt.tight_layout()
@@ -3435,7 +3462,127 @@ var_pp, var_obs = predictive_check(np.var, izdata.prior_predictive['sc'].sel(cha
                                    izdata.observed_data['sc'])
 var_Pp, _ = predictive_check(np.var, izdata.posterior_predictive['sc'].sel(chain=0))
 
+# +
+var_pp = jax.jit(lambda x: jnp.var(x, axis=1))(izdata.prior_predictive['sc'].sel(chain=0).values)
+var_Pp = jax.jit(lambda x: jnp.var(x, axis=1))(izdata.posterior_predictive['sc'].sel(chain=0).values)
+var_obs = jax.jit(lambda x: jnp.var(x, axis=0))(izdata.observed_data['sc'].values)
 
+var_pp = jax.jit(lambda x: jnp.mean(x, axis=0))(var_pp)
+var_Pp = jax.jit(lambda x: jnp.mean(x, axis=0))(var_Pp)
+#var_obs = jax.jit(lambda x: jnp.mean(x, axis=0))
+
+# +
+fig, ax = plt.subplots(1, 1)
+cumulative = False
+density=True
+nbins=100
+xlim = (0, 50)
+ylim= None
+hrange = (0, 200)
+
+if density:
+    ylabel= "Probability density"
+    
+def _helper(ax, x, color, alpha, label):
+    ax.hist(x, bins=nbins, density=density, cumulative=cumulative, label=label, alpha=alpha, color=color,
+           range=hrange)
+
+_helper(ax, np.ravel(izdata.prior_predictive['sc'].values), label='Prior Pred', color='k', alpha=0.8)
+_helper(ax, np.ravel(izdata.posterior_predictive['sc'].values), alpha=0.3, label='Post Pred', color='r')
+_helper(ax, np.ravel(izdata.observed_data['sc'].values), label="Obs", color='b', alpha=0.1)
+    
+ax.set_xlabel("Spectral count")
+ax.set_xlim(xlim)
+ax.set_ylim(ylim)
+ax.set_ylabel(ylabel)
+ax.legend()
+
+plt.show()
+plt.savefig("ZeroIPoissBeta11_4.png")
+# -
+
+
+
+def obs_scatter(o, pp, Pp, iz=True, xlabel="Observed sample variance", ylabel="Simluated mean sample variance"):
+    if iz:
+        o = np.ravel(obs.values)
+        pp = np.ravel(pp.mean('draw').values)
+        Pp = np.ravel(Pp.mean('draw').values)
+
+    fig, ax = plt.subplots(1, 1)
+    ax.plot(o, pp, 
+            'b.', alpha=0.1, label='Prior')
+
+    ax.plot(o, Pp,
+           'r.', alpha=0.1, label='Posterior')
+
+    ax.plot(o, o, label='y=x', color='grey', alpha=0.3)
+    ax.legend()
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    return fig, ax
+
+
+fig, ax = obs_scatter(np.ravel(var_obs), np.ravel(var_pp), np.ravel(var_Pp), iz=False)
+fig.savefig("ZeroIPoissBeta1-1_4_1000_prey.png", dpi=notebook_dpi)
+
+fig, ax = obs_scatter(np.ravel(var_obs), np.ravel(var_pp), np.ravel(var_Pp), iz=False)
+ax.set_ylim((0, 400))
+fig.savefig("ZeroIPoissBeta23_2_1000_preyZoom.png", dpi=notebook_dpi)
+
+
+# +
+@jax.jit
+def simulated_min_max_gap(x):
+    return jnp.max(x, axis=1) - jnp.min(x, axis=1)
+
+min_max_Pp = simulated_min_max_gap(izdata.posterior_predictive['sc'].sel(chain=0).values)
+min_max_pp = simulated_min_max_gap(izdata.prior_predictive['sc'].sel(chain=0).values)
+
+@jax.jit
+def observed_min_max_gap(x):
+    return jnp.max(x, axis=0) - jnp.min(x, axis=0)
+
+min_max_obs = observed_min_max_gap(izdata.observed_data['sc'].values)
+
+# +
+fig, ax = obs_scatter(np.ravel(min_max_obs), np.ravel(min_max_pp.mean(axis=0)), 
+                      np.ravel(min_max_Pp.mean(axis=0)), iz=False,
+                     xlabel="Observed max min gap", ylabel="Simulated mean max min gap")
+
+fig.savefig("ZeroIPoissBeta1-1_4_1000_prey_Max_min_gap.png", dpi=notebook_dpi)
+# -
+
+min_max_Pp.mean(axis=0)
+
+min_max_obs.shape
+
+var_pp.mean('draw').to_numpy().flatten()
+
+var_obs
+
+# +
+fig, ax = plt.subplots(1, 1)
+
+a = var_pp.isel(bait=0, condition=0, preyu=0, test=0).values
+b = var_Pp.isel(bait=0, condition=0, preyu=0, test=0).values
+ax.hist(np.ravel(a), bins=100, alpha=0.1)
+ax.hist(np.ravel(b), bins=100)
+ax.set_xlim(0, 100)
+ax.set_ylim(0, 50)
+plt.show()
+# -
+
+plt.hist(a, cumulative=True)
+plt.hist(b, color='C1', cumulative=True)
+plt.xlim(0, 100)
+
+b
+
+plt.hist(np.ones(100))
+plt.hist(np.ones(100), alpha=0.5)
+
+plt.hist
 
 izdata.observed_data['sc'].sel(bait='CUL5',
                                      condition='wt',
@@ -3816,6 +3963,16 @@ FU20170905-20	ELOB_mock_MG132	2
 FU20170905-41	ELOB_mock_MG132	3
 FU20170905-54	ELOB_mock_MG132	4
 """
+
+df_new[df_new['n_possible_first_tryptic_peptides']<50]
+
+plt.hist(df_new['aa_seq_len'], bins=100, range=(0, 2000))
+plt.show()
+
+plt.hist(np.ravel(df_new[rsel].values), range=(0, 50), bins=100)
+plt.show()
+
+np.min(df_new['n_possible_first_tryptic_peptides'])
 
 # +
 # (prey, cell_type, infection, replicates)
