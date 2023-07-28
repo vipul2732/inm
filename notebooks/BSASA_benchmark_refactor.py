@@ -58,8 +58,95 @@ from pathlib import Path
 
 
 # +
+def action_f(rng_key, df, start, stop):
+    print(start, stop)
+    return m5crop2idata(rng_key, df, start, stop)
+
+def bait_box_plot(ds, var='CRL_E', preysel=True, boxkwargs={}):
+    vals = []
+    z = [('CBFB', 'PEBB'), ('ELOB', 'ELOB'), ('CUL5', 'CUL5')]#, ('LRR1', 'LLR1')]
+    for i in z:
+        if preysel:
+            arr = np.ravel(ds.sel(bait=i[0], preyu=i[1])[var].values)
+        else:
+            arr = np.ravel(ds.sel(bait=i[0])[var].values)
+        vals.append(arr)
+    z.append(('LRR1', 'LLR1'))
+    arr = np.ravel(ds.sel(bait='LRR1', preyu='LLR1', condition='mock')[var].values)
+    vals.append(arr)
+    assert len(vals) == 4, len(vals)
+    if var == 'CRL_E' and preysel==False:
+        arr = np.ravel(ds.sel(bait='ELOB')['CRL_C'].values) # Bait can be any because control is similiar
+        vals.append(arr)
+        z.append('Parent')
+    sns.boxplot(vals, **boxkwargs)#, labels=['A'] * 4)
+    plt.title("Amount of Bait in own purification across 3 conditions")
+    plt.xticks(np.arange(len(vals)), [i[0] for i in z])
+    plt.ylabel("Spectral count")
+    plt.tight_layout()
+    save_plt()
+    plt.close()
+
 def colprint(name, value):
     print(f"N {name} {value}")
+
+def center_and_scale_predictor(y, shift=2):
+    assert y.ndim == 2
+    col_shape = (len(y), 1)
+    mean, var = np.mean(y, axis=1).reshape(col_shape), np.var(y, axis=1).reshape(col_shape)
+    var[var==0] = 1
+    y = ((y - mean) / var) + shift
+    return namedtuple('ParamScale', 'y mean var shift col_shape')(
+        y, mean, var, shift, col_shape)
+    
+def corr_action(df, col1, col2):
+    return sp.stats.pearsonr(df[col1].values, df[col2])
+
+def concat_inf(i1, i2, dim='irow', sample_stats = True):
+    assert i1 is not None
+    assert i2 is not None
+    inference_data = [i1, i2]
+    dim_concat = lambda key: xr.concat([i[key] for i in inference_data], dim=dim)
+    post = dim_concat('posterior')
+    Pp   = dim_concat('posterior_predictive')
+    ll   = dim_concat('log_likelihood')
+    pp   = dim_concat('prior_predictive')
+    prior= dim_concat('prior')
+    obs  = dim_concat('observed_data')
+    if sample_stats:
+        ss   = dim_concat('sample_stats')
+        return az.InferenceData(posterior=post, posterior_predictive=Pp, log_likelihood=ll,
+                           sample_stats=ss, prior_predictive=pp, prior=prior, observed_data=obs)
+    else:
+        raise ValueError('Sample stats not implemented')
+
+def df_new2json(df):
+    csel = [f"c{i}" for i in range(1, 13)]
+    rsel = [f"r{i}" for i in range(1, 5)]
+    Nrows = len(df)
+    Nrsel = len(rsel)
+    Ncsel = len(csel)
+    RMatrix = df.loc[:, rsel].values
+    CMatrix = df.loc[:, csel].values
+    RMatrix = [[int(i) for i in row] for row in RMatrix]
+    CMatrix = [[int(i) for i in row] for row in CMatrix]
+    return {'Nrsel': Nrsel, 'Ncsel': Ncsel, 'Nrows': Nrows, 'Yexp': RMatrix,
+           'Yctrl': CMatrix}
+
+def do_mcmc(model, rng_key, model_kwargs,Kernel=numpyro.infer.NUTS,Search=numpyro.infer.MCMC,
+        num_warmup=500, num_samples=1000, thinning=1,extra_fields=('potential_energy',)):
+    search_kwargs = {'num_warmup': num_warmup, 'num_samples': num_samples,
+        'thinning': thinning}
+    run_kwargs = {'extra_fields': extra_fields}
+    search_kwargs = {} if search_kwargs is None else search_kwargs
+    run_kwargs = {} if run_kwargs is None else run_kwargs
+    kernel = Kernel(model)
+    search = Search(kernel, **search_kwargs)
+    search.run(rng_key, **model_kwargs, **run_kwargs)
+    return search
+
+def exp_pdf(x, r):
+    return r * np.exp(-x * r)
 
 def fill_tensors(df, tensorR, tensorC, condition_name, bait_mapping, prey_mapping,
         condition_mapping,r_cols, c_cols, prey_col_name, bait_col_name="Bait"):
@@ -341,6 +428,388 @@ def init_nuid(bsasa_ref) -> int:
     return len(set(
       bsasa_ref['Prey1'].values).
       union(bsasa_ref['Prey2'].values))
+
+def model(x=None, y=None):
+    b = 0 #numpyro.sample('b', dist.Normal(0, 0.1))
+    m = numpyro.sample('m', dist.Normal(0, 1))
+    numpyro.sample('Y', dist.Normal(m * x + b), obs=y)
+
+def model_test():
+    numpyro.sample("a", dist.Normal(0, 1))
+
+def m1(df):
+    nrows = len(df)
+    hyper_prior = np.ones(nrows) * 1/5
+    Yexp = df.loc[:, rsel].values
+    Yctrl = df.loc[:, csel].values
+    nexp = len(rsel)
+    nctrl = len(csel)
+    kappa_ = numpyro.sample('k', dist.Exponential(rate=hyper_prior))
+    lambda_ = numpyro.sample('l', dist.Exponential(rate=hyper_prior))
+    for i in range(0, nctrl):
+        numpyro.sample(f'Ycrtl_{i}', dist.Poisson(kappa_), obs=Yctrl[:, i])
+    for i in range(0, nexp):
+        numpyro.sample(f'Yexp_a{i}', dist.Poisson(lambda_), obs=Yexp[:, i])
+        numpyro.sample(f'Yexp_b{i}', dist.Poisson(kappa_), obs=Yexp[:, i])
+
+def model2(ds, N=3062):
+    # wt, vif, mock
+    # 
+    # [condition, bait, prey, rrep]
+    ELOB_wt = ds.sel(condition='wt', bait='ELOB')['CRL_E'].values
+    CUL5_wt = ds.sel(condition='wt', bait='CUL5')['CRL_E'].values
+    CBFB_wt = ds.sel(condition='wt', bait='CBFB')['CRL_E'].values
+    # 
+    ELOB_vif = ds.sel(condition='vif', bait='ELOB')['CRL_E'].values
+    CUL5_vif = ds.sel(condition='vif', bait='CUL5')['CRL_E'].values
+    CBFB_vif = ds.sel(condition='vif', bait='CBFB')['CRL_E'].values
+    # 
+    ELOB_mock = ds.sel(condition='mock', bait='ELOB')['CRL_E'].values
+    CUL5_mock = ds.sel(condition='mock', bait='CUL5')['CRL_E'].values
+    CBFB_mock = ds.sel(condition='mock', bait='CBFB')['CRL_E'].values
+    # 
+    LRR1_mock = ds.sel(condition='mock', bait='LRR1')['CRL_E'].values
+    # 
+    ctrl_ELOB_wt = ds.sel(condition='wt', bait='ELOB')['CRL_C'].values
+    ctrl_CUL5_wt = ds.sel(condition='wt', bait='CUL5')['CRL_C'].values
+    ctrl_CBFB_wt = ds.sel(condition='wt', bait='CBFB')['CRL_C'].values
+    # 
+    ctrl_ELOB_vif = ds.sel(condition='vif', bait='ELOB')['CRL_C'].values
+    ctrl_CUL5_vif = ds.sel(condition='vif', bait='CUL5')['CRL_C'].values
+    ctrl_CBFB_vif = ds.sel(condition='vif', bait='CBFB')['CRL_C'].values
+    # 
+    ctrl_ELOB_mock = ds.sel(condition='mock', bait='ELOB')['CRL_C'].values
+    ctrl_CUL5_mock = ds.sel(condition='mock', bait='CUL5')['CRL_C'].values
+    ctrl_CBFB_mock = ds.sel(condition='mock', bait='CBFB')['CRL_C'].values
+    # 
+    ctrl_LRR1_mock = ds.sel(condition='mock', bait='LRR1')['CRL_C'].values
+   # max_val = ds['CRL_E'].max('rrep')
+   # mu_Nc = np.ones((5, 3))
+   # mu_alpha = np.ones((N, 5, 3))
+    #N = numpyro.sample('N', dist.Normal(np.zeros(3), 5))
+    #mu = numpyro.sample('mu', dist.Normal(max_val.sel(bait='ELOB').values.T, 50), sample_shape=(3062, 3))
+    #numpyro.sample('sc', dist.Normal(N * mu), obs=max_val.sel(bait='ELOB').values.T)
+    #N1 = numpyro.sample('N1', dist.Normal(0, 1))
+    #N2 = numpyro.sample('N2', dist.Normal(0, 1))
+    #mu_elob = numpyro.sample('mu_elob', dist.Normal(np.mean(ELOB_wt, axis=1), np.var(ELOB_wt, axis=1)))
+    #mu_cul5 = numpyro.sample('mu_cul5', dist.Normal(np.mean(CUL5_wt, axis=1), np.var(ELOB_wt, axis=1)))
+    #numpyro.sample('ELOB_wt', dist.Normal(mu_elob * N1, 5), obs=ELOB_wt)
+    #numpyro.sample('CUL5_wt', dist.Normal(mu_cul5 * N2, 5), obs=CUL5_wt)
+    #cell_abundance = numpyro.sample(dist.Normal(jnp.ones((3, 5))), 1)
+    assert ELOB_wt.shape == (3062, 4)
+    mu_hyper_prior = np.ones((3062, 1)) / 50
+    sig_hyper_prior = np.ones((3062, 1)) / 2
+    mu = numpyro.sample('mu', dist.Exponential(mu_hyper_prior))
+    sigma = numpyro.sample('s', dist.Exponential(sig_hyper_prior))
+    Ncells = numpyro.sample('Nc', dist.Normal(np.ones((1, 4)), 0.5))
+    Ncells_rep = jnp.repeat(Ncells, 3062, axis=0)
+    numpyro.sample('sc', dist.Normal(mu * Ncells_rep, sigma), obs=ELOB_wt)
+    #Ncells = cell_abundance * 1e7 
+    #gamma_i = numpyro.sample('gamma', dist.Beta(0.5, 0.5), sample_shape=(3062,))
+    #mu_ctrl = numpyro.sample('mu0', dist.Uniform(0, 250), sample_shape=(3062,))
+    #mu_wt = numpyro.sample('mu_wt', dist.Uniform(0, 250), sample_shape=(3062,))
+    #numpyro.sample('ELOB_wt', dist.Normal(mu_wt, 10), obs=ELOB_wt)
+    #numpyro.sample('ctrl_ELOB_wt', dist.Normal(mu_ctrl * gamma_i, 10), obs=ctrl_ELOB_wt)
+    
+def model4(e_data=None, ctrl_data=None, a=None, b=None):
+    # Prior around 1/5
+    if a is None:
+        a = numpyro.sample('a', dist.Uniform(0.0001, 1))
+    if b is None:
+        b = numpyro.sample('b', dist.Uniform(0.0001, 1))
+    numpyro.sample('y_e', dist.Exponential(a), obs=e_data)
+    numpyro.sample('y_c', dist.Exponential(b), obs=ctrl_data)
+
+def model5(a=None, b=None, y_c=None, y_e=None, poisson_sparse=True, batch_shape=()):
+    """
+    a:  experimental rate
+    b:  control rate
+    y_e: experimental obs
+    y_c: control obs
+    """
+    #max_val = np.max([np.max(y_c), np.max(y_e)])
+    # Assum the true rates are within 10 + 2 * max observed value
+    hyper = np.ones(batch_shape) * 200 #* max_val
+    if a is None:
+        a = numpyro.sample('a', dist.HalfNormal(hyper))
+    if b is None:
+        b = numpyro.sample('b', dist.HalfNormal(hyper))
+    # predictive checks
+    nrows, ncols = batch_shape
+    if y_c is None:
+        b = jnp.ones((nrows, 12)) * b
+    if y_e is None:
+        a = jnp.ones((nrows, 4)) * a
+    numpyro.sample('y_c', dist.Poisson(b, is_sparse=poisson_sparse), obs=y_c)
+    numpyro.sample('y_e', dist.Poisson(a, is_sparse=poisson_sparse), obs=y_e)
+
+def model52_f(df_new, start, end, numpyro_model = model5,numpyro_model_kwargs = None):
+    if numpyro_model_kwargs is None:
+        numpyro_model_kwargs = {}
+    def init_kernel(rescale_model=False):
+        n = slice(start, end)
+        dsel = df_new.iloc[n, :]
+        l = len(dsel)
+        y_c = np.array(dsel[csel].values, dtype=int)
+        y_e = np.array(dsel[rsel].values, dtype=int)
+        #col_shape = (l, 1)
+        # Scale and shift predictors
+        #mean_c, var_c = np.mean(y_c, axis=1).reshape(col_shape), np.var(y_c, axis=1).reshape(col_shape)
+        #mean_e, var_e = np.mean(y_e, axis=1).reshape(col_shape), np.var(y_e, axis=1).reshape(col_shape)
+        #var_c[var_c==0]=1
+        #var_e[var_e==0]=1
+        #y_c = ((y_c - mean_c) / var_c) + 2.
+        #y_e = ((y_e - mean_e) / var_e) + 2.
+        if rescale_model:
+            y_c_param_scale = center_and_scale_predictor(y_c)
+            y_e_param_scale = center_and_scale_predictor(y_e)
+            model_kwargs={'y_c': y_c_param_scale.y, 'y_e': y_e_param_scale.y}
+        else:
+            model_kwargs={'y_c': y_c, 'y_e': y_e}
+            y_c_param_scale = None
+            y_e_param_scale = None
+        model_meta={'y_c': y_c_param_scale, 'y_e': y_e_param_scale}
+        model = partial(
+            numpyro_model, 
+            batch_shape=(l, 1),
+            **numpyro_model_kwargs) # partial apply for prior and post pred checks
+        return namedtuple('Init', 'model kwargs meta')(model, model_kwargs, model_meta)
+    
+    def init_sampling(rng_key, num_warmup, num_samples):
+        return namedtuple('Init', 'rng_key num_warmup num_samples')(rng_key, num_warmup, num_samples)
+    
+    def sample(model_init, sample_init):
+        search = do_mcmc(model_init.model, 
+                         sample_init.rng_key, 
+                         model_init.kwargs,
+                         num_warmup = sample_init.num_warmup,
+                         num_samples = sample_init.num_samples)
+        #samples = search.get_samples()
+        #summary_dict = summary(samples, group_by_chain=False)
+        return search
+    
+    
+    #k1, k2, k3 = jax.random.split(rng_key, 3)
+    #search = do_mcmc(model, k1, model_kwargs, num_warmup=1000, num_samples=5000)
+    #samples = search.get_samples()
+    #summary_dict = summary(samples, group_by_chain=False)
+    
+    def sample_pp(model_init, sample_init):
+        """
+        Sample from the prior predictive distribution
+        """
+        return numpyro.infer.Predictive(
+            model = model_init.model, 
+            num_samples = sample_init.num_samples
+        )(sample_init.rng_key)
+    
+    def sample_Pp(model_init, samples, sample_init):
+        return numpyro.infer.Predictive(
+            model = model_init.model, 
+            posterior_samples = samples
+        )(rng_key = sample_init.rng_key)
+    
+    def _pre_init_InferenceData(
+        search,
+        pp,
+        Pp,
+        model_meta
+    ):
+    
+        coords = {'irow': np.arange(start, end), 'col': np.array([0]),
+                  'rrep': np.arange(4), 'crep': np.arange(12)}
+
+        dims = {'a': ['chain', 'draw', 'irow', 'col'],
+                'b': ['chain', 'draw', 'irow', 'col'],
+                'y_e': ['irow', 'rrep'], 
+                'y_c':['irow', 'crep']}
+        
+
+        pred_dims = {'y_c': ['chain', 'draw', 'irow', 'col'],
+                     'y_e': ['chain', 'draw', 'irow', 'col']}
+            
+        
+        inf_data = az.from_numpyro(search, 
+            prior=pp, posterior_predictive=Pp, coords=coords, dims=dims, pred_dims=pred_dims)
+        assert inf_data is not None
+        return inf_data
+        
+    def rescale_model(model_meta, inf_data):
+
+        # Scale Observed
+        yobs = inf_data['observed_data']
+        
+        inf_data.observed_data['y_c'].values = un_center_and_scale_predictor(
+            yobs.y_c, model_meta['y_c'])
+        
+        inf_data.observed_data['y_e'].values = un_center_and_scale_predictor(
+            yobs.y_e, model_meta['y_e'])
+        
+        # Scale Posterior
+        
+        ufunc = parital(un_center_and_scale_predictor, param_scale=model_meta['y_e'])
+        
+        inf_data.posterior.a = xr.apply_ufunc(
+            ufunc, inf_data.posterior.a)
+        
+        
+        
+        inf_data.posterior.a.values = un_center_and_scale_predictor(
+            inf_data.posterior.a)
+
+
+        return inf_data
+    
+    
+    def _append_posterior_statistics(
+        inf_data, 
+        samples, 
+        group_by_chain=False
+    ):
+        summary_dict = summary(samples, group_by_chain=group_by_chain)
+        
+        a_rhat = summary_dict['a']['r_hat'][:, 0]
+        a_neff = summary_dict['a']['n_eff'][:, 0]
+        b_rhat = summary_dict['b']['r_hat'][:, 0]
+        b_neff = summary_dict['b']['n_eff'][:, 0]
+        
+        tmp_df = pd.DataFrame({'a_rhat': a_rhat, 'a_neff': a_neff, 'b_rhat':b_rhat, 'b_neff': b_neff})
+        inf_data['posterior']['stats'] = xr.DataArray(tmp_df.values, 
+                                                    coords={'irow': np.arange(start, end),
+                                                    'stat': np.array(tmp_df.columns)})
+        return inf_data
+    
+    def init_InferenceData(
+        search,
+        pp,
+        Pp,
+        model_meta,
+        rescale=True,
+        append_sample_stats=True,
+        group_by_chain=False
+    ):
+        inf_data = _pre_init_InferenceData(search, pp, Pp, model_meta)
+        
+        if rescale:
+            inf_data = rescale_model(model_meta = model_meta, inf_data = inf_data)
+        if append_sample_stats:
+            inf_data = _append_posterior_statistics(inf_data, search.get_samples(), group_by_chain=group_by_chain)
+            
+        return inf_data
+    
+    return namedtuple(
+        "M5F", "init_kernel init_sampling sample sample_pp sample_Pp rescale_model init_InferenceData")(
+            init_kernel = init_kernel,
+            init_sampling = init_sampling,
+            sample = sample,
+            sample_pp = sample_pp,
+            sample_Pp = sample_Pp,
+            rescale_model = rescale_model,
+            init_InferenceData = init_InferenceData
+        )
+
+def m5crop2idata(rng_key, df, start, end, rsel = None, csel = None, rescale_model=False,
+                num_warmup=1000, num_samples=1000, num_pred_samples=500, num_pred_warmup=None,
+                 append_sample_stats=True):
+    if rsel is None:
+        rsel = [f"r{i}" for i in range(1,5)]
+    if csel is None:
+        csel = [f"c{i}" for i in range(1, 13)]
+    if num_pred_warmup is None:
+        num_pred_warmup = num_warmup
+    l = end - start
+    y_c = df.iloc[start:end, :][csel].values
+    y_e = df.iloc[start:end, :][rsel].values
+    kd = {'hyper_a': (np.mean(y_e, axis=1).reshape((l, 1)) + 10) * 1.5,
+          'hyper_b': (np.mean(y_c, axis=1).reshape((l, 1)) + 10) * 1.5}
+    m5f = model52_f(df_new, start=start, end=end, numpyro_model=model6,
+               numpyro_model_kwargs=kd)
+    kernel = m5f.init_kernel(rescale_model=rescale_model)
+    k1, k2, k3 = jax.random.split(rng_key, 3)
+    # Sample model
+    sample_init = m5f.init_sampling(k1, num_warmup=num_warmup, num_samples=num_samples)
+    search = m5f.sample(kernel, sample_init)
+    # Prior predictive check
+    sample_init = m5f.init_sampling(k2, num_warmup=num_pred_warmup, num_samples=num_pred_samples)
+    pp = m5f.sample_pp(kernel, sample_init)
+    # posterior predictive check
+    sample_init = m5f.init_sampling(k3, num_warmup = num_pred_warmup,
+        num_samples = num_pred_samples)
+    Pp = m5f.sample_Pp(kernel, search.get_samples(), sample_init)
+    idata = m5f.init_InferenceData(search, pp, Pp, kernel.meta, rescale=rescale_model,
+        append_sample_stats=append_sample_stats)
+    return idata
+
+def model6(hyper_a, hyper_b, a=None, b=None, y_c=None, y_e=None, poisson_sparse=True, batch_shape=()):
+    """
+    Similiar to model 5 however we place stronger priors on Poisson
+    rates in the hopes of speeding up HMC
+    """
+    
+    if a is None:
+        a = numpyro.sample('a', dist.HalfNormal(hyper_a))
+    if b is None:
+        b = numpyro.sample('b', dist.HalfNormal(hyper_b))
+    
+    # predictive checks
+    nrows, ncols = batch_shape
+    
+    if y_c is None:
+        b = jnp.ones((nrows, 12)) * b
+    
+    if y_e is None:
+        a = jnp.ones((nrows, 4)) * a
+        
+    
+    numpyro.sample('y_c', dist.Poisson(b, is_sparse=poisson_sparse), obs=y_c)
+    numpyro.sample('y_e', dist.Poisson(a, is_sparse=poisson_sparse), obs=y_e)
+
+def multi_hist(hists, bins, labels, alphas, xlabel):
+    for i in range(len(hists)):
+        plt.hist(hists[i], bins=bins, label=labels[i], alpha=alphas[i])
+    plt.xlabel(xlabel)
+    plt.legend()
+    plt.show()
+
+def n_tryptic_cleavages(aa_seq):
+    assert aa_seq.isupper()
+    aa_seq = np.array(list(aa_seq))
+    Ksites = aa_seq == 'K'
+    Rsites = aa_seq == 'R'
+    Allsites = Ksites | Rsites
+    n_sites = np.sum(Allsites)
+    if (aa_seq[-1] == 'K') or (aa_seq[-1] == 'R'):
+        n_sites -= 1
+    return n_sites
+
+def n_first_tryptic_cleavages(aa_seq):
+    return 2 * n_tryptic_cleavages(aa_seq)
+
+def n_first_typtic_cleavage_peptides(aa_seq):
+    return 1 + n_first_tryptic_cleavages(aa_seq)
+
+def plot_exp_dens(x, rate):
+    y = np.exp(dist.Exponential(rate).log_prob(x)) / rate
+    plt.plot(x, y, label=f"rate={rate}")
+
+
+def plot_lp(m_data):
+    az.plot_trace(m_data.sample_stats['lp'])
+
+def plot_prior(m_data, start=0, end=10):
+    az.plot_trace(m_data.prior.sel(irow=np.arange(start, end)))
+    
+def predictive_check(m_data, T='max', map_axis_pair=('y_e', 'rrep')):
+    var, dim = map_axis_pair
+    Tobs = (m_data.observed_data[var]).max(dim).values
+    Tprior = (m_data.prior_predictive[var]).max(dim).values
+    Tpost = (m_data.posterior_predictive[var]).max(dim).values
+    prior_n, *_ = plt.hist(np.ravel(Tprior), bins=10, label='Prior predictive', alpha=0.8)
+    post_n, *_ = plt.hist(np.ravel(Tpost), bins=10, label='Posterior predictive', alpha=0.8)
+    ymax = max(np.mean(prior_n), np.mean(post_n))
+    plt.vlines(Tobs.item(), 0, ymax, 'k', label='observed')
+    plt.xlabel(f"T(y) : {T} spectral count")
+    plt.legend()
 # Function for plotting an accuracy curve
 def pos_ntotal(prey_pairs_df, col, threshold, comp=operator.le, pos_col='pdb_pos'):
     sel = prey_pairs_df[col] <= threshold
@@ -349,10 +818,6 @@ def pos_ntotal(prey_pairs_df, col, threshold, comp=operator.le, pos_col='pdb_pos
     ntotal = len(sub_df)
     return npos, ntotal
 
-def remove_self_interactions(bsasa_ref):
-    sel = bsasa_ref["Prey1"].values != bsasa_ref["Prey2"].values
-    bsasa_ref = bsasa_ref[sel]
-    return bsasa_ref
 
 def preysel(df, prey_name, gene2uid):
     uid = gene2uid[prey_name]
@@ -474,10 +939,26 @@ def pval(results, true_results):
     N = len(results)
     return np.sum(results >= true_result) / N
 
-def save_ax(ax):
-    title = ax.title.get_text()
-    savename = title.replace(" ", "") + ".png"
-    plt.savefig(savename, ax=ax, dpi=NOTEBOOK_DPI)
+def posterior_odds(samples, Yexp):
+    def f(x, Yexp):
+        """x as a vector, return average probability"""
+        return jax.vmap(jax.scipy.stats.poisson.pmf)(Yexp, x).sum(axis=1) / 4
+    def f2(X, Yexp):
+        nrows, nsamples = X.shape
+        return jax.vmap(f, in_axes=[1, None])(X, Yexp).sum(axis=0) / nsamples
+    K = samples['k'].T
+    L = samples['l'].T
+    return np.array(f2(K, Yexp)), np.array(f2(L, Yexp))
+
+def remove_self_interactions(bsasa_ref):
+    sel = bsasa_ref["Prey1"].values != bsasa_ref["Prey2"].values
+    bsasa_ref = bsasa_ref[sel]
+    return bsasa_ref
+
+def remove_self_interactions(bsasa_ref):
+    sel = bsasa_ref["Prey1"].values != bsasa_ref["Prey2"].values
+    bsasa_ref = bsasa_ref[sel]
+    return bsasa_ref
 
 def remove_prey_nan(bsasa_ref):
     """Remove nans from DataFrame for Prey1 and Prey2 columns"""
@@ -486,6 +967,33 @@ def remove_prey_nan(bsasa_ref):
     notna = pd.notna(bsasa_ref["Prey2"].values)
     bsasa_ref = bsasa_ref[notna]
     return bsasa_ref
+
+def slice_up_df_metric(df, thresholds, col, compare_f, action_f):
+    results = []
+    for t in thresholds:
+        sel = compare_f(df[col].values, t)
+        results.append(action_f(df[sel]))
+    return results
+
+def save_ax(ax):
+    title = ax.title.get_text()
+    savename = title.replace(" ", "") + ".png"
+    plt.savefig(savename, ax=ax, dpi=NOTEBOOK_DPI)
+
+def save_plt():
+    ax = plt.gca()
+    title = ax.title.get_text()
+    savename = title.replace(" ", "") + ".png"
+    plt.savefig(savename, dpi=NOTEBOOK_DPI)
+
+def summary_stats(m_data):
+    data = m_data.posterior.stats.sel(stat=['a_rhat', 'b_rhat', 'a_neff', 'b_neff'])
+    max_ = data.max('irow').values
+    min_ = data.min('irow').values
+    std = data.std(dim='irow').values
+    med = data.median('irow').values
+    return pd.DataFrame([max_, min_, med, std], index=['max', 'min', 'med', 'std'], 
+        columns=data.stat.values)
 
 def summarize_col(df, col):
     """Print summary stats for a DataFrame column"""
@@ -496,6 +1004,20 @@ def summarize_col(df, col):
          "mean": np.mean, "var": np.var}
     for key, ufunc in d.items():
         colprint(f"{col} {key}", f(vals, ufunc))
+
+def thresh_sel(t, x):
+    """Return the number of remaining entries"""
+    return len(x[x >= t])
+
+def un_center_and_scale_predictor(x, param_scale, min_value=1e-8, safe=True):
+    if safe:
+        assert x.shape[0] == param_scale.col_shape[0], (x.shape, param_scale.col_shape)
+    x = np.array(x)
+    var = param_scale.var
+    var[var==0] = 1
+    x = (x - param_scale.shift) * var + param_scale.mean
+    x[np.where(x <= min_value)] = 0.
+    return x
 
 def update_df_new_PDB_COCOMPLEX(df_new, ds):
     cocomplex_labels = []
@@ -521,22 +1043,11 @@ def xy_from(prey_pairs_df, col, thresholds, comp, pos_col):
         ntot.append(nt)
     return np.array(ntot), np.array(npos)
 
-def slice_up_df_metric(df, thresholds, col, compare_f, action_f):
-    results = []
-    for t in thresholds:
-        sel = compare_f(df[col].values, t)
-        results.append(action_f(df[sel]))
-    return results
-
-def corr_action(df, col1, col2):
-    return sp.stats.pearsonr(df[col1].values, df[col2])
-
 def n_remaining_action(df):
     return len(df)
 
 def compare_window_f(a, N, b):
     return (N - b < a) & (a < N + b)
-        
         
 def simple_scatter(x, y, xname, yname, title=None):
     plt.plot(x, y, 'k.')
@@ -544,7 +1055,6 @@ def simple_scatter(x, y, xname, yname, title=None):
     plt.ylabel(yname)
     plt.title(title)
     
-
 # -
 bsasa_ref = init_bsasa_ref()
 
@@ -762,11 +1272,6 @@ benchmark_summary = pd.DataFrame([len(cocomplex_df), len(bsasa_ref), len(df_all)
                           'Bait-prey cocomplex',
                           'Possible Interactions'])
 
-def save_plt():
-    ax = plt.gca()
-    title = ax.title.get_text()
-    savename = title.replace(" ", "") + ".png"
-    plt.savefig(savename, dpi=NOTEBOOK_DPI)
 
 title="Direct Interaction Benchmark Summary"
 cols = ['Co-complex', 'Direct', 'Bait-prey']
@@ -977,19 +1482,6 @@ wt  - vig/wt ctrl
 mock - mock ctrl
 """
 
-def df_new2json(df):
-    csel = [f"c{i}" for i in range(1, 13)]
-    rsel = [f"r{i}" for i in range(1, 5)]
-    Nrows = len(df)
-    Nrsel = len(rsel)
-    Ncsel = len(csel)
-    RMatrix = df.loc[:, rsel].values
-    CMatrix = df.loc[:, csel].values
-    RMatrix = [[int(i) for i in row] for row in RMatrix]
-    CMatrix = [[int(i) for i in row] for row in CMatrix]
-    return {'Nrsel': Nrsel, 'Ncsel': Ncsel, 'Nrows': Nrows, 'Yexp': RMatrix,
-           'Yctrl': CMatrix}
-
 
 # -
 
@@ -1075,37 +1567,11 @@ plt.close()
 
 #plt.show()
 
-def exp_pdf(x, r):
-    return r * np.exp(-x * r)
-
-
 # -
 
 seq_lens = np.array([uid2seq_len[prey] for prey in df_new['Prey'].values])
 df_new.loc[:, 'aa_seq_len'] = seq_lens
 df_new.loc[:, 'exp_aa_seq_len'] = np.exp(seq_lens)
-
-
-# +
-def n_tryptic_cleavages(aa_seq):
-    assert aa_seq.isupper()
-    aa_seq = np.array(list(aa_seq))
-    Ksites = aa_seq == 'K'
-    Rsites = aa_seq == 'R'
-    Allsites = Ksites | Rsites
-    n_sites = np.sum(Allsites)
-    if (aa_seq[-1] == 'K') or (aa_seq[-1] == 'R'):
-        n_sites -= 1
-    return n_sites
-
-def n_first_tryptic_cleavages(aa_seq):
-    return 2 * n_tryptic_cleavages(aa_seq)
-
-def n_first_typtic_cleavage_peptides(aa_seq):
-    return 1 + n_first_tryptic_cleavages(aa_seq)
-
-
-# -
 
 n_first_sites = [n_first_tryptic_cleavages(uid2seq[prey]) for prey in df_new['Prey']]
 df_new.loc[:, 'n_first_tryptic_cleavage_sites'] = np.array(n_first_sites)
@@ -1226,13 +1692,6 @@ plt.title("Control Data")
 
 # -
 
-def model(x=None, y=None):
-    b = 0 #numpyro.sample('b', dist.Normal(0, 0.1))
-    m = numpyro.sample('m', dist.Normal(0, 1))
-    numpyro.sample('Y', dist.Normal(m * x + b), obs=y)
-
-
-
 nuts_kernal = numpyro.infer.NUTS(model)
 mcmc = numpyro.infer.MCMC(nuts_kernal, num_warmup=500, num_samples=1000)
 rng_key = jax.random.PRNGKey(13)
@@ -1242,22 +1701,6 @@ mcmc.print_summary()
 
 
 # +
-def m1(df):
-    nrows = len(df)
-    hyper_prior = np.ones(nrows) * 1/5
-    Yexp = df.loc[:, rsel].values
-    Yctrl = df.loc[:, csel].values
-    nexp = len(rsel)
-    nctrl = len(csel)
-    kappa_ = numpyro.sample('k', dist.Exponential(rate=hyper_prior))
-    lambda_ = numpyro.sample('l', dist.Exponential(rate=hyper_prior))
-    for i in range(0, nctrl):
-        numpyro.sample(f'Ycrtl_{i}', dist.Poisson(kappa_), obs=Yctrl[:, i])
-    for i in range(0, nexp):
-        numpyro.sample(f'Yexp_a{i}', dist.Poisson(lambda_), obs=Yexp[:, i])
-        numpyro.sample(f'Yexp_b{i}', dist.Poisson(kappa_), obs=Yexp[:, i])
-    
-    
     
 # -
 
@@ -1284,37 +1727,10 @@ samples = mcmc.get_samples()
 
 #jax.vmap(jax.scipy.stats.poisson.pmf)
 
-
-# +
-def posterior_odds(samples, df):
-    theta1 = samples['l']
-    theta2 = samples['k']
-    Yexp = df[rsel].values
-    f = jax.scipy.stats.poisson.pmf
-    p1 = f(Yexp, mu=theta1.T)
-    p2 = f(Yexp, mu=theta2.T)
-    return p1, p2
-    
-    
-# -
-
 x1 = samples['k'].T[:, 0]
 y1 = df_new.loc[:, rsel].values
 
-
 # +
-def f(x, Yexp):
-    """x as a vector, return average probability"""
-    return jax.vmap(jax.scipy.stats.poisson.pmf)(Yexp, x).sum(axis=1) / 4
-
-def f2(X, Yexp):
-    nrows, nsamples = X.shape
-    return jax.vmap(f, in_axes=[1, None])(X, Yexp).sum(axis=0) / nsamples
-
-def posterior_odds(samples, Yexp):
-    K = samples['k'].T
-    L = samples['l'].T
-    return np.array(f2(K, Yexp)), np.array(f2(L, Yexp))
 
 Yexp = df_new.loc[:, rsel].values
 odds_kappa, odds_lambda = posterior_odds(samples, Yexp)
@@ -1357,15 +1773,8 @@ plt.title("tmp")
 save_plt()
 plt.close()
 
-
-
 # +
 # Impact of selecting a threshold
-def thresh_sel(t, x):
-    """
-    Return the number of remaining entries
-    """
-    return len(x[x >= t])
 
 thresholds = np.arange(-5, 5, 0.1)
 remaining = []
@@ -1382,30 +1791,6 @@ plt.close()
 
 
 # +
-def bait_box_plot(ds, var='CRL_E', preysel=True, boxkwargs={}):
-    vals = []
-    z = [('CBFB', 'PEBB'), ('ELOB', 'ELOB'), ('CUL5', 'CUL5')]#, ('LRR1', 'LLR1')]
-    for i in z:
-        if preysel:
-            arr = np.ravel(ds.sel(bait=i[0], preyu=i[1])[var].values)
-        else:
-            arr = np.ravel(ds.sel(bait=i[0])[var].values)
-        vals.append(arr)
-    z.append(('LRR1', 'LLR1'))
-    arr = np.ravel(ds.sel(bait='LRR1', preyu='LLR1', condition='mock')[var].values)
-    vals.append(arr)
-    assert len(vals) == 4, len(vals)
-    if var == 'CRL_E' and preysel==False:
-        arr = np.ravel(ds.sel(bait='ELOB')['CRL_C'].values) # Bait can be any because control is similiar
-        vals.append(arr)
-        z.append('Parent')
-    sns.boxplot(vals, **boxkwargs)#, labels=['A'] * 4)
-    plt.title("Amount of Bait in own purification across 3 conditions")
-    plt.xticks(np.arange(len(vals)), [i[0] for i in z])
-    plt.ylabel("Spectral count")
-    plt.tight_layout()
-    save_plt()
-    plt.close()
     
 bait_box_plot(ds, var="CRL_E")
 
@@ -1582,66 +1967,13 @@ print("")
 #x2[np.any((x.sel(bait=k, condition='vif').values != x.sel(bait=k2, condition='wt').values), axis=1)]
 ## -
 
+di = numpyro.render_model(model_test,render_distributions=True, render_params=True,
+                     filename="ModelTest.png")
+#plt.title("Model Test")
+#save_plt()
+#plt.close()
 # +
-def model2(ds, N=3062):
-    # wt, vif, mock
-    # 
-    # [condition, bait, prey, rrep]
-    ELOB_wt = ds.sel(condition='wt', bait='ELOB')['CRL_E'].values
-    CUL5_wt = ds.sel(condition='wt', bait='CUL5')['CRL_E'].values
-    CBFB_wt = ds.sel(condition='wt', bait='CBFB')['CRL_E'].values
-    # 
-    ELOB_vif = ds.sel(condition='vif', bait='ELOB')['CRL_E'].values
-    CUL5_vif = ds.sel(condition='vif', bait='CUL5')['CRL_E'].values
-    CBFB_vif = ds.sel(condition='vif', bait='CBFB')['CRL_E'].values
-    # 
-    ELOB_mock = ds.sel(condition='mock', bait='ELOB')['CRL_E'].values
-    CUL5_mock = ds.sel(condition='mock', bait='CUL5')['CRL_E'].values
-    CBFB_mock = ds.sel(condition='mock', bait='CBFB')['CRL_E'].values
-    # 
-    LRR1_mock = ds.sel(condition='mock', bait='LRR1')['CRL_E'].values
-    # 
-    ctrl_ELOB_wt = ds.sel(condition='wt', bait='ELOB')['CRL_C'].values
-    ctrl_CUL5_wt = ds.sel(condition='wt', bait='CUL5')['CRL_C'].values
-    ctrl_CBFB_wt = ds.sel(condition='wt', bait='CBFB')['CRL_C'].values
-    # 
-    ctrl_ELOB_vif = ds.sel(condition='vif', bait='ELOB')['CRL_C'].values
-    ctrl_CUL5_vif = ds.sel(condition='vif', bait='CUL5')['CRL_C'].values
-    ctrl_CBFB_vif = ds.sel(condition='vif', bait='CBFB')['CRL_C'].values
-    # 
-    ctrl_ELOB_mock = ds.sel(condition='mock', bait='ELOB')['CRL_C'].values
-    ctrl_CUL5_mock = ds.sel(condition='mock', bait='CUL5')['CRL_C'].values
-    ctrl_CBFB_mock = ds.sel(condition='mock', bait='CBFB')['CRL_C'].values
-    # 
-    ctrl_LRR1_mock = ds.sel(condition='mock', bait='LRR1')['CRL_C'].values
-   # max_val = ds['CRL_E'].max('rrep')
-   # mu_Nc = np.ones((5, 3))
-   # mu_alpha = np.ones((N, 5, 3))
-    #N = numpyro.sample('N', dist.Normal(np.zeros(3), 5))
-    #mu = numpyro.sample('mu', dist.Normal(max_val.sel(bait='ELOB').values.T, 50), sample_shape=(3062, 3))
-    #numpyro.sample('sc', dist.Normal(N * mu), obs=max_val.sel(bait='ELOB').values.T)
-    #N1 = numpyro.sample('N1', dist.Normal(0, 1))
-    #N2 = numpyro.sample('N2', dist.Normal(0, 1))
-    #mu_elob = numpyro.sample('mu_elob', dist.Normal(np.mean(ELOB_wt, axis=1), np.var(ELOB_wt, axis=1)))
-    #mu_cul5 = numpyro.sample('mu_cul5', dist.Normal(np.mean(CUL5_wt, axis=1), np.var(ELOB_wt, axis=1)))
-    #numpyro.sample('ELOB_wt', dist.Normal(mu_elob * N1, 5), obs=ELOB_wt)
-    #numpyro.sample('CUL5_wt', dist.Normal(mu_cul5 * N2, 5), obs=CUL5_wt)
-    #cell_abundance = numpyro.sample(dist.Normal(jnp.ones((3, 5))), 1)
-    assert ELOB_wt.shape == (3062, 4)
-    mu_hyper_prior = np.ones((3062, 1)) / 50
-    sig_hyper_prior = np.ones((3062, 1)) / 2
-    mu = numpyro.sample('mu', dist.Exponential(mu_hyper_prior))
-    sigma = numpyro.sample('s', dist.Exponential(sig_hyper_prior))
-    Ncells = numpyro.sample('Nc', dist.Normal(np.ones((1, 4)), 0.5))
-    Ncells_rep = jnp.repeat(Ncells, 3062, axis=0)
-    numpyro.sample('sc', dist.Normal(mu * Ncells_rep, sigma), obs=ELOB_wt)
-    #Ncells = cell_abundance * 1e7 
-    #gamma_i = numpyro.sample('gamma', dist.Beta(0.5, 0.5), sample_shape=(3062,))
-    #mu_ctrl = numpyro.sample('mu0', dist.Uniform(0, 250), sample_shape=(3062,))
-    #mu_wt = numpyro.sample('mu_wt', dist.Uniform(0, 250), sample_shape=(3062,))
-    #numpyro.sample('ELOB_wt', dist.Normal(mu_wt, 10), obs=ELOB_wt)
-    #numpyro.sample('ctrl_ELOB_wt', dist.Normal(mu_ctrl * gamma_i, 10), obs=ctrl_ELOB_wt)
-    
+
 print(f"N free parameters {h(5 * 3 + 5 * 3 * 3062)}")  
 # -
 
@@ -1658,11 +1990,6 @@ plt.close()
 
 # +
 #plt.hist(np.ravel(np.std(df_new[rsel].values, axis=1)), bins=50, density=True)
-
-
-def plot_exp_dens(x, rate):
-    y = np.exp(dist.Exponential(rate).log_prob(x)) / rate
-    plt.plot(x, y, label=f"rate={rate}")
 
 x = np.arange(0, 30, 0.1)
 for rate in np.arange(0, 2.2, 0.2):
@@ -1699,16 +2026,6 @@ plt.hist(np.ravel(ds.sel(bait=["CBFB", "ELOB", "CUL5"])['CRL_C'].values), bins=1
 plt.title("tmp")
 save_plt()
 plt.close()
-
-
-def model4(e_data=None, ctrl_data=None, a=None, b=None):
-    # Prior around 1/5
-    if a is None:
-        a = numpyro.sample('a', dist.Uniform(0.0001, 1))
-    if b is None:
-        b = numpyro.sample('b', dist.Uniform(0.0001, 1))
-    numpyro.sample('y_e', dist.Exponential(a), obs=e_data)
-    numpyro.sample('y_c', dist.Exponential(b), obs=ctrl_data)
 
 # +
 dsel = ds.sel(bait=['CBFB', 'ELOB', 'CUL5'])
@@ -1747,8 +2064,6 @@ plt.hist(posterior_predictive['y_c'], bins=100, label='posterior control')
 plt.hist(posterior_predictive['y_e'], bins=100, label='posterior experiment', alpha=0.5)
 plt.show()
 
-
-
 plt.hist(posterior_samples['a'], bins=50, label='Experiment')
 plt.hist(posterior_samples['b'], bins=50, label='Control')
 #plt.hist(prior['a'], bins=50)
@@ -1770,81 +2085,18 @@ y = np.exp(dist.HalfNormal(200).log_prob(x))
 sns.scatterplot(x=x, y=y)
 plt.show()
 
-
-def model5(a=None, b=None, y_c=None, y_e=None, poisson_sparse=True, batch_shape=()):
-    """
-    a:  experimental rate
-    b:  control rate
-    y_e: experimental obs
-    y_c: control obs
-    """
-    
-    #max_val = np.max([np.max(y_c), np.max(y_e)])
-    
-    # Assum the true rates are within 10 + 2 * max observed value
-    
-    
-    
-    hyper = np.ones(batch_shape) * 200 #* max_val
-    
-    if a is None:
-        a = numpyro.sample('a', dist.HalfNormal(hyper))
-    if b is None:
-        b = numpyro.sample('b', dist.HalfNormal(hyper))
-    
-    # predictive checks
-    nrows, ncols = batch_shape
-    
-    if y_c is None:
-        b = jnp.ones((nrows, 12)) * b
-    
-    if y_e is None:
-        a = jnp.ones((nrows, 4)) * a
-        
-    
-    numpyro.sample('y_c', dist.Poisson(b, is_sparse=poisson_sparse), obs=y_c)
-    numpyro.sample('y_e', dist.Poisson(a, is_sparse=poisson_sparse), obs=y_e)
-
 nuts_kernal = numpyro.infer.NUTS(model4)
 mcmc = numpyro.infer.MCMC(nuts_kernal, num_warmup=1000, num_samples=10000, thinning=2)
 rng_key = jax.random.PRNGKey(13)
 mcmc.run(rng_key, e_data=e_data, ctrl_data=ctrl_data, extra_fields=('potential_energy',))
-
-
-def do_mcmc(model, rng_key, 
-            model_kwargs, 
-            Kernel=numpyro.infer.NUTS,
-            Search=numpyro.infer.MCMC, 
-            num_warmup=500,
-            num_samples=1000,
-            thinning=1,
-            extra_fields=('potential_energy',)):
-    
-
-    search_kwargs = {'num_warmup': num_warmup, 
-                    'num_samples': num_samples,
-                    'thinning': thinning}
-    
-    run_kwargs = {'extra_fields': extra_fields}
-    
-    search_kwargs = {} if search_kwargs is None else search_kwargs
-    run_kwargs = {} if run_kwargs is None else run_kwargs
-    
-    kernel = Kernel(model)
-    search = Search(kernel, **search_kwargs)
-    
-    
-    search.run(rng_key, **model_kwargs, **run_kwargs)
-    
-    
-    return search
 
 model = model5
 n = 0
 y_c = np.array(df_new.iloc[n, :][csel].values, dtype=int)
 y_e = np.array(df_new.iloc[n, :][rsel].values, dtype=int)
 model_kwargs={'y_c': y_c, 'y_e': y_e}
-numpyro.render_model(model5, model_args=(None, None, y_c, y_e),
+
+numpyro.render_model(model5, model_args=(None, None, y_c, y_e, True, ()),
                      render_distributions=True, render_params=True)
 
 search = do_mcmc(model5, 1, model_kwargs, num_warmup=1000, num_samples=5000)
@@ -1857,16 +2109,6 @@ prior = numpyro.infer.Predictive(model5, num_samples=500)
 
 posterior_predictive = numpyro.infer.Predictive(model5, posterior_samples)
 
-
-def multi_hist(hists, bins, labels, alphas, xlabel):
-    for i in range(len(hists)):
-        plt.hist(hists[i], bins=bins, label=labels[i], alpha=alphas[i])
-    plt.xlabel(xlabel)
-    plt.legend()
-    plt.show()
-
-
-
 # +
 hists = [posterior_samples['a'], posterior_samples['b'], posterior_samples['a'] - posterior_samples['b']]
 labels = ['Experiment', 'Control', 'Difference']
@@ -1877,234 +2119,12 @@ multi_hist(hists, bins=50, labels=labels, alphas=alphas, xlabel='Poisson rate')
 
 posterior_samples['a'].shape
 
-
-
-def outer_f(x):
-    def inner_r(x):
-        return _secret_f(x)
-    
-    def _secret_f(x):
-        print(f"Hello, {x}!")
-        
-    return inner_r
-
-
-inner_r = outer_f(None)
-
 # +
 
 start = 0
 end = 100
 
-def center_and_scale_predictor(y, shift=2):
-    assert y.ndim == 2
-    col_shape = (len(y), 1)
-    mean, var = np.mean(y, axis=1).reshape(col_shape), np.var(y, axis=1).reshape(col_shape)
-    var[var==0] = 1
     
-    y = ((y - mean) / var) + shift
-    return namedtuple('ParamScale', 'y mean var shift col_shape')(
-        y, mean, var, shift, col_shape
-    )
-
-def un_center_and_scale_predictor(x, param_scale, min_value=1e-8, safe=True):
-    if safe:
-        assert x.shape[0] == param_scale.col_shape[0], (x.shape, param_scale.col_shape)
-    x = np.array(x)
-    var = param_scale.var
-    var[var==0] = 1
-    
-    x = (x - param_scale.shift) * var + param_scale.mean
-    x[np.where(x <= min_value)] = 0.
-    return x
-    
-    
-
-    
-
-
-def model52_f(df_new, 
-              start, 
-              end, 
-              numpyro_model = model5,
-              numpyro_model_kwargs = None):
-    
-    if numpyro_model_kwargs is None:
-        numpyro_model_kwargs = {}
-    
-    def init_kernel(rescale_model=False):
-        n = slice(start, end)
-        dsel = df_new.iloc[n, :]
-        l = len(dsel)
-
-        y_c = np.array(dsel[csel].values, dtype=int)
-        y_e = np.array(dsel[rsel].values, dtype=int)
-
-        #col_shape = (l, 1)
-
-        # Scale and shift predictors
-        #mean_c, var_c = np.mean(y_c, axis=1).reshape(col_shape), np.var(y_c, axis=1).reshape(col_shape)
-        #mean_e, var_e = np.mean(y_e, axis=1).reshape(col_shape), np.var(y_e, axis=1).reshape(col_shape)
-
-
-        #var_c[var_c==0]=1
-        #var_e[var_e==0]=1
-
-        #y_c = ((y_c - mean_c) / var_c) + 2.
-        #y_e = ((y_e - mean_e) / var_e) + 2.
-        
-        if rescale_model:
-            y_c_param_scale = center_and_scale_predictor(y_c)
-            y_e_param_scale = center_and_scale_predictor(y_e)
-            model_kwargs={'y_c': y_c_param_scale.y, 'y_e': y_e_param_scale.y}
-            
-        else:
-            model_kwargs={'y_c': y_c, 'y_e': y_e}
-            y_c_param_scale = None
-            y_e_param_scale = None
-            
-        model_meta={'y_c': y_c_param_scale, 'y_e': y_e_param_scale}
-        
-        model = partial(
-            numpyro_model, 
-            batch_shape=(l, 1),
-            **numpyro_model_kwargs) # partial apply for prior and post pred checks
-        
-        return namedtuple('Init', 'model kwargs meta')(model, model_kwargs, model_meta)
-    
-    def init_sampling(rng_key, num_warmup, num_samples):
-        return namedtuple('Init', 'rng_key num_warmup num_samples')(rng_key, num_warmup, num_samples)
-    
-    def sample(model_init, sample_init):
-        search = do_mcmc(model_init.model, 
-                         sample_init.rng_key, 
-                         model_init.kwargs,
-                         num_warmup = sample_init.num_warmup,
-                         num_samples = sample_init.num_samples)
-        #samples = search.get_samples()
-        #summary_dict = summary(samples, group_by_chain=False)
-        return search
-    
-    
-    #k1, k2, k3 = jax.random.split(rng_key, 3)
-    #search = do_mcmc(model, k1, model_kwargs, num_warmup=1000, num_samples=5000)
-    #samples = search.get_samples()
-    #summary_dict = summary(samples, group_by_chain=False)
-    
-    def sample_pp(model_init, sample_init):
-        """
-        Sample from the prior predictive distribution
-        """
-        return numpyro.infer.Predictive(
-            model = model_init.model, 
-            num_samples = sample_init.num_samples
-        )(sample_init.rng_key)
-    
-    def sample_Pp(model_init, samples, sample_init):
-        return numpyro.infer.Predictive(
-            model = model_init.model, 
-            posterior_samples = samples
-        )(rng_key = sample_init.rng_key)
-    
-    def _pre_init_InferenceData(
-        search,
-        pp,
-        Pp,
-        model_meta
-    ):
-    
-        coords = {'irow': np.arange(start, end), 'col': np.array([0]),
-                  'rrep': np.arange(4), 'crep': np.arange(12)}
-
-        dims = {'a': ['chain', 'draw', 'irow', 'col'],
-                'b': ['chain', 'draw', 'irow', 'col'],
-                'y_e': ['irow', 'rrep'], 
-                'y_c':['irow', 'crep']}
-        
-
-        pred_dims = {'y_c': ['chain', 'draw', 'irow', 'col'],
-                     'y_e': ['chain', 'draw', 'irow', 'col']}
-            
-        
-        inf_data = az.from_numpyro(search, 
-            prior=pp, posterior_predictive=Pp, coords=coords, dims=dims, pred_dims=pred_dims)
-        assert inf_data is not None
-        return inf_data
-        
-    def rescale_model(model_meta, inf_data):
-
-        # Scale Observed
-        yobs = inf_data['observed_data']
-        
-        inf_data.observed_data['y_c'].values = un_center_and_scale_predictor(
-            yobs.y_c, model_meta['y_c'])
-        
-        inf_data.observed_data['y_e'].values = un_center_and_scale_predictor(
-            yobs.y_e, model_meta['y_e'])
-        
-        # Scale Posterior
-        
-        ufunc = parital(un_center_and_scale_predictor, param_scale=model_meta['y_e'])
-        
-        inf_data.posterior.a = xr.apply_ufunc(
-            ufunc, inf_data.posterior.a)
-        
-        
-        
-        inf_data.posterior.a.values = un_center_and_scale_predictor(
-            inf_data.posterior.a)
-
-
-        return inf_data
-    
-    
-    def _append_posterior_statistics(
-        inf_data, 
-        samples, 
-        group_by_chain=False
-    ):
-        summary_dict = summary(samples, group_by_chain=group_by_chain)
-        
-        a_rhat = summary_dict['a']['r_hat'][:, 0]
-        a_neff = summary_dict['a']['n_eff'][:, 0]
-        b_rhat = summary_dict['b']['r_hat'][:, 0]
-        b_neff = summary_dict['b']['n_eff'][:, 0]
-        
-        tmp_df = pd.DataFrame({'a_rhat': a_rhat, 'a_neff': a_neff, 'b_rhat':b_rhat, 'b_neff': b_neff})
-        inf_data['posterior']['stats'] = xr.DataArray(tmp_df.values, 
-                                                    coords={'irow': np.arange(start, end),
-                                                    'stat': np.array(tmp_df.columns)})
-        return inf_data
-    
-    def init_InferenceData(
-        search,
-        pp,
-        Pp,
-        model_meta,
-        rescale=True,
-        append_sample_stats=True,
-        group_by_chain=False
-    ):
-        inf_data = _pre_init_InferenceData(search, pp, Pp, model_meta)
-        
-        if rescale:
-            inf_data = rescale_model(model_meta = model_meta, inf_data = inf_data)
-        if append_sample_stats:
-            inf_data = _append_posterior_statistics(inf_data, search.get_samples(), group_by_chain=group_by_chain)
-            
-        return inf_data
-    
-    return namedtuple(
-        "M5F", "init_kernel init_sampling sample sample_pp sample_Pp rescale_model init_InferenceData")(
-            init_kernel = init_kernel,
-            init_sampling = init_sampling,
-            sample = sample,
-            sample_pp = sample_pp,
-            sample_Pp = sample_Pp,
-            rescale_model = rescale_model,
-            init_InferenceData = init_InferenceData
-        )
-
 def run_and_merge_models(df_new, from_, to, step, rng_key):
     posterior = []
     prior = []
@@ -2149,30 +2169,6 @@ def run_and_merge_models(df_new, from_, to, step, rng_key):
 
 # -
 
-def model6(hyper_a, hyper_b, a=None, b=None, y_c=None, y_e=None, poisson_sparse=True, batch_shape=()):
-    """
-    Similiar to model 5 however we place stronger priors on Poisson
-    rates in the hopes of speeding up HMC
-    """
-    
-    if a is None:
-        a = numpyro.sample('a', dist.HalfNormal(hyper_a))
-    if b is None:
-        b = numpyro.sample('b', dist.HalfNormal(hyper_b))
-    
-    # predictive checks
-    nrows, ncols = batch_shape
-    
-    if y_c is None:
-        b = jnp.ones((nrows, 12)) * b
-    
-    if y_e is None:
-        a = jnp.ones((nrows, 4)) * a
-        
-    
-    numpyro.sample('y_c', dist.Poisson(b, is_sparse=poisson_sparse), obs=y_c)
-    numpyro.sample('y_e', dist.Poisson(a, is_sparse=poisson_sparse), obs=y_e)
-
 
 # +
 # Variants - number of chains
@@ -2206,72 +2202,7 @@ Pp = m5f.sample_Pp(kernel, search.get_samples(), sample_init)
 inf_data10_20 = m5f.init_InferenceData(search, pp, Pp, kernel.meta, rescale=False, append_sample_stats=True)
 
 
-def m5crop2idata(rng_key, df, start, end, rsel = None, csel = None, rescale_model=False,
-                num_warmup=1000, num_samples=1000, num_pred_samples=500, num_pred_warmup=None,
-                 append_sample_stats=True):
-    if rsel is None:
-        rsel = [f"r{i}" for i in range(1,5)]
-    if csel is None:
-        csel = [f"c{i}" for i in range(1, 13)]
-        
-    if num_pred_warmup is None:
-        num_pred_warmup = num_warmup
-        
-    l = end - start
-    y_c = df.iloc[start:end, :][csel].values
-    y_e = df.iloc[start:end, :][rsel].values
-
-    kd = {'hyper_a': (np.mean(y_e, axis=1).reshape((l, 1)) + 10) * 1.5,
-          'hyper_b': (np.mean(y_c, axis=1).reshape((l, 1)) + 10) * 1.5}
-    
-    m5f = model52_f(df_new, start=start, end=end, numpyro_model=model6,
-               numpyro_model_kwargs=kd)
-
-    kernel = m5f.init_kernel(rescale_model=rescale_model)
-    
-    k1, k2, k3 = jax.random.split(rng_key, 3)
-    
-    # Sample model
-    sample_init = m5f.init_sampling(k1, num_warmup=num_warmup, num_samples=num_samples)
-    search = m5f.sample(kernel, sample_init)
-    
-    # Prior predictive check
-    sample_init = m5f.init_sampling(k2, num_warmup=num_pred_warmup, num_samples=num_pred_samples)
-    pp = m5f.sample_pp(kernel, sample_init)
-    
-    # posterior predictive check
-    sample_init = m5f.init_sampling(k3, num_warmup = num_pred_warmup, num_samples = num_pred_samples)
-    Pp = m5f.sample_Pp(kernel, search.get_samples(), sample_init)
-    
-    idata = m5f.init_InferenceData(
-        search, pp, Pp, kernel.meta, rescale=rescale_model, append_sample_stats=append_sample_stats)
-    return idata
-
-
 # +
-def concat_inf(i1, i2, dim='irow', sample_stats = True):
-    assert i1 is not None
-    assert i2 is not None
-    inference_data = [i1, i2]
-    dim_concat = lambda key: xr.concat([i[key] for i in inference_data], dim=dim)
-    
-    post = dim_concat('posterior')
-    Pp   = dim_concat('posterior_predictive')
-    ll   = dim_concat('log_likelihood')
-    pp   = dim_concat('prior_predictive')
-    prior= dim_concat('prior')
-    obs  = dim_concat('observed_data')
-    
-    if sample_stats:
-        ss   = dim_concat('sample_stats')
-        return az.InferenceData(posterior=post, posterior_predictive=Pp, log_likelihood=ll,
-                           sample_stats=ss, prior_predictive=pp, prior=prior, observed_data=obs)
-    
-    else:
-        raise ValueError('Sample stats not implemented')
-    
-        
-    
 
 # +
 tmp = df_new.iloc[:, :]
@@ -2281,10 +2212,6 @@ crops = range(0, len(tmp), 1000)
 start = 0
 
 
-
-def action_f(rng_key, df, start, stop):
-    print(start, stop)
-    return m5crop2idata(rng_key, df, start, stop)
     
     
 for stop in crops:
@@ -2334,39 +2261,6 @@ How many should fall outside the prior and posterior predictive checks
 
 # +
 # Analysis
-def summary_stats(m_data):
-    data = m_data.posterior.stats.sel(stat=['a_rhat', 'b_rhat', 'a_neff', 'b_neff'])
-    max_ = data.max('irow').values
-    min_ = data.min('irow').values
-    
-    std = data.std(dim='irow').values
-    med = data.median('irow').values
-    
-    return pd.DataFrame([max_, min_, med, std], 
-                        index=['max', 'min', 'med', 'std'], 
-                        columns=data.stat.values)
-
-def plot_lp(m_data):
-    az.plot_trace(m_data.sample_stats['lp'])
-
-def plot_prior(m_data, start=0, end=10):
-    az.plot_trace(m_data.prior.sel(irow=np.arange(start, end)))
-    
-def predictive_check(m_data, T='max', 
-                     map_axis_pair=('y_e', 'rrep')):
-    
-    var, dim = map_axis_pair
-    Tobs = (m_data.observed_data[var]).max(dim).values
-    Tprior = (m_data.prior_predictive[var]).max(dim).values
-    Tpost = (m_data.posterior_predictive[var]).max(dim).values
-    
-    prior_n, *_ = plt.hist(np.ravel(Tprior), bins=10, label='Prior predictive', alpha=0.8)
-    post_n, *_ = plt.hist(np.ravel(Tpost), bins=10, label='Posterior predictive', alpha=0.8)
-    ymax = max(np.mean(prior_n), np.mean(post_n))
-    plt.vlines(Tobs.item(), 0, ymax, 'k', label='observed')
-    plt.xlabel(f"T(y) : {T} spectral count")
-    
-    plt.legend()
 
 summary_stats(idata)
 plot_lp(idata)
