@@ -87,6 +87,15 @@ def bait_box_plot(ds, var='CRL_E', preysel=True, boxkwargs={}):
     save_plt()
     plt.close()
 
+def boxen_pair(ax, vals, title, xticks, xticklabels, rc_context, ylim, ylabel=None):
+    sns.boxenplot(vals, ax=ax)
+    with mpl.rc_context(rc_context):
+        ax.set_title(title)
+        ax.set_ylabel(ylabel)
+        ax.set_xticks(xticks, xticklabels)
+        ax.set_ylim(ylim)
+        return ax
+
 def colprint(name, value):
     print(f"N {name} {value}")
 
@@ -99,6 +108,27 @@ def center_and_scale_predictor(y, shift=2):
     return namedtuple('ParamScale', 'y mean var shift col_shape')(
         y, mean, var, shift, col_shape)
     
+def check_satisfaction(sym_s, obs_s, prob=0.9, var_names=['y_c', 'y_e'], dim='draw'):
+    """Does the distribution satisfy the observed data?"""
+    a = sym_s.min <= obs_s.min
+    b = sym_s.max >= obs_s.max
+    hdi_mean = ds_hdi(sym_s.mean, prob = prob, var_names = var_names, dim = dim)
+    hdi_var  = ds_hdi(sym_s.var,  prob = prob, var_names = var_names, dim = dim)
+    s1 = hdi_mean.sel(hdi='min') <= obs_s.mean
+    s2 = hdi_mean.sel(hdi='max') >= obs_s.mean
+    mean_sat = s1 & s2
+    s1 = hdi_var.sel(hdi='min') <= obs_s.var
+    s2 = hdi_var.sel(hdi='max') >= obs_s.var
+    var_sat = s1 & s2
+    return namedtuple('satisfaction',
+        'min max mean var')(a, b, mean_sat, var_sat)
+
+def certainty_score(ds):
+    """
+    The cumulative probabilty of a variable above 
+    """
+    return (ds > 0).sum(dim="draw") / idata.posterior.dims['draw']
+
 def corr_action(df, col1, col2):
     return sp.stats.pearsonr(df[col1].values, df[col2])
 
@@ -119,6 +149,9 @@ def concat_inf(i1, i2, dim='irow', sample_stats = True):
                            sample_stats=ss, prior_predictive=pp, prior=prior, observed_data=obs)
     else:
         raise ValueError('Sample stats not implemented')
+
+def compare_window_f(a, N, b):
+    return (N - b < a) & (a < N + b)
 
 def df_new2json(df):
     csel = [f"c{i}" for i in range(1, 13)]
@@ -145,6 +178,30 @@ def do_mcmc(model, rng_key, model_kwargs,Kernel=numpyro.infer.NUTS,Search=numpyr
     search.run(rng_key, **model_kwargs, **run_kwargs)
     return search
 
+def _get_summary_stats(y_sim, dims=('rrep', 'crep')):
+    return namedtuple('T', "mean min max var")(
+            y_sim.mean(dim=dims),
+            y_sim.min(dim=dims),
+            y_sim.max(dim=dims),
+            y_sim.var(dim=dims))
+
+def ds_get_summary_stats(ds, dims=('rrep', 'crep')):
+    return _get_summary_stats(ds, dims=dims)
+
+def ds_hdi(x: xr.Dataset, var_names, dim, prob=0.9):
+    axes = [x[name].get_axis_num(dim) for name in var_names]
+    assert len(np.unique(axes)) == 1, axes
+    axis_num = axes[0]
+    f = partial(da_hdi, dim=dim, prob=prob)
+    return x.map(f)
+    
+def da_hdi(x: xr.DataArray, dim, prob):
+    axis_num = x.get_axis_num(dim)
+    y = hpdi(x.values, axis=axis_num, prob=prob)
+    hdi = np.array(['min', 'max'])
+    coords = {'hdi': hdi, 'irow': x.coords['irow']}
+    return xr.DataArray(data=y, coords=coords, dims=['hdi', 'irow'])
+
 def exp_pdf(x, r):
     return r * np.exp(-x * r)
 
@@ -160,8 +217,27 @@ def fill_tensors(df, tensorR, tensorC, condition_name, bait_mapping, prey_mappin
         tensorC[condition_index][bait_index][prey_index] = [row[c] for c in c_cols]
     return tensorR, tensorC
 
+def htup(x) -> tuple:
+    return tuple('{:,}'.format(i) for i in x)
+
 def h(x):
-    return '{:,}'.format(x)
+    if isinstance(x, tuple):
+        return htup(x)
+    else:
+        return '{:,}'.format(x)
+
+def hists(ax, xs, labels, colors, alphas, bins, hist_kwargs = None):
+    if hist_kwargs is None:
+        hist_kwargs  = {}
+    for i in range(len(xs)):
+        ax.hist(xs[i], color=colors[i], alpha=alphas[i], bins=bins[i],
+               label=labels[i], **hist_kwargs)
+    return ax
+
+def inf_get_summary_stats(inf_data, chain_num=0):
+    return (ds_get_summary_stats(inf_data.prior_predictive.sel(chain=chain_num)),
+            ds_get_summary_stats(inf_data.posterior_predictive.sel(chain=chain_num)),
+            ds_get_summary_stats(inf_data.observed_data))
 
 def init_bsasa_ref(path="../significant_cifs/BSASA_reference.csv"):
     """Initialize the BSASA reference"""
@@ -428,6 +504,19 @@ def init_nuid(bsasa_ref) -> int:
     return len(set(
       bsasa_ref['Prey1'].values).
       union(bsasa_ref['Prey2'].values))
+
+def isOdd(x):
+    return x % 2 != 0
+
+def isHashable(x):
+    try:
+        hash(x)
+        return True
+    except TypeError:
+        return False
+
+def known_positives(ref_set):
+    return len(ref_set)
 
 def model(x=None, y=None):
     b = 0 #numpyro.sample('b', dist.Normal(0, 0.1))
@@ -764,6 +853,73 @@ def model6(hyper_a, hyper_b, a=None, b=None, y_c=None, y_e=None, poisson_sparse=
     numpyro.sample('y_c', dist.Poisson(b, is_sparse=poisson_sparse), obs=y_c)
     numpyro.sample('y_e', dist.Poisson(a, is_sparse=poisson_sparse), obs=y_e)
 
+def model7(cul5_e, elob_e, cbfb_e, cul5_ctrl, elob_ctrl, cbfb_ctrl,lrr1_e, purification_shape):
+    nrows, ncols = purification_shape
+    # alphas - replicate specific abundance factors
+    alpha_hyper = np.ones((4, 4)) * 5
+    beta_hyper = np.ones(purification_shape) * 200
+    # Batch the alphas over the number of pulldowns
+    alpha = numpyro.sample('a', dist.Normal(alpha_hyper, 1))
+    cul5_beta = numpyro.sample('cb', dist.HalfNormal(beta_hyper))
+    elob_beta = numpryo.sample('eb', dist.HalfNormal(beta_hyper))
+    cbfb_beta = numpyro.sample('bb', dist.HalfNormal(beta_hyper))
+    lrr1_beta = numpryo.sample('lb', dist.HalfNormal(beta_hyper))
+    numypro.sample('y_cul_e', dist.Poisson(cul5_beta * alpha[0, :]), obs=cul_e)
+
+def model8(ds, prey_max=None):
+    """
+    """
+    if prey_max is None:
+        prey_max = len(ds['preyu'].values)
+    n_bait = len(ds['bait'])
+    n_infections = len(ds['condition'])
+    n_replicates = len(ds['rrep'])
+    alpha_batch_shape = (n_bait, n_infections, n_replicates)
+    n_prey = len(ds['preyu'])
+    obs = ds['CRL_E'].transpose('preyu', 'bait', 'condition', 'rrep')
+    obs_c = ds['CRL_C'].transpose('preyu', 'bait', 'condition', 'crep')
+    obs_bait_counts = np.zeros(alpha_batch_shape)
+    n_control_replicates = 4 # Global domain knowledge
+    control_counts = np.zeros((n_prey, n_bait, n_infections, n_control_replicates))
+    # CBFB 1:4, CUL5 5:8, ELOB 9:12
+    csel_map = {'CBFB': [0, 1, 2, 3],
+            'CUL5': [4, 5, 6, 7],
+            'ELOB': [8, 9, 10, 11]}
+    for i, bait in enumerate(ds.bait):
+        if bait == 'CBFB':
+            prey_sel = 'PEBB'
+        else:
+            prey_sel = bait
+        obs_bait_counts[i, :, :] = obs.sel(bait=bait, preyu=prey_sel).values
+        columns = csel_map[bait.item()]
+        control_counts[:, i, :, :] = obs_c.sel(bait=bait, crep=columns).values
+    obs_bait_counts = jnp.array(obs_bait_counts, dtype=int)
+    obs_c = jnp.array(control_counts[0:prey_max, :, :, :], dtype=int)
+    if prey_max:
+        obs = obs.sel(preyu=obs.preyu[0:prey_max])
+    # epsilon: control counts
+    # Sample Bait alphas: bait rate
+    max_obs = jnp.max(obs_bait_counts)
+    #alpha_hyper_prior = jnp.ones(obs_bait_counts.shape) * max_obs
+    mean_ = obs_bait_counts.mean(axis=2)
+    alpha_hyper_prior = jnp.zeros(alpha_batch_shape)
+    assert mean_.shape == (n_bait, n_infections), mean_.shape
+    for i in range(n_replicates):
+        alpha_hyper_prior = alpha_hyper_prior.at[:, :, i].set(mean_)
+    alpha_hyper_prior = jnp.array(alpha_hyper_prior)
+    alpha = numpyro.sample('alpha', dist.Normal(alpha_hyper_prior, 20)) # rate
+    numpyro.sample('bait_obs', dist.Poisson(alpha), obs=obs_bait_counts)
+    # Sample betas: prey coefficient
+    n_prey = len(obs.preyu)
+    beta_batch_shape = (n_prey, n_bait, n_infections, n_replicates)
+    beta_hyper_prior = jnp.ones(beta_batch_shape) # HalfNormal Scale
+    beta = numpyro.sample('beta', dist.HalfNormal(scale=beta_hyper_prior)) # Unitless
+    numpyro.sample('obs_exp', dist.Poisson(beta * alpha), obs=obs.values)
+    max_control_obs = jnp.max(obs_c)
+    epsilon_hyper_prior = jnp.ones(beta_batch_shape) * max_control_obs # Prior over rates
+    epsilon = numpyro.sample('epsilon', dist.HalfNormal(epsilon_hyper_prior)) # Same prior as alpha
+    numpyro.sample('obs_ctrl', dist.Poisson(epsilon), obs=obs_c) # Independant of alpha * beta
+
 def multi_hist(hists, bins, labels, alphas, xlabel):
     for i in range(len(hists)):
         plt.hist(hists[i], bins=bins, label=labels[i], alpha=alphas[i])
@@ -788,10 +944,12 @@ def n_first_tryptic_cleavages(aa_seq):
 def n_first_typtic_cleavage_peptides(aa_seq):
     return 1 + n_first_tryptic_cleavages(aa_seq)
 
+def n_remaining_action(df):
+    return len(df)
+
 def plot_exp_dens(x, rate):
     y = np.exp(dist.Exponential(rate).log_prob(x)) / rate
     plt.plot(x, y, label=f"rate={rate}")
-
 
 def plot_lp(m_data):
     az.plot_trace(m_data.sample_stats['lp'])
@@ -817,7 +975,6 @@ def pos_ntotal(prey_pairs_df, col, threshold, comp=operator.le, pos_col='pdb_pos
     npos = np.sum(sub_df[pos_col].values)
     ntotal = len(sub_df)
     return npos, ntotal
-
 
 def preysel(df, prey_name, gene2uid):
     uid = gene2uid[prey_name]
@@ -848,6 +1005,30 @@ def parse_spec(df, spec_colname='Spec', ctrl_colname='ctrlCounts',n_spec=4, n_ct
         df.loc[:, ccol] = ctrls[:, i]
     return df
 
+def phase_space_of_protein_interactions(ax):
+    N = 4000
+    Imax = math.comb(N, 2)
+    
+    
+    #x = np.arange(1, N, 1)
+    #y = sp.special.comb(x, 2)
+    
+    x = np.arange(1, N)
+    y0 = sp.special.comb(x, 2)
+    yl = 0.004 * y0
+    yu = 0.014 * y0
+    
+    
+    
+    #ax.plot(x, y, 'k')
+    ax.plot(x, np.log10(y0))
+    ax.plot(x, np.log10(yl))
+    ax.plot(x, np.log10(yu))
+    #ax.plot(x, yl)
+    ax.set_xlabel("N unique proteins")
+    ax.set_ylabel("log10 N pairs")
+    return ax
+
 def print_bsasa_ref(bsasa_ref):
     sel = ~bsasa_ref['hasna'].values
     a = set(bsasa_ref.loc[sel, 'Prey1'].values) 
@@ -856,9 +1037,9 @@ def print_bsasa_ref(bsasa_ref):
     s = h(len(c))
     print((f"Of the {h(bsasa_ref.shape[0])} pairs in the BSASA reference\n"
            f"{h(sum(bsasa_ref['hasna'].values))} are NaN\n"
-           f"{h(len(set(bsasa_ref['PDBID'].values)))}"
+           f"{h(len(set(bsasa_ref['PDBID'].values)))} "
            f"PDB IDs are represented\n"
-           f"{h(len(set(bsasa_ref.loc[~bsasa_ref['hasna'], 'PDBID'])))}"
+           f"{h(len(set(bsasa_ref.loc[~bsasa_ref['hasna'], 'PDBID'])))} "
            f"PDBIDs after removing NaNs\n"
            f"There are {h(nuid)} Uniprot IDS\n"
            f"There are {s} Uniprot IDS"
@@ -900,6 +1081,9 @@ def print_(uid_total, interaction_total, direct_interaction_set,
         f"The remaining {uid_total - nuid} prey were not found in the PDB"
         f"This corresponds to {h(math.comb(uid_total - nuid, 2))} "
         "possible interactions"))
+
+def predicted_positives(ref_set, pred_set):
+    return len(pred_set)
 
 def permutation_test(rseed, vals, true, T, n_samples):
     t_true = T(true)
@@ -968,12 +1152,79 @@ def remove_prey_nan(bsasa_ref):
     bsasa_ref = bsasa_ref[notna]
     return bsasa_ref
 
+def remove_every_other(df):
+    assert len(df) % 2 == 0, f"Number of entries is not even"
+    return df.iloc[list(map(isOdd, range(0, len(df)))), :]
+
+def ref_df2ref_set(df, a, b):
+    return set([frozenset(i) for i in df.loc[:, [a, b]].values])
+
+def run_and_merge_models(df_new, from_, to, step, rng_key):
+    posterior = []
+    prior = []
+    observed = []
+    prior_p = []
+    post_p = []
+    log_like = []
+    sample_stats = []
+    
+    
+    intervals = list(range(from_, to, step))
+    for i in range(len(intervals)):
+        start = intervals[i]
+        end = start + step
+        print(start ,end)
+        rng_key, k1 = jax.random.split(rng_key)
+        
+        m_data = model52m_data(df_new, start, end, k1)
+        
+        posterior.append(m_data.posterior)
+        prior.append(m_data.prior)
+        observed.append(m_data.observed_data)
+        prior_p.append(m_data.prior_predictive)
+        log_like.append(m_data.log_likelihood)
+        sample_stats.append(m_data.sample_stats)
+    
+    posterior = xr.merge(posterior)
+    prior = xr.merge(prior)
+    observed = xr.merge(observed)
+    prior_p = xr.merge(prior_p)
+    post_p = xr.merge(post_p)
+    log_like = xr.merge(log_like)
+    sample_stats = xr.merge(sample_stats)
+    
+    
+    return av.InferenceData({'posterior': posterior, 'prior': prior, 'posterior_predictive': post_p,
+                            'prior_predictive': prior_p, 'log_likelihood': log_like,
+                            'observed_data': observed})
+
+def set2frozen_pairs(s):
+    """
+    s[a] -> s[f[a1, a2], ...]
+    
+    The set of unordered pairs 
+    """
+    return set([frozenset(i) for i in combinations(s, 2)])
+
 def slice_up_df_metric(df, thresholds, col, compare_f, action_f):
     results = []
     for t in thresholds:
         sel = compare_f(df[col].values, t)
         results.append(action_f(df[sel]))
     return results
+
+def satisfaction(inf_data, chain_num=0, dims=('rrep', 'crep')):
+    """Define Data Satisfaction in a simple way
+    - a dataset satifies the model if
+      - the obs mean is within the sample mean
+      - the obs variance is within the sample variance
+      - the sim min value <= obs min value
+      - the sim max value >= obs max value"""
+    y_pp_sim = inf_data.prior_predictive.sel(chain=chain_num)
+    y_Pp_sim = inf_data.posterior_predictive.sel(chain=chain_num)
+    pp_s, Pp_s, o_s = inf_get_summary_stats(inf_data, chain_num=chain_num)
+    return namedtuple("pc", "pp Pp obs")(check_satisfaction(pp_s, o_s),
+        check_satisfaction(Pp_s, o_s), o_s)
 
 def save_ax(ax):
     title = ax.title.get_text()
@@ -985,6 +1236,17 @@ def save_plt():
     title = ax.title.get_text()
     savename = title.replace(" ", "") + ".png"
     plt.savefig(savename, dpi=NOTEBOOK_DPI)
+
+def score_from_df(pred_df, ref_set, a, b, score_fun):
+    """
+    pred_df: prediction dataframe
+    ref_set: reference set
+    a: column
+    b: column
+    score_fun :: (ref_set -> pred_set -> int)
+    """
+    pred_set = set2frozen_pairs(two_col_union(pred_df, a, b))
+    return score_fun(ref_set, pred_set)
 
 def summary_stats(m_data):
     data = m_data.posterior.stats.sel(stat=['a_rhat', 'b_rhat', 'a_neff', 'b_neff'])
@@ -1005,9 +1267,77 @@ def summarize_col(df, col):
     for key, ufunc in d.items():
         colprint(f"{col} {key}", f(vals, ufunc))
 
+def simple_scatter(x, y, xname, yname, title=None):
+    plt.plot(x, y, 'k.')
+    plt.xlabel(xname)
+    plt.ylabel(yname)
+    plt.title(title)
+
+def scores_from_df(pred_df, thresholds, sel_col_name: str, ref_set,score_from_df_fun):
+    """
+    pred_df : DataFrame
+    thresholds : iterable[...]
+    sel_col_name: column to apply thresholds
+    ref_set: set
+    score_from_df_fun :: (pred_df -> ref_set -> int)
+    """
+    return [score_from_df_fun(df, ref_set) for df in [pred_df.loc[pred_df[sel_col_name]>=t] for t in thresholds]]
+
+def scores_from_df_fast(pred_df, thresholds, sel_col_name, ref_set, score_funs):
+    """
+    1. Select the subframe
+    2. Compute tp
+    3. Compute pp
+    4. return
+    """
+    nrows = len(thresholds)
+    ncols = len(score_funs)
+    scores = np.zeros((nrows, ncols))
+    for i, sub_df in enumerate((pred_df.loc[pred_df[sel_col_name] >= t] for t in thresholds)):
+        scores[i, :] = [score_fun(sub_df, ref_set) for score_fun in score_funs]
+    return scores
+
 def thresh_sel(t, x):
     """Return the number of remaining entries"""
     return len(x[x >= t])
+
+def to_satisfaction_frame(p_c):
+    """sat tup: A tuple from check_satsifaction"""
+    df = pd.DataFrame(index=p_c.mean.coords['irow'], data={
+        'mean_c': p_c.mean.y_c, 'mean_e': p_c.mean.y_e,
+        'var_e':  p_c.var.y_e, 'var_c':  p_c.var.y_c})
+    df.loc[:, 'all_e'] = np.alltrue(df.loc[:, ['mean_e', 'var_e']], axis=1)
+    df.loc[:, 'all_c'] = np.alltrue(df.loc[:, ['mean_c', 'var_c']], axis=1)
+    return df.loc[:, ['mean_c', 'var_c', 'all_c', 'mean_e', 'var_e', 'all_e']]
+
+def tp(ref_set, pred_set):
+    return len(ref_set.intersection(pred_set))
+
+def tp_over_pp_score(ref_set, pred_set):
+    tp_ = tp(ref_set, pred_set)
+    pp_ = len(pred_set)
+    if pp_ != 0:
+        return tp_ / pp_
+    else:
+        return 0
+
+def tp_from_df(df, ref_set):
+    prey_set = set(df['bait'].values).intersection(df)
+    
+def df2pp_tp(sub_df, threshold):
+    prey_set = set(sub_df['bait']).union(sub_df['PreyName'])
+    prey_pairs = set2frozen_pairs(prey_set)
+    n_predicted_positives = len(prey_pairs)
+    n_tp = tp(ref_set, prey_pairs)
+    return n_predicted_positives, n_tp
+
+def two_col_union(df, a, b):
+    """
+    The union of unique values from two columns
+    """
+    bait = set(df[a].values)
+    prey = set(df[b])
+    return bait | prey
 
 def un_center_and_scale_predictor(x, param_scale, min_value=1e-8, safe=True):
     if safe:
@@ -1042,28 +1372,137 @@ def xy_from(prey_pairs_df, col, thresholds, comp, pos_col):
         npos.append(p)
         ntot.append(nt)
     return np.array(ntot), np.array(npos)
+# Classes         
+class UnHashableRegister:
+    """
+    Object -> str
+    """
+    def __init__(self):
+        self.register = {} 
+    #
+    def put(self, obj, name: str):
+        assert isinstance(name, str)
+        self.register[name] = obj
+    #
+    def get_name(self, obj):
+        for name, ref_obj in self.register.items():
+            if obj is ref_obj:
+                return name
+    #
+    def pop(self, name):
+        for ref_name, ref_obj in self.register.items():
+            if name == ref_name:
+                break
+        self.register.pop(ref_name)
+        return ref_obj
 
-def n_remaining_action(df):
-    return len(df)
+class HashableRegister:
+    def __init__(self):
+        self.register = {}
+    # 
+    def put(self, obj, name):
+        assert isinstance(name, str)
+        self.register[obj] = name
+    # 
+    def get_name(self, obj):
+        return self.register[obj]
+    #
+    def pop(self, name):
+        return self.register.pop(name)
 
-def compare_window_f(a, N, b):
-    return (N - b < a) & (a < N + b)
-        
-def simple_scatter(x, y, xname, yname, title=None):
-    plt.plot(x, y, 'k.')
-    plt.xlabel(xname)
-    plt.ylabel(yname)
-    plt.title(title)
-    
+class NameRegister:
+    def __init__(self):
+        self.hashable_register = HashableRegister() 
+        self.unhashable_register = UnHashableRegister()
+        self.current_register = None
+    #
+    def set_current_register(self, obj):
+        if isHashable(obj):
+            self.current_register = self.hashable_register
+        else:
+            self.current_register = self.unhashable_register
+    # 
+    def put(self, obj, name):
+        assert isinstance(name, str)
+        self.set_current_register(obj)
+        self.current_register.put(obj, name)
+    # 
+    def get_name(self, obj):
+        self.set_current_register(obj)
+        return self.current_register.get_name(obj)
+
+nr = NameRegister()
+
+# Sali colors
+blue =   np.array([ 70, 90, 220, 255 ]) / 255
+black =  np.array([  0., 0.,  0.,  0.])
+gray =   np.array([ 55, 55,  55, 255 ]) / 255
+red =    np.array([197, 45, 15, 255]) / 255
+green =  np.array([50, 180, 0, 255]) / 255
+yellow = np.array([255, 204, 0, 255]) / 255
+
+nr.put(blue, 'blue')
+nr.put(black, 'black')
+nr.put(gray, 'gray')
+nr.put(red, 'red')
+nr.put(green, 'green')
+nr.put(yellow, 'yellow')
+
+#Plotting
+rc_dict = {'text.usetex': True,
+           'font.family': 'sans-serif'}
 # -
+
+
+"""
+Displaying User information in a Pretty way
+1. Getting the information
+   info :: 
+   
+
+2. Formatting it
+
+3. Displaying it
+   - pp :: pretty print
+"""
+
+def info_it(i):
+    return len(i)
+
+def info_unique_it(i):
+    return len(set(i))
+
+def format_loffset(x: str, offset=4):
+    return " " * offset + x
+
+
+def pp(i, f, g = lambda x: x, printf=print):
+    """
+    Pretty print
+    i :: an iterable   object
+    f :: (i -> int)    info getter
+    g :: (str -> str)  formater
+    printf A function for printing
+    ---
+    h :: (int -> str)
+    """
+    printf(g(h(f(i))))
+
 bsasa_ref = init_bsasa_ref()
+bsasa_ref = remove_prey_nan(bsasa_ref)
+bsasa_ref = remove_self_interactions(bsasa_ref)
+bsasa_ref = remove_every_other(bsasa_ref)
+nr.put(bsasa_ref, 'bsasa_ref')
 
 # +
 uid2seq, uid2seq_len = init_uid2seq()
+nr.put(uid2seq, 'uid2seq')
 # +
 
 direct_interaction_set = init_direct_interaction_set(bsasa_ref)
 nuid = init_nuid(bsasa_ref)
+nr.put(direct_interaction_set, 'direct_interaction_set')
+nr.put(nuid, 'nuid')
 
 print_bsasa_ref(bsasa_ref)
 
@@ -1082,9 +1521,7 @@ chain_mapping = pd.read_csv("../significant_cifs/chain_mapping_all.csv")
 # +
 table1 = pd.read_csv("../table1.csv")
 
-print(f"table 1 {table1.shape}\nBSASA REF {bsasa_ref.shape}")
-
-bsasa_ref = remove_prey_nan(bsasa_ref)
+print(f"table 1 {h(table1.shape)}\nBSASA REF {h(bsasa_ref.shape)}")
 
 pdb_set = set(bsasa_ref['PDBID'].values)
 prey_set = set(bsasa_ref['Prey1'].values).union(bsasa_ref['Prey2'].values)
@@ -1116,18 +1553,29 @@ print(f"4n9f {'4n9f' in pdb_set}")
 # ELOB and ELOC were not found in 4n9f because ... hhblits did not find 4n9f for these inputs.
 
 
-bsasa_ref = remove_self_interactions(bsasa_ref)
 
 print(f"\nNon self {bsasa_ref.shape}")
 print("-------------------")
 
-plt.hist(bsasa_ref['bsasa_lst'].values, bins=30, color='r')
+fig, ax = plt.subplots(1, 1)
+vals = bsasa_ref['bsasa_lst'].values
+ax.hist(vals, bins=200, range=(0, int(1e4))) 
 #plt.show()
-plt.savefig("tmp.png", dpi=300)
+tx = 0.5 
+ty = 0.5 
+s = f"N={h(len(vals))}"
+plt.text(tx, ty, s, transform=ax.transAxes)
+plt.title("Chain Buried Solvent Accesible Surface Area")
+plt.xlabel("BSASA (A^2)")
+plt.ylabel("Count")
+plt.vlines(500, 0, 20000, 'r', linestyles='dashed', label="500 A cutoff")
+plt.legend()
+plt.tight_layout()
+save_plt()
+plt.close()
 
 summarize_col(bsasa_ref, 'bsasa_lst')
     
-
 interaction_set = init_interaction_set(bsasa_ref)
 
 n_possible_interactions = math.comb(uid_total, 2)
@@ -1167,8 +1615,8 @@ cocomplexes = init_cocomplexes(complexes)
 print(f"N cocomplexes {h(len(cocomplexes.keys()))}")
 
 cocomplex_uid_set = init_cocomplex_uid_set(cocomplexes)
+# Long Running Cell
 cocomplex_pairs = list(combinations(cocomplex_uid_set, 2))
-
 
 cocomplex_df = init_cocomplex_df(cocomplex_pairs, cocomplexes)
 
@@ -1186,8 +1634,10 @@ vals = cocomplex_df['NPDBS'].values
 title = "N PDBS per Cocomplex prey pair"
 savename = title.replace(" ", "") + ".png"
 plt.title(title)
-plt.hist(vals, bins=(len(set(vals)) // 1), range=(0, 100))
+plt.hist(vals, bins=(len(set(vals)) // 1), range=(0, 600))
 plt.xlabel("N PDBS")
+plt.ylabel("Count")
+plt.tight_layout()
 plt.savefig(savename, dpi=NOTEBOOK_DPI)
 plt.close()
 #plt.show()
@@ -2124,49 +2574,6 @@ posterior_samples['a'].shape
 start = 0
 end = 100
 
-    
-def run_and_merge_models(df_new, from_, to, step, rng_key):
-    posterior = []
-    prior = []
-    observed = []
-    prior_p = []
-    post_p = []
-    log_like = []
-    sample_stats = []
-    
-    
-    intervals = list(range(from_, to, step))
-    for i in range(len(intervals)):
-        start = intervals[i]
-        end = start + step
-        print(start ,end)
-        rng_key, k1 = jax.random.split(rng_key)
-        
-        m_data = model52m_data(df_new, start, end, k1)
-        
-        posterior.append(m_data.posterior)
-        prior.append(m_data.prior)
-        observed.append(m_data.observed_data)
-        prior_p.append(m_data.prior_predictive)
-        log_like.append(m_data.log_likelihood)
-        sample_stats.append(m_data.sample_stats)
-    
-    posterior = xr.merge(posterior)
-    prior = xr.merge(prior)
-    observed = xr.merge(observed)
-    prior_p = xr.merge(prior_p)
-    post_p = xr.merge(post_p)
-    log_like = xr.merge(log_like)
-    sample_stats = xr.merge(sample_stats)
-    
-    
-    return av.InferenceData({'posterior': posterior, 'prior': prior, 'posterior_predictive': post_p,
-                            'prior_predictive': prior_p, 'log_likelihood': log_like,
-                            'observed_data': observed})
-    
-    
-
-
 # -
 
 
@@ -2290,90 +2697,7 @@ fig.tight_layout()
 #inf_data.posterior.stat
 
 # +
-def _get_summary_stats(y_sim, dims=('rrep', 'crep')):
-    return namedtuple('T', "mean min max var")(
-            y_sim.mean(dim=dims),
-            y_sim.min(dim=dims),
-            y_sim.max(dim=dims),
-            y_sim.var(dim=dims))
 
-def ds_get_summary_stats(ds, dims=('rrep', 'crep')):
-    return _get_summary_stats(ds, dims=dims)
-
-def inf_get_summary_stats(inf_data, chain_num=0):
-    return (ds_get_summary_stats(inf_data.prior_predictive.sel(chain=chain_num)),
-            ds_get_summary_stats(inf_data.posterior_predictive.sel(chain=chain_num)),
-            ds_get_summary_stats(inf_data.observed_data))
-
-def check_satisfaction(sym_s, obs_s, prob=0.9, 
-    var_names=['y_c', 'y_e'],
-    dim='draw'):
-
-    """
-    Does the distribution satisfy the observed data?
-    """
-
-    a = sym_s.min <= obs_s.min
-    b = sym_s.max >= obs_s.max
-
-    hdi_mean = ds_hdi(sym_s.mean, prob = prob, var_names = var_names, dim = dim)
-    hdi_var  = ds_hdi(sym_s.var,  prob = prob, var_names = var_names, dim = dim)
-    
-    s1 = hdi_mean.sel(hdi='min') <= obs_s.mean
-    s2 = hdi_mean.sel(hdi='max') >= obs_s.mean
-    
-    mean_sat = s1 & s2
-    
-    s1 = hdi_var.sel(hdi='min') <= obs_s.var
-    s2 = hdi_var.sel(hdi='max') >= obs_s.var
-    
-    var_sat = s1 & s2
-
-
-
-    return namedtuple('satisfaction', 'min max mean var')(
-        a, b, mean_sat, var_sat
-    )
-
-def satisfaction(inf_data, chain_num=0, dims=('rrep', 'crep')):
-    """
-    Define Data Satisfaction in a simple way
-
-    - a dataset satifies the model if
-      - the obs mean is within the sample mean
-      - the obs variance is within the sample variance
-      - the sim min value <= obs min value
-      - the sim max value >= obs max value
-    """
-    
-    y_pp_sim = inf_data.prior_predictive.sel(chain=chain_num)
-    y_Pp_sim = inf_data.posterior_predictive.sel(chain=chain_num)
-    
-    pp_s, Pp_s, o_s = inf_get_summary_stats(inf_data, chain_num=chain_num)
-    
-    
-    return namedtuple("pc", "pp Pp obs")(
-        check_satisfaction(pp_s, o_s), 
-        check_satisfaction(Pp_s, o_s),
-        o_s
-    )
-
-
-def ds_hdi(x: xr.Dataset, var_names, dim, prob=0.9):
-    
-    axes = [x[name].get_axis_num(dim) for name in var_names]
-    assert len(np.unique(axes)) == 1, axes
-    axis_num = axes[0]
-    f = partial(da_hdi, dim=dim, prob=prob)
-    return x.map(f)
-    
-
-def da_hdi(x: xr.DataArray, dim, prob):
-    axis_num = x.get_axis_num(dim)
-    y = hpdi(x.values, axis=axis_num, prob=prob)
-    hdi = np.array(['min', 'max'])
-    coords = {'hdi': hdi, 'irow': x.coords['irow']}
-    return xr.DataArray(data=y, coords=coords, dims=['hdi', 'irow'])
 
 
 # Shared dimensions: irow
@@ -2381,20 +2705,6 @@ def da_hdi(x: xr.DataArray, dim, prob):
 
 # Passing Frame
 
-def to_satisfaction_frame(p_c):
-    """
-    sat tup: A tuple from check_satsifaction
-    """
-    
-    df = pd.DataFrame(index=p_c.mean.coords['irow'], data={
-        'mean_c': p_c.mean.y_c,
-        'mean_e': p_c.mean.y_e,
-        'var_e':  p_c.var.y_e,
-        'var_c':  p_c.var.y_c
-    })
-    df.loc[:, 'all_e'] = np.alltrue(df.loc[:, ['mean_e', 'var_e']], axis=1)
-    df.loc[:, 'all_c'] = np.alltrue(df.loc[:, ['mean_c', 'var_c']], axis=1)
-    return df.loc[:, ['mean_c', 'var_c', 'all_c', 'mean_e', 'var_e', 'all_e']]
 
 
 # -
@@ -2408,10 +2718,7 @@ post_sat = to_satisfaction_frame(sat.Pp)
 # Prior and posterior predictive check example
 # Checks of simulation
 
-
-irow_sel = 9000 #8432
-
-
+irow_sel = 9_000 #8432
 
 fig, axs = plt.subplots(nrows = 1, ncols=2)
 dsel = idata.prior_predictive.sel(irow=irow_sel)
@@ -2455,13 +2762,6 @@ plt.show()
 # +
 alpha=0.9
 
-blue = np.array([70, 90, 220, 255]) / 255
-black = np.array([0., 0., 0., 0.])
-gray = np.array([55, 55, 55, 255]) / 255
-red = np.array([197, 45, 15, 255]) / 255
-green = np.array([50, 180, 0, 255])
-yellow = np.array([255, 204, 0, 255]) / 255
-
 
 #fig, axs = plt.subplots(nrows=1, nc)
 (prior_sat.sum() / len(prior_sat)).plot(kind='bar', label='prior predictive', color=red)
@@ -2476,29 +2776,6 @@ plt.savefig(f"O{nobs}N{nsamples}.png", dpi=300)
 
 
 # +
-def phase_space_of_protein_interactions(ax):
-    N = 4000
-    Imax = math.comb(N, 2)
-    
-    
-    #x = np.arange(1, N, 1)
-    #y = sp.special.comb(x, 2)
-    
-    x = np.arange(1, N)
-    y0 = sp.special.comb(x, 2)
-    yl = 0.004 * y0
-    yu = 0.014 * y0
-    
-    
-    
-    #ax.plot(x, y, 'k')
-    ax.plot(x, np.log10(y0))
-    ax.plot(x, np.log10(yl))
-    ax.plot(x, np.log10(yu))
-    #ax.plot(x, yl)
-    ax.set_xlabel("N unique proteins")
-    ax.set_ylabel("log10 N pairs")
-    return ax
 
 fig, ax = plt.subplots(1, 1)
 phase_space_of_protein_interactions(ax)
@@ -2561,39 +2838,21 @@ df_new.sort_values('nprVar', ascending=False).loc[:, ['bait'] + rsel + ['nprVar'
 
 df_new.loc[~post_sat['var_c'].values, rsel + csel + ['bait']]
 
-
-def boxen_pair(ax, vals, title, xticks, xticklabels, rc_context, ylim, ylabel=None):
-    sns.boxenplot(vals, ax=ax)
-    with mpl.rc_context(rc_context):
-        ax.set_title(title)
-        ax.set_ylabel(ylabel)
-        ax.set_xticks(xticks, xticklabels)
-        ax.set_ylim(ylim)
-        return ax
-
-
 # +
 # Plot posterior shrinkage
 
-rc_dict = {'text.usetex': True,
-           'font.family': 'sans-serif'}
 
 with mpl.rc_context(rc_dict):
     fig, axs = plt.subplots(1, 2) # The original figure must share the rc_dict
     ylim = (0, 300)
     tmp = idata#.sel(irow=np.arange(20))
-
     a = np.ravel(tmp.posterior.sel(chain=0)['a'])
     b = np.ravel(tmp.posterior.sel(chain=0)['b'])
-
     xlabels = ["$$ \\alpha $$", "$$ \\beta $$"]
     #xlabels = ['a', 'b']
-
     boxen_pair(axs[1], [a, b], "Posterior", [0, 1], xlabels, rc_dict, ylim)
-
     a = np.ravel(tmp.prior.sel(chain=0)['a'])
     b = np.ravel(tmp.prior.sel(chain=0)['b'])
-
     boxen_pair(axs[0], [a, b], "Prior", [0, 1], xlabels, rc_dict, ylim, ylabel="Poisson rate")
     plt.savefig("PosteriorShrinkage.png", dpi=300)
     plt.close()
@@ -2601,16 +2860,6 @@ with mpl.rc_context(rc_dict):
 
 # -
 
-def hists(ax, xs, labels, colors, alphas, bins, hist_kwargs = None):
-    if hist_kwargs is None:
-        hist_kwargs  = {}
-    for i in range(len(xs)):
-        ax.hist(xs[i], color=colors[i], alpha=alphas[i], bins=bins[i],
-               label=labels[i], **hist_kwargs)
-    return ax
-
-
-notebook_dpi = 300
 with mpl.rc_context(mpl.rcParams):
     fig, ax = plt.subplots(1, 1)
     x1 = (idata.posterior['a'] - idata.posterior['b']).sel(chain=0, irow=3)
@@ -2624,20 +2873,12 @@ with mpl.rc_context(mpl.rcParams):
     ax.legend()
     ax.set_xlabel("Poisson Rate Difference")
     ax.set_ylabel("Counts")
-    plt.savefig("RateDifference", dpi=notebook_dpi)
+    plt.savefig("RateDifference", dpi=NOTEBOOK_DPI)
 
 
 # +
 # Posterior Certainty - cumulative probability mass above 0
 
-def certainty_score(ds):
-    """
-    The cumulative probabilty of a variable above 
-    """
-    return (ds > 0).sum(dim="draw") / idata.posterior.dims['draw']
-    
-    
-    
 # -
 
 posterior_certainties = certainty_score((idata.posterior['a'] - idata.posterior['b']).sel(chain=0, col=0))
@@ -2666,18 +2907,6 @@ plt.savefig("ScoreDistNear.png", dpi=notebook_dpi)
 # ?xy_from
 
 # +
-def xy_plot(ax, x, y, fmt_str="", xlabel=None, ylabel=None, alpha=1, label=None, kwargs=None,
-           title=None):
-    if kwargs is None:
-        kwargs = {}
-    ax.plot(x, y, fmt_str, alpha=alpha, label=label, **kwargs)
-
-    if xlabel:
-        ax.set_xlabel(xlabel)
-    if ylabel:
-        ax.set_ylabel(ylabel)
-    if title:
-        ax.set_title(title)
 fig, ax = plt.subplots(1, 2)
 #ax[0].plot(prior_certainties, df_new['SaintScore'].values, 'b.', alpha=0.1)
 
@@ -2777,94 +3006,10 @@ b = df_new[c1].values
 Some functions to benchmark AP-MS scoring functions
 """
 
-def two_col_union(df, a, b):
-    """
-    The union of unique values from two columns
-    """
-    bait = set(df[a].values)
-    prey = set(df[b])
-    return bait | prey
-
-def ref_df2ref_set(df, a, b):
-    return set([frozenset(i) for i in df.loc[:, [a, b]].values])
-
-
-def set2frozen_pairs(s):
-    """
-    s[a] -> s[f[a1, a2], ...]
-    
-    The set of unordered pairs 
-    """
-    return set([frozenset(i) for i in combinations(s, 2)])
-
-
-def tp(ref_set, pred_set):
-    return len(ref_set.intersection(pred_set))
-
-def tp_over_pp_score(ref_set, pred_set):
-    tp_ = tp(ref_set, pred_set)
-    pp_ = len(pred_set)
-    
-    if pp_ != 0:
-        return tp_ / pp_
-    else:
-        return 0
-
-def predicted_positives(ref_set, pred_set):
-    return len(pred_set)
-
-def known_positives(ref_set):
-    return len(ref_set)
-
-
-def score_from_df(pred_df, ref_set, a, b, score_fun):
-    """
-    pred_df: prediction dataframe
-    ref_set: reference set
-    a: column
-    b: column
-    score_fun :: (ref_set -> pred_set -> int)
-    """
-    pred_set = set2frozen_pairs(two_col_union(pred_df, a, b))
-    return score_fun(ref_set, pred_set)
-
 tp_over_pp_score_from_df = partial(score_from_df, score_fun=tp_over_pp_score)
 tp_from_df = partial(score_from_df, score_fun=tp)
 
-
-def scores_from_df(pred_df, 
-                   thresholds, 
-                   sel_col_name: str, 
-                   ref_set,
-                   score_from_df_fun):
-    """
-    pred_df : DataFrame
-    thresholds : iterable[...]
-    sel_col_name: column to apply thresholds
-    ref_set: set
-    score_from_df_fun :: (pred_df -> ref_set -> int)
-    """
-    
-    return [score_from_df_fun(df, ref_set) for df in [pred_df.loc[pred_df[sel_col_name]>=t] for t in thresholds]]
-
-
 # -
-
-def scores_from_df_fast(pred_df, thresholds, sel_col_name, ref_set, score_funs):
-    """
-    1. Select the subframe
-    2. Compute tp
-    3. Compute pp
-    4. return
-    """
-    
-    nrows = len(thresholds)
-    ncols = len(score_funs)
-    
-    scores = np.zeros((nrows, ncols))
-    for i, sub_df in enumerate((pred_df.loc[pred_df[sel_col_name] >= t] for t in thresholds)):
-        scores[i, :] = [score_fun(sub_df, ref_set) for score_fun in score_funs]
-    return scores
 
 
 # +
@@ -2899,37 +3044,19 @@ posterior_predictions = []
 prior_predictions = []
 
 
-def tp_from_df(df, ref_set):
-    prey_set = set(df['bait'].values).intersection(df)
-    
-def df2pp_tp(sub_df, threshold):
-    prey_set = set(sub_df['bait']).union(sub_df['PreyName'])
-    prey_pairs = set2frozen_pairs(prey_set)
-    
-    n_predicted_positives = len(prey_pairs)
-    n_tp = tp(ref_set, prey_pairs)
-    return n_predicted_positives, n_tp
-
 for threshold in thresholds:
     saint_subdf = df_new.loc[df_new['SaintScore'] >= threshold]
     prior_subdf = df_new.loc[df_new['PriorCertainty'] >= threshold]
     post_subdf  = df_new.loc[df_new['PostCertainty'] >= threshold]
-    
     saint_predictions.append(df2pp_tp(saint_subdf, threshold))
     prior_predictions.append(df2pp_tp(prior_subdf, threshold))
     posterior_predictions.append(df2pp_tp(post_subdf, threshold))
-    
-
     print(threshold)
-
-
-
 
 # +
 saint_predictions_arr = np.array(saint_predictions)
 prior_predictions_arr = np.array(prior_predictions)
 postr_predictions_arr = np.array(posterior_predictions)
-
 
 #saint_predictions[:, 0] = sp.special.comb(saint_predictions[:, 0], 2)
 # -
@@ -2965,146 +3092,6 @@ ax.set_xlim((xstart, xend))
 #ax.set_ylim((0, 500))
 plt.savefig("null_benchmark.png", dpi=notebook_dpi)
 
-
-# -
-
-def model5(a=None, b=None, y_c=None, y_e=None, poisson_sparse=True, batch_shape=()):
-    """
-    a:  experimental rate
-    b:  control rate
-    y_e: experimental obs
-    y_c: control obs
-    """
-    #max_val = np.max([np.max(y_c), np.max(y_e)])
-    # Assum the true rates are within 10 + 2 * max observed value
-    hyper = np.ones(batch_shape) * 200 #* max_val
-    if a is None:
-        a = numpyro.sample('a', dist.HalfNormal(hyper))
-    if b is None:
-        b = numpyro.sample('b', dist.HalfNormal(hyper))
-    # predictive checks
-    nrows, ncols = batch_shape
-    if y_c is None:
-        b = jnp.ones((nrows, 12)) * b
-    if y_e is None:
-        a = jnp.ones((nrows, 4)) * a
-    numpyro.sample('y_c', dist.Poisson(b, is_sparse=poisson_sparse), obs=y_c)
-    numpyro.sample('y_e', dist.Poisson(a, is_sparse=poisson_sparse), obs=y_e)
-
-# +
-# Two Unknowns - it isn't known how manuy of these true interactions are supported by the data
-# May need another benchmark criteria for indirect bait prey interactions
-
-
-# Model the protein abundance parameters
-
-def model7(cul5_e, elob_e, cbfb_e, cul5_ctrl, elob_ctrl, cbfb_ctrl,
-           lrr1_e, purification_shape,):
-    
-    nrows, ncols = purification_shape
-    
-    # alphas - replicate specific abundance factors
-    alpha_hyper = np.ones((4, 4)) * 5
-    beta_hyper = np.ones(purification_shape) * 200
-    
-    # Batch the alphas over the number of pulldowns
-    
-    alpha = numpyro.sample('a', dist.Normal(alpha_hyper, 1))
-    
-    cul5_beta = numpyro.sample('cb', dist.HalfNormal(beta_hyper))
-    elob_beta = numpryo.sample('eb', dist.HalfNormal(beta_hyper))
-    cbfb_beta = numpyro.sample('bb', dist.HalfNormal(beta_hyper))
-    lrr1_beta = numpryo.sample('lb', dist.HalfNormal(beta_hyper))
-    
-    numypro.sample('y_cul_e', dist.Poisson(cul5_beta * alpha[0, :]), obs=cul_e)
-
-
-# -
-
-def model8(ds, prey_max=None):
-    """
-    
-    
-    """
-    if prey_max is None:
-        prey_max = len(ds['preyu'].values)
-    
-    n_bait = len(ds['bait'])
-    n_infections = len(ds['condition'])
-    n_replicates = len(ds['rrep'])
-    alpha_batch_shape = (n_bait, n_infections, n_replicates)
-    n_prey = len(ds['preyu'])
-    
-    obs = ds['CRL_E'].transpose('preyu', 'bait', 'condition', 'rrep')
-    obs_c = ds['CRL_C'].transpose('preyu', 'bait', 'condition', 'crep')
-    
-    obs_bait_counts = np.zeros(alpha_batch_shape)
-    
-    n_control_replicates = 4 # Global domain knowledge
-    
-    control_counts = np.zeros((n_prey, n_bait, n_infections, n_control_replicates))
-    
-    # CBFB 1:4, CUL5 5:8, ELOB 9:12
-    
-    csel_map = {'CBFB': [0, 1, 2, 3],
-            'CUL5': [4, 5, 6, 7],
-            'ELOB': [8, 9, 10, 11]}
-
-    for i, bait in enumerate(ds.bait):
-        if bait == 'CBFB':
-            prey_sel = 'PEBB'
-        else:
-            prey_sel = bait
-        
-        obs_bait_counts[i, :, :] = obs.sel(bait=bait, preyu=prey_sel).values
-        
-        columns = csel_map[bait.item()]
-        control_counts[:, i, :, :] = obs_c.sel(bait=bait, crep=columns).values
-    
-    
-    obs_bait_counts = jnp.array(obs_bait_counts, dtype=int)
-    
-    obs_c = jnp.array(control_counts[0:prey_max, :, :, :], dtype=int)
-    
-    if prey_max:
-        obs = obs.sel(preyu=obs.preyu[0:prey_max])
-        
-    # epsilon: control counts
-    
-
-    # Sample Bait alphas: bait rate
-    max_obs = jnp.max(obs_bait_counts)
-    #alpha_hyper_prior = jnp.ones(obs_bait_counts.shape) * max_obs
-    
-    mean_ = obs_bait_counts.mean(axis=2)
-    alpha_hyper_prior = jnp.zeros(alpha_batch_shape)
-    
-    assert mean_.shape == (n_bait, n_infections), mean_.shape
-    
-    for i in range(n_replicates):
-        alpha_hyper_prior = alpha_hyper_prior.at[:, :, i].set(mean_)
-    
-    alpha_hyper_prior = jnp.array(alpha_hyper_prior)
-    
-    alpha = numpyro.sample('alpha', dist.Normal(alpha_hyper_prior, 20)) # rate
-    numpyro.sample('bait_obs', dist.Poisson(alpha), obs=obs_bait_counts)
-    
-    # Sample betas: prey coefficient
-    n_prey = len(obs.preyu)
-    beta_batch_shape = (n_prey, n_bait, n_infections, n_replicates)
-    
-    beta_hyper_prior = jnp.ones(beta_batch_shape) # HalfNormal Scale
-    beta = numpyro.sample('beta', dist.HalfNormal(scale=beta_hyper_prior)) # Unitless
-    numpyro.sample('obs_exp', dist.Poisson(beta * alpha), obs=obs.values)
-    
-    max_control_obs = jnp.max(obs_c)
-    
-    epsilon_hyper_prior = jnp.ones(beta_batch_shape) * max_control_obs # Prior over rates
-    epsilon = numpyro.sample('epsilon', dist.HalfNormal(epsilon_hyper_prior)) # Same prior as alpha
-    numpyro.sample('obs_ctrl', dist.Poisson(epsilon), obs=obs_c) # Independant of alpha * beta
-    
-
-# +
 # Compare control counts
 tmp = ds.sel(bait=['CBFB', 'CUL5', 'ELOB'])
 for bait_test in ['CBFB', 'CUL5', 'ELOB']:
