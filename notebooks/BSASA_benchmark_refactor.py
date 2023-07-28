@@ -105,6 +105,19 @@ def init_Bait2bait_Bait2condition(df_all):
             Bait2condition[key + val + '_MG132'] = val
     return Bait2bait, Bait2condition        
 
+def init_dfs(xlsx_path="../1-s2.0-S1931312819302537-mmc2.xlsx"):
+    xlsx_file = xlsx_path
+    df1 = pd.read_excel(xlsx_file, 0)
+    df2 = pd.read_excel(xlsx_file, 1)
+    df3 = pd.read_excel(xlsx_file, 2)
+    df1 = df1[df1['PreyGene'] != 'IGHG1_MOUSE']
+    df2 = df2[df2['PreyGene'] != 'IGHG1_MOUSE']
+    df3 = df3[df3['PreyGene'] != 'IGHG1_MOUSE']
+    assert "IGHG1_MOUSE" not in df1.values
+    assert "IGHG1_MOUSE" not in df2.values
+    assert "IGHG1_MOUSE" not in df3.values
+    return df1, df2, df3
+
 def init_direct_matrix(nprey, preyu, preyv, bsasa_ref):
     direct_matrix = xr.DataArray(np.zeros((nprey, nprey)), 
         coords={"preyu": preyu, "preyv": preyv}, dims=["preyu", "preyv"])
@@ -187,6 +200,44 @@ def init_direct_interaction_set(bsasa_ref) -> set:
     sel = ~bsasa_ref['hasna'].values
     return {frozenset(
         (r['Prey1'], r['Prey2'])) : "" for i, r in bsasa_ref.loc[sel, :].iterrows()}
+
+def init_interactions(df_all, cocomplex_df, bsasa_ref):
+    #direct_interaction_saint = []
+    direct_interaction = []
+    direct_interaction_labels = []
+    cocomplex_interactions = []
+    #cocomplex_interaction_saint = []
+    cocomplex_interaction_labels = []
+    unknown = []
+    cocomplex_pairs = [frozenset((row['Prey1'], row['Prey2']))
+                       for i, row in cocomplex_df.iterrows()]
+    bsasa_ref_pairs = [frozenset((row['Prey1'], row['Prey2']))
+                       for i, row in bsasa_ref.iterrows()]
+    for i, row in df_all.iterrows():
+        bait_uid = row["BaitUID"]
+        prey_uid = row["Prey"]
+        pair = frozenset((bait_uid, prey_uid))
+        found = False
+        if pair in cocomplex_pairs:
+            cocomplex_interactions.append(1)
+            cocomplex_interaction_labels.append(pair)
+            found = True
+        else:
+            cocomplex_interactions.append(0)
+        if pair in bsasa_ref_pairs:
+            direct_interaction.append(1)
+            direct_interaction_labels.append(pair)
+            found = True
+        else:
+            direct_interaction.append(0)
+        if not found:
+            unknown.append(1)
+        else:
+            unknown.append(0)
+    unknown = np.array(unknown)
+    direct_interaction = np.array(direct_interaction)
+    cocomplex_interactions = np.array(cocomplex_interactions)
+    return direct_interaction, cocomplex_interactions, unknown
 
 def init_tensorRandC(df_new, rsel, csel, preyu, bait, conditions, fill_tensors):
     # expeRiment tensor
@@ -290,6 +341,13 @@ def init_nuid(bsasa_ref) -> int:
     return len(set(
       bsasa_ref['Prey1'].values).
       union(bsasa_ref['Prey2'].values))
+# Function for plotting an accuracy curve
+def pos_ntotal(prey_pairs_df, col, threshold, comp=operator.le, pos_col='pdb_pos'):
+    sel = prey_pairs_df[col] <= threshold
+    sub_df = prey_pairs_df.loc[sel, :]
+    npos = np.sum(sub_df[pos_col].values)
+    ntotal = len(sub_df)
+    return npos, ntotal
 
 def remove_self_interactions(bsasa_ref):
     sel = bsasa_ref["Prey1"].values != bsasa_ref["Prey2"].values
@@ -302,7 +360,7 @@ def preysel(df, prey_name, gene2uid):
     sel2 = df['Prey2'] == uid
     return df[sel1 | sel2]
 
-def parse_spec(df, spec_colname='Spec',ctrl_colname='ctrlcounts',n_spec=4, n_ctrl=12):
+def parse_spec(df, spec_colname='Spec', ctrl_colname='ctrlCounts',n_spec=4, n_ctrl=12):
     """Parse the Spec and CtrlCounts columns"""
     rsel = [f"r{i}" for i in range(1, n_spec + 1)]
     csel = [f"c{i}" for i in range(1, n_ctrl + 1)]
@@ -378,25 +436,6 @@ def print_(uid_total, interaction_total, direct_interaction_set,
         f"This corresponds to {h(math.comb(uid_total - nuid, 2))} "
         "possible interactions"))
 
-def remove_prey_nan(bsasa_ref):
-    """Remove nans from DataFrame for Prey1 and Prey2 columns"""
-    notna = pd.notna(bsasa_ref["Prey1"].values)
-    bsasa_ref = bsasa_ref[notna]
-    notna = pd.notna(bsasa_ref["Prey2"].values)
-    bsasa_ref = bsasa_ref[notna]
-    return bsasa_ref
-
-
-def summarize_col(df, col):
-    """Print summary stats for a DataFrame column"""
-    vals = df[col].values
-    def f(x, g):
-        return h(np.round(g(x), 2))
-    d = {"min": np.min, "max": np.max,
-         "mean": np.mean, "var": np.var}
-    for key, ufunc in d.items():
-        colprint(f"{col} {key}", f(vals, ufunc))
-
 def permutation_test(rseed, vals, true, T, n_samples):
     t_true = T(true)
     N = len(true)
@@ -405,17 +444,16 @@ def permutation_test(rseed, vals, true, T, n_samples):
     results = T(sampling, axis=0)
     true_result = T(true)
     return np.array(results), np.array(true_result)
-        
     
 def plot_sampling(results, true_result, v0, v1, test_stat="",
         backend='seaborn', title="", vkwargs={'color':'r', 'label': 'True'},
         histkwargs={'label':'Null'}, tx=0, ty=5, ts=f"N samples {''}\nSize {''}",
-        nbins=None, savefig=False):
+        nbins=None, savefig=False, show=False, ax=None):
     nsamples = len(results)
     if not nbins:
         nbins = min(nsamples // 10, 100)
     if backend == 'seaborn':
-        ax = sns.histplot(results, bins=nbins, **histkwargs)
+        ax = sns.histplot(results, bins=nbins, **histkwargs, ax=ax)
     elif backend == 'mpl':
         ax = plt.hist(results, bins=nbins, **histkwargs)
     ts = ts + f"\np-value {pval(results, true_result)}"
@@ -428,12 +466,36 @@ def plot_sampling(results, true_result, v0, v1, test_stat="",
         assert title != ""
         savename = title.replace(" ", "") + ".png"
         plt.savefig(savename, dpi=NOTEBOOK_DPI) 
-    plt.show()
+    if show:
+        plt.show()
     return ax
     
 def pval(results, true_results):
     N = len(results)
     return np.sum(results >= true_result) / N
+
+def save_ax(ax):
+    title = ax.title.get_text()
+    savename = title.replace(" ", "") + ".png"
+    plt.savefig(savename, ax=ax, dpi=NOTEBOOK_DPI)
+
+def remove_prey_nan(bsasa_ref):
+    """Remove nans from DataFrame for Prey1 and Prey2 columns"""
+    notna = pd.notna(bsasa_ref["Prey1"].values)
+    bsasa_ref = bsasa_ref[notna]
+    notna = pd.notna(bsasa_ref["Prey2"].values)
+    bsasa_ref = bsasa_ref[notna]
+    return bsasa_ref
+
+def summarize_col(df, col):
+    """Print summary stats for a DataFrame column"""
+    vals = df[col].values
+    def f(x, g):
+        return h(np.round(g(x), 2))
+    d = {"min": np.min, "max": np.max,
+         "mean": np.mean, "var": np.var}
+    for key, ufunc in d.items():
+        colprint(f"{col} {key}", f(vals, ufunc))
 
 def update_df_new_PDB_COCOMPLEX(df_new, ds):
     cocomplex_labels = []
@@ -449,6 +511,40 @@ def update_df_new_PDB_COCOMPLEX(df_new, ds):
     # Assign
     df_new.loc[:, 'PDB_COCOMPLEX'] = np.array(cocomplex_labels, dtype=bool)
     return df_new
+
+def xy_from(prey_pairs_df, col, thresholds, comp, pos_col):
+    npos = []
+    ntot = []
+    for t in thresholds:
+        p, nt = npos_ntotal(prey_pairs_df, col, t, comp=comp, pos_col=pos_col)
+        npos.append(p)
+        ntot.append(nt)
+    return np.array(ntot), np.array(npos)
+
+def slice_up_df_metric(df, thresholds, col, compare_f, action_f):
+    results = []
+    for t in thresholds:
+        sel = compare_f(df[col].values, t)
+        results.append(action_f(df[sel]))
+    return results
+
+def corr_action(df, col1, col2):
+    return sp.stats.pearsonr(df[col1].values, df[col2])
+
+def n_remaining_action(df):
+    return len(df)
+
+def compare_window_f(a, N, b):
+    return (N - b < a) & (a < N + b)
+        
+        
+def simple_scatter(x, y, xname, yname, title=None):
+    plt.plot(x, y, 'k.')
+    plt.xlabel(xname)
+    plt.ylabel(yname)
+    plt.title(title)
+    
+
 # -
 bsasa_ref = init_bsasa_ref()
 
@@ -478,7 +574,8 @@ table1 = pd.read_csv("../table1.csv")
 
 print(f"table 1 {table1.shape}\nBSASA REF {bsasa_ref.shape}")
 
-basa_ref = remove_prey_nan(bsasa_ref)
+bsasa_ref = remove_prey_nan(bsasa_ref)
+
 pdb_set = set(bsasa_ref['PDBID'].values)
 prey_set = set(bsasa_ref['Prey1'].values).union(bsasa_ref['Prey2'].values)
 
@@ -526,17 +623,17 @@ interaction_set = init_interaction_set(bsasa_ref)
 n_possible_interactions = math.comb(uid_total, 2)
 n_possible_found_interactions = math.comb(len(prey_set), 2)
 
-print(f"N possible interactions {h(n_possible_interactions)}"
+print(f"N possible interactions {h(n_possible_interactions)}\n"
       f"N possible found interactions "
-      f"{h(n_possible_found_interactions)}"
+      f"{h(n_possible_found_interactions)}\n"
       f"N interactions found {h(len(interaction_set))}")
 
 
 print('----Per Interaction----')
 
 
-npdbs_per_interaction = init_npdbs_per_interaction(
-        bsasa_ref, interaction_set)    
+npdbs_per_interaction = init_npdbs_per_interaction(bsasa_ref, interaction_set)
+        
 
 print("\nCHAIN MAPPING")
 print("---------")
@@ -550,15 +647,14 @@ print(f"30% SeqID {chain_mapping.shape}")
 chain_pdb_set = set(chain_mapping['PDBID'].values)
 chain_uid_set = set(chain_mapping['QueryID'].values)
 
-print(f"N PDBS {len(chain_pdb_set)}")
-print(f"N UIDS {len(chain_uid_set)}")
+print(f"N PDBS {h(len(chain_pdb_set))}")
+print(f"N UIDS {h(len(chain_uid_set))}")
 
 complexes = init_complexes(chain_pdb_set, chain_mapping)
 
-
 cocomplexes = init_cocomplexes(complexes)
             
-print(f"N cocomplexes {len(cocomplexes.keys())}")
+print(f"N cocomplexes {h(len(cocomplexes.keys()))}")
 
 cocomplex_uid_set = init_cocomplex_uid_set(cocomplexes)
 cocomplex_pairs = list(combinations(cocomplex_uid_set, 2))
@@ -570,7 +666,7 @@ print(f"Co complex df {cocomplex_df.shape}")
 # -
 
 #npairs = math.comb(3062, 2)
-nobs = math.comb(1400, 2)
+#nobs = math.comb(1400, 2)
 
 # +
 # Two Classes of truth from the Protein Data Bank
@@ -580,27 +676,15 @@ vals = cocomplex_df['NPDBS'].values
 title = "N PDBS per Cocomplex prey pair"
 savename = title.replace(" ", "") + ".png"
 plt.title(title)
-plt.hist(vals, bins=(len(set(vals)) // 1))
+plt.hist(vals, bins=(len(set(vals)) // 1), range=(0, 100))
+plt.xlabel("N PDBS")
 plt.savefig(savename, dpi=NOTEBOOK_DPI)
+plt.close()
 #plt.show()
 
 # +
 # Test the SAINT scores
 # Test only bait prey interactions
-def init_dfs(xlsx_path="../1-s2.0-S1931312819302537-mmc2.xlsx"):
-    xlsx_file = xlsx_path
-    df1 = pd.read_excel(xlsx_file, 0)
-    df2 = pd.read_excel(xlsx_file, 1)
-    df3 = pd.read_excel(xlsx_file, 2)
-    
-    df1 = df1[df1['PreyGene'] != 'IGHG1_MOUSE']
-    df2 = df2[df2['PreyGene'] != 'IGHG1_MOUSE']
-    df3 = df3[df3['PreyGene'] != 'IGHG1_MOUSE']
-    
-    assert "IGHG1_MOUSE" not in df1.values
-    assert "IGHG1_MOUSE" not in df2.values
-    assert "IGHG1_MOUSE" not in df3.values
-    return df1, df2, df3
 
 df1, df2, df3 = init_dfs()
 
@@ -624,50 +708,13 @@ df_all = init_df_all(df1, df2, df3, baits, conditions, viral_remapping)
     # +
 # X axis SAINT score, Y1 Cocomplex interactions, Y2 is 
 
-saint_scores = df_all["SaintScore"].values
-direct_interaction_saint = []
-direct_interaction = []
-direct_interaction_labels = []
-cocomplex_interactions = []
-cocomplex_interaction_saint = []
-cocomplex_interaction_labels = []
-unknown = []
 
-cocomplex_pairs = [frozenset((row['Prey1'], row['Prey2'])) for i, row in cocomplex_df.iterrows()]
-bsasa_ref_pairs = [frozenset((row['Prey1'], row['Prey2'])) for i, row in bsasa_ref.iterrows()]
-for i, row in df_all.iterrows():
-    bait_uid = row["BaitUID"]
-    prey_uid = row["Prey"]
-    
-    pair = frozenset((bait_uid, prey_uid))
-    found = False
-    if pair in cocomplex_pairs:
-        cocomplex_interactions.append(1)
-        cocomplex_interaction_labels.append(pair)
-        found = True
-    else:
-        cocomplex_interactions.append(0)
-    if pair in bsasa_ref_pairs:
-        direct_interaction.append(1)
-        direct_interaction_labels.append(pair)
-        
-        found = True
-    else:
-        direct_interaction.append(0)
-    
-    if not found:
-        unknown.append(1)
-    else:
-        unknown.append(0)
-
-
-unknown = np.array(unknown)
-direct_interaction = np.array(direct_interaction)
-cocomplex_interactions = np.array(cocomplex_interactions)
+direct_interaction, cocomplex_interactions, unknown = init_interactions(df_all=df_all,
+    cocomplex_df=cocomplex_df, bsasa_ref=bsasa_ref)
 # -
 
 #npairs = math.comb(3062, 2)
-nobs = math.comb(1400, 2)
+#nobs = math.comb(1400, 2)
 
 # +
 
@@ -681,11 +728,12 @@ ax = plot_sampling(results, true_result, 0, 250000,
                    test_stat="T(x): Mean Saint Score of 9 bait-prey pairs", 
                    title="Permutation test",
                    tx=0.05,
-                   ty=240000,
+                   ty=200_000,
                    ts=f"N samples w/ replacement {h(len(results))}\nSize {sum(direct_interaction)}",
                    nbins=30,
-                   histkwargs={'label': 'Null'})
-
+                   histkwargs={'label': 'Null'},
+                   savefig=True)
+plt.close()
 print("H0: Direct Bait-Prey interactions have no relation to SaintScore")
 
 # +
@@ -694,36 +742,51 @@ vals = df_all['SaintScore'].values
 results, true_result = permutation_test(13, vals, vals[np.where(cocomplex_interactions)], np.mean, 1000000)
 ax = plot_sampling(results, true_result, 0, 130000, 
                    test_stat="T(x): Mean Saint Score of 19 bait-prey pairs", 
-                   title="Permutation test",
+                   title="Cocomplex Permutation test",
                    tx=0.05,
                    ty=120000,
                    ts=f"N samples w/ replacement {h(len(results))}\nSize {sum(cocomplex_interactions)}",
                    nbins=30,
-                   histkwargs={'label': 'Random pair'})
+                   histkwargs={'label': 'Random pair'}, savefig=True)
+plt.close()
 
 print("H0: Cocomplex bait-prey interactions have no relation to Saint Score")
 
 # +
 # N unknown
 benchmark_summary = pd.DataFrame([len(cocomplex_df), len(bsasa_ref), len(df_all),
-                                 sum(unknown), sum(direct_interaction), sum(cocomplex_interactions),
-                                 math.comb(3062, 2)], 
-                                 columns=["N"], index=['PDB Co-complex', 'PDB Direct', 'Bait-prey',
-                                                      'Bait-prey absent in PDB',
-                                                      'Bait-prey Direct',
-                                                      'Bait-prey cocomplex',
-                                                      'Possible Interactions'])
+    sum(unknown), sum(direct_interaction), sum(cocomplex_interactions),math.comb(3062, 2)],
+    columns=["N"], index=['PDB Co-complex', 'PDB Direct', 'Bait-prey',
+                          'Bait-prey absent in PDB',
+                          'Bait-prey Direct',
+                          'Bait-prey cocomplex',
+                          'Possible Interactions'])
 
+def save_plt():
+    ax = plt.gca()
+    title = ax.title.get_text()
+    savename = title.replace(" ", "") + ".png"
+    plt.savefig(savename, dpi=NOTEBOOK_DPI)
 
+title="Direct Interaction Benchmark Summary"
 cols = ['Co-complex', 'Direct', 'Bait-prey']
 sns.categorical.barplot(benchmark_summary.T.iloc[:, 0:4])
 plt.ylabel('N Interactions')
+plt.title(title)
+plt.tight_layout()
+save_plt()
+#plt.savefig(, dpi=NOTEBOOK_DPI)
+plt.close()
 # -
 
-benchmark_summary
+#benchmark_summary
 
 sns.categorical.barplot(benchmark_summary.T.iloc[:, 4:6])
 plt.ylabel('N Interactions')
+plt.title("Bait Prey Benchmark Summary")
+plt.tight_layout()
+save_plt()
+plt.close()
 
 # +
 # Load in the xarrays and scores
@@ -732,11 +795,14 @@ Bait2bait, Bait2condition = init_Bait2bait_Bait2condition(df_all)
 
         
 df_all.loc[:, 'bait'] = [Bait2bait[i] for i in df_all['Bait'].values]
+
 df_all.loc[:, 'condition'] = [Bait2condition[i] for i in df_all['Bait'].values]
 
 rsel = [f"r{i}" for i in range(1, 5)]
 csel = [f"c{i}" for i in range(1, 13)]
+
 df_all = parse_spec(df_all)
+
 df_new = df_all[['bait', 'condition', 'Prey', 'SaintScore', 'BFDR'] + rsel + csel]
 
 prey_set = sorted(list(set(df_new.index)))
@@ -751,6 +817,8 @@ edge_list = list(combinations(preyu, 2))
 # Create a tensor filled with zeros
     
 df_new.loc[:, 'PreyName'] = df_new.index
+bait = ['CBFB', 'ELOB', 'CUL5', 'LRR1']
+conditions = ['wt', 'vif', 'mock']
 
 tensorR, tensorC = init_tensorRandC(
     df_new, rsel, csel, preyu, bait, conditions, fill_tensors)
@@ -770,7 +838,8 @@ bsasa_ref.loc[:, 'Prey1Name'] = bsasa_ref.loc[:, "Prey1"].map(
     lambda x: uid2preyname[x])
 bsasa_ref.loc[:, 'Prey2Name'] = bsasa_ref.loc[:, "Prey2"].map(
     lambda x: uid2preyname[x])
-direct_maitrx = init_direct_matrix(nprey, preyu, preyv, bsasa_ref)
+# Long running: 2 min
+direct_matrix = init_direct_matrix(nprey, preyu, preyv, bsasa_ref)
 
 
 ds = xr.Dataset({'cocomplex': cocomplex_matrix, 'direct': direct_matrix, 'CRL_E':tensorR, 'CRL_C':tensorC})
@@ -778,6 +847,7 @@ ds = xr.Dataset({'cocomplex': cocomplex_matrix, 'direct': direct_matrix, 'CRL_E'
 
 #df_new[df_new['condition']=='wt']
 
+saint_scores = df_all["SaintScore"].values
 kws = {'stat':'probability'}
 sns.histplot(saint_scores, label=f"All N: {len(saint_scores)}", bins=10, **kws)
 sns.histplot(saint_scores[np.where(direct_interaction)], 
@@ -786,20 +856,26 @@ sns.histplot(saint_scores[np.where(cocomplex_interactions)],
              label=f"Cocomplex {sum(cocomplex_interactions)}", bins=10, alpha=0.5, **kws)
 plt.legend()
 plt.xlabel("Saint Score")
-savename = "SaintScoreHist.png")
-plt.savefig(savename, dpi=NOTEBOOK_DPI)
-plt.show()
+plt.title("Saint Scores")
+save_plt()
+#savename = "SaintScoreHist.png")
+#plt.savefig(savename, dpi=NOTEBOOK_DPI)
+#plt.show()
+plt.close()
 
 sns.histplot(saint_scores, label=f"All N: {len(saint_scores)}", bins=10, **kws)
-plt.show()
+#plt.show()
+plt.title("tmp")
+save_plt()
+plt.close()
 
-saint_scores[np.where(direct_interaction)]
+#saint_scores[np.where(direct_interaction)]
 
-for (i,j) in direct_interaction_labels:
-    print(uid2gene[i], uid2gene[j])
-
-for (i,j) in cocomplex_interaction_labels:
-    print(uid2gene[i], uid2gene[j])
+#for (i,j) in direct_interaction_labels:
+#    print(uid2gene[i], uid2gene[j])
+#
+#for (i,j) in cocomplex_interaction_labels:
+#    print(uid2gene[i], uid2gene[j])
 
 #df_all['Spec']
 
@@ -811,18 +887,23 @@ vals = np.array([len(v) for k,v in cocomplexes.items()])
 plt.hist(vals, bins=(len(set(vals)) // 1))
 title = "N Protein types per cocomplex"
 plt.title(title)
-savename = title.replace(" ", "") + ".png"
-plt.savefig(savename, dpi=NOTEBOOK_DPI)
-plt.show()
+plt.ylabel("Count")
+plt.tight_layout()
+save_plt()
+#plt.savefig(savename, dpi=NOTEBOOK_DPI)
+#plt.show()
+plt.close()
 
 # +
 vals = np.array([val for key,val in npdbs_per_interaction.items()])
 title = "N PDBS per Interaction"
 plt.title(title)
 plt.hist(vals, bins=20)
-savename = title.replace(" ", "") + ".png"
-plt.savefig(savename, dpi=NOTEBOOK_DPI)
-plt.show()
+save_plt()
+#savename = title.replace(" ", "") + ".png"
+#plt.savefig(savename, dpi=NOTEBOOK_DPI)
+#plt.show()
+plt.close()
 
 
 # -
@@ -843,36 +924,6 @@ print(f"N cocomplex {h(np.sum(np.tril(ds['cocomplex'] > 0, k=-1)))}")
 # Append Cocomplex labels to DataFrame
 
 df_new = update_df_new_PDB_COCOMPLEX(df_new, ds)
-# +
-#df_new
-
-
-# -
-
-#ds.sel(preyu='PEBB')
-
-#xr.DataArray(df_new.sort_index())
-
-# +
-# Function for plotting an accuracy curve
-def npos_ntotal(prey_pairs_df, col, threshold, comp=operator.le, pos_col='pdb_pos'):
-    sel = prey_pairs_df[col] <= threshold
-    sub_df = prey_pairs_df.loc[sel, :]
-    npos = np.sum(sub_df[pos_col].values)
-    ntotal = len(sub_df)
-    return npos, ntotal
-
-def xy_from(prey_pairs_df, col, thresholds, comp, pos_col):
-    npos = []
-    ntot = []
-    for t in thresholds:
-        p, nt = npos_ntotal(prey_pairs_df, col, t, comp=comp, pos_col=pos_col)
-        npos.append(p)
-        ntot.append(nt)
-    return np.array(ntot), np.array(npos)
-
-
-# +
 x, y = xy_from(df_new, 'SaintScore', np.arange(1, 0, -0.05), comp=operator.ge, pos_col='PDB_COCOMPLEX')
 
 pos_col = 'PDB_COCOMPLEX'
@@ -884,6 +935,9 @@ xplot = x / npairs
 plt.plot(xplot, yplot, 'k.', label='Saint Score')
 plt.ylabel(f"Fraction PDB Cocomplex Positives (N={h(npdb_pos)})")
 plt.xlabel(f"Fraction Total Positives (N={h(npairs)})")
+plt.title("tmp")
+save_plt()
+plt.close()
 
 #y2 = 1.0
 #x2 = npdb_pos / npairs
@@ -894,16 +948,14 @@ plt.xlabel(f"Fraction Total Positives (N={h(npairs)})")
 ##xmul = 10
 #plt.plot(x2 * xmul, y2, 'rx', label=f'{xmul}x PDB')
 #plt.savefig('f1.png', dpi=300)
-plt.savefig("FractionPlot.png", dpi=NOTEBOOK_DPI)
-plt.legend()
-plt.show()
+#plt.savefig("FractionPlot.png", dpi=NOTEBOOK_DPI)
+#plt.legend()
+#plt.show()
 # -
 
 df_new.loc[:, 'rAv'] = df_new.loc[:, rsel].mean(axis=1)
 df_new.loc[:, 'cAv'] = df_new.loc[:, csel].mean(axis=1)
 df_new.loc[:, 'Av_diff'] = df_new['rAv'].values - df_new['cAv'].values
-
-df_new.shape
 
 # +
 """
@@ -928,17 +980,13 @@ mock - mock ctrl
 def df_new2json(df):
     csel = [f"c{i}" for i in range(1, 13)]
     rsel = [f"r{i}" for i in range(1, 5)]
-    
     Nrows = len(df)
     Nrsel = len(rsel)
     Ncsel = len(csel)
-    
     RMatrix = df.loc[:, rsel].values
     CMatrix = df.loc[:, csel].values
-    
     RMatrix = [[int(i) for i in row] for row in RMatrix]
     CMatrix = [[int(i) for i in row] for row in CMatrix]
-    
     return {'Nrsel': Nrsel, 'Ncsel': Ncsel, 'Nrows': Nrows, 'Yexp': RMatrix,
            'Yctrl': CMatrix}
 
@@ -956,7 +1004,9 @@ x = np.ravel(df_new.loc[:, rsel].values)
 plt.hist(x, bins=100)
 s = f"Mean {np.mean(x)}\nMedian {np.median(x)}\nVar {np.var(x)}\nMin {np.min(x)}\nMax {np.max(x)}"
 plt.text(100, 30000, s)
-plt.show()
+#plt.show()
+save_plt()
+plt.close()
 
 df_new.loc[:, 'rVar'] = df_new.loc[:, rsel].var(axis=1).values
 df_new.loc[:, 'cVar'] = df_new.loc[:, csel].var(axis=1).values
@@ -981,7 +1031,15 @@ plt.text(60, 1400, s)
 plt.xlabel('Mean')
 plt.ylabel('Variance')
 plt.legend()
-plt.show()
+plt.title("Mean Variance Correlation")
+save_plt()
+#plt.show()
+plt.close()
+
+sns.regplot(x=x1, y=y1, scatter_kws={'alpha': 0.05}) 
+plt.title("AP Mean Variance Regression")
+save_plt()
+plt.close()
 
 
 # -
@@ -990,9 +1048,12 @@ ctrl_counts = (df_new.loc[(df_new['condition']=='wt') | (df_new['condition']=='m
 x = np.ravel(ctrl_counts.values)
 plt.title("Control Counts")
 plt.hist(x, bins=100)
-s = f"Mean {np.mean(x)}\nMedian {np.median(x)}\nVar {np.var(x)}\nMin {np.min(x)}\nMax {np.max(x)}"
+svals = tuple(h(np.round(f(x), 2)) for f in (np.mean, np.median, np.var, np.min, np.max)) 
+s = "Mean %s\nMedian %s\nVar %s\nMin %s\nMax %s" % svals
 plt.text(100, 30000, s)
-plt.show()
+#plt.show()
+save_plt()
+plt.close()
 
 # +
 xall = np.concatenate([np.ravel(ctrl_counts.values), np.ravel(df_new.loc[:, rsel].values)])
@@ -1000,15 +1061,19 @@ bounds = (0, 50)
 xaxis = np.arange(0, bounds[1], 1)
 r = 1/5
 yvalue = r * np.exp(-r * xaxis) * 5e5
-
 plt.hist(xall, bins=50, range=bounds)
 plt.plot(xaxis, yvalue, 'r', label='Model')
 plt.title("All Counts")
-s = f"Mean {np.mean(xall)}\nMedian {np.median(xall)}\nVar {np.var(xall)}\nMin {np.min(xall)}\nMax {np.max(xall)}"
+svals = tuple(h(np.round(f(xall), 2)) for f in (np.mean, np.median, np.var, np.min, np.max)) 
+s = "Mean %s\nMedian %s\nVar %s\nMin %s\nMax %s" % svals
 plt.xlabel("Spectral Count")
 plt.legend()
 plt.text(100, 30000, s)
-plt.show()
+save_plt()
+plt.tight_layout()
+plt.close()
+
+#plt.show()
 
 def exp_pdf(x, r):
     return r * np.exp(-x * r)
@@ -1031,7 +1096,6 @@ def n_tryptic_cleavages(aa_seq):
     n_sites = np.sum(Allsites)
     if (aa_seq[-1] == 'K') or (aa_seq[-1] == 'R'):
         n_sites -= 1
-    
     return n_sites
 
 def n_first_tryptic_cleavages(aa_seq):
@@ -1045,31 +1109,51 @@ def n_first_typtic_cleavage_peptides(aa_seq):
 
 n_first_sites = [n_first_tryptic_cleavages(uid2seq[prey]) for prey in df_new['Prey']]
 df_new.loc[:, 'n_first_tryptic_cleavage_sites'] = np.array(n_first_sites)
-df_new.loc[:, 'n_possible_first_tryptic_peptides'] = df_new.loc[:, 'n_first_tryptic_cleavage_sites'] + 1
-
+df_new.loc[:, 'n_possible_first_tryptic_peptides'] = df_new.loc[
+        :,'n_first_tryptic_cleavage_sites'] + 1
 sel = df_new['aa_seq_len'] <= 5000
 sns.histplot(df_new[sel], x='n_first_tryptic_cleavage_sites', y='aa_seq_len')
+plt.title("Number of tryptic cleavage sites and seq len")
+plt.tight_layout()
+save_plt()
+plt.close()
 
-sns.regplot(df_new[sel], x='rAv', y='n_first_tryptic_cleavage_sites')
+#sns.regplot(df_new[sel], x='rAv', y='n_first_tryptic_cleavage_sites')
 
 sel = df_new['aa_seq_len'] <= 200
-sns.regplot(df_new[sel], x='cAv', y='n_first_tryptic_cleavage_sites')
+sns.histplot(df_new[sel], x='cAv', y='n_first_tryptic_cleavage_sites',
+             cbar=True, kde=True)
+plt.title("Seq and cAv lt 200")
+plt.tight_layout()
+save_plt()
+plt.close()
 
 sns.regplot(df_new[sel], x='rAv', y='aa_seq_len')
+plt.title("Seq and rAv lt 200")
+plt.tight_layout()
+save_plt()
+plt.close()
+
 
 plt.plot(np.arange(len(df_new)), df_new['rAv'] - df_new['cAv'], 'k.')
+plt.title("Average Difference")
+save_plt()
+plt.close()
 
-plt.plot(np.arange(len(df_new)), df_new['rAv'], 'k.')
+#plt.plot(np.arange(len(df_new)), df_new['rAv'], 'k.')
 
-plt.plot(np.arange(len(df_new)), df_new['cAv'], 'k.')
+#plt.plot(np.arange(len(df_new)), df_new['cAv'], 'k.')
 
 # +
 nbins=30
-aa_max_len=2000
+aa_max_len=2_000
 xlabel='n_possible_first_tryptic_peptides'
 #xlabel='aa_seq_len'
 sns.histplot(df_new[df_new['aa_seq_len'] <=aa_max_len], x=xlabel, y='rAv',
             bins=(nbins, nbins), cbar=True, cmap='hot')
+plt.title("tmp")
+save_plt()
+plt.close()
 
 print("The sequence length appears to set the upper bound on Spectral Count")
 print("The protein spectral count is the sum of peptide spectral count")
@@ -1084,9 +1168,17 @@ print(f"Therefore longer sequences may be have lower abundance at lower abundanc
 
 sns.histplot(df_new[df_new['aa_seq_len'] <=aa_max_len], x=xlabel, y='cAv',
             bins=(nbins, nbins), cbar=True, cmap='hot')
+plt.title("tmp")
+save_plt()
+plt.close()
 
 sns.histplot(df_new[df_new['aa_seq_len'] <=aa_max_len], x=xlabel, y='rMin',
             bins=(nbins, nbins), cbar=True, cmap='hot')
+plt.title("tmp")
+save_plt()
+plt.close()
+
+
 
 
 
@@ -1155,15 +1247,12 @@ def m1(df):
     hyper_prior = np.ones(nrows) * 1/5
     Yexp = df.loc[:, rsel].values
     Yctrl = df.loc[:, csel].values
-    
     nexp = len(rsel)
     nctrl = len(csel)
-    
     kappa_ = numpyro.sample('k', dist.Exponential(rate=hyper_prior))
     lambda_ = numpyro.sample('l', dist.Exponential(rate=hyper_prior))
     for i in range(0, nctrl):
         numpyro.sample(f'Ycrtl_{i}', dist.Poisson(kappa_), obs=Yctrl[:, i])
-        
     for i in range(0, nexp):
         numpyro.sample(f'Yexp_a{i}', dist.Poisson(lambda_), obs=Yexp[:, i])
         numpyro.sample(f'Yexp_b{i}', dist.Poisson(kappa_), obs=Yexp[:, i])
@@ -1193,20 +1282,15 @@ samples = mcmc.get_samples()
 # +
 # First create a function that reads in a vector of
 
-jax.vmap(jax.scipy.stats.poisson.pmf)
+#jax.vmap(jax.scipy.stats.poisson.pmf)
 
 
 # +
-def f1(Y, x):
-    return 
-
 def posterior_odds(samples, df):
     theta1 = samples['l']
     theta2 = samples['k']
-    
     Yexp = df[rsel].values
     f = jax.scipy.stats.poisson.pmf
-    
     p1 = f(Yexp, mu=theta1.T)
     p2 = f(Yexp, mu=theta2.T)
     return p1, p2
@@ -1220,9 +1304,7 @@ y1 = df_new.loc[:, rsel].values
 
 # +
 def f(x, Yexp):
-    """
-    x as a vector, return average probability
-    """
+    """x as a vector, return average probability"""
     return jax.vmap(jax.scipy.stats.poisson.pmf)(Yexp, x).sum(axis=1) / 4
 
 def f2(X, Yexp):
@@ -1232,7 +1314,6 @@ def f2(X, Yexp):
 def posterior_odds(samples, Yexp):
     K = samples['k'].T
     L = samples['l'].T
-    
     return np.array(f2(K, Yexp)), np.array(f2(L, Yexp))
 
 Yexp = df_new.loc[:, rsel].values
@@ -1242,11 +1323,17 @@ odds_kappa, odds_lambda = posterior_odds(samples, Yexp)
 
 odds_kappa[np.where(odds_kappa==0)] = 1e-7
 
-plt.hist(odds_kappa, bins=100)
-plt.show()
+plt.hist(odds_kappa, bins=100, label="kappa")
+plt.xlabel("Posterior odds")
+plt.title("tmp")
+save_plt()
+plt.close()
+#plt.show()
 
 plt.hist(odds_lambda, bins=100)
-plt.show()
+plt.title("tmp")
+save_plt()
+plt.close()
 
 log_odds_ratio = np.log10(odds_lambda) - np.log10(odds_kappa)
 # Capped at -4 and 4
@@ -1258,11 +1345,18 @@ capped_odds_ratio = 10**log_odds_ratio
 
 plt.hist(capped_odds_ratio, bins=100, range=(0,10))
 plt.xlabel("Odds Ratio")
-plt.show()
+#plt.show()
+plt.title("tmp")
+save_plt()
+plt.close()
 
 plt.hist(log_odds_ratio, bins=100, range=(-5, 5))
 plt.xlabel("Log Odds Ratio M1 vs M2")
-plt.show()
+#plt.show()
+plt.title("tmp")
+save_plt()
+plt.close()
+
 
 
 # +
@@ -1270,7 +1364,6 @@ plt.show()
 def thresh_sel(t, x):
     """
     Return the number of remaining entries
-    
     """
     return len(x[x >= t])
 
@@ -1283,6 +1376,9 @@ remaining = np.array(remaining)
 plt.plot(thresholds, remaining)
 plt.xlabel('Log10 odds threshold')
 plt.ylabel('Data Remaining')
+plt.title("tmp")
+save_plt()
+plt.close()
 
 
 # +
@@ -1295,48 +1391,34 @@ def bait_box_plot(ds, var='CRL_E', preysel=True, boxkwargs={}):
         else:
             arr = np.ravel(ds.sel(bait=i[0])[var].values)
         vals.append(arr)
-    
-    vals.append(arr)
     z.append(('LRR1', 'LLR1'))
     arr = np.ravel(ds.sel(bait='LRR1', preyu='LLR1', condition='mock')[var].values)
+    vals.append(arr)
+    assert len(vals) == 4, len(vals)
     if var == 'CRL_E' and preysel==False:
         arr = np.ravel(ds.sel(bait='ELOB')['CRL_C'].values) # Bait can be any because control is similiar
         vals.append(arr)
         z.append('Parent')
-        
-
-    
     sns.boxplot(vals, **boxkwargs)#, labels=['A'] * 4)
     plt.title("Amount of Bait in own purification across 3 conditions")
     plt.xticks(np.arange(len(vals)), [i[0] for i in z])
     plt.ylabel("Spectral count")
-    plt.show()
+    plt.tight_layout()
+    save_plt()
+    plt.close()
     
-bait_box_plot(ds)
+bait_box_plot(ds, var="CRL_E")
 
 # -
 
-bait_box_plot(ds, var='CRL_C')
+bait_box_plot(ds, var="CRL_C")
 
-bait_box_plot(ds, preysel=False, boxkwargs={'ylim': 50})
+bait_box_plot(ds, preysel=False)#, boxkwargs={'ylim': 50})
 
 
 # +
-def slice_up_df_metric(df, thresholds, col, compare_f, action_f):
-    results = []
-    for t in thresholds:
-        sel = compare_f(df[col].values, t)
-        results.append(action_f(df[sel]))
-        
-    return results
-
-def corr_action(df, col1, col2):
-    return sp.stats.pearsonr(df[col1].values, df[col2])
 
 corr_mean_var_action = partial(corr_action, col1='rAv', col2='rVar')
-
-def n_remaining_action(df):
-    return len(df)
 
 
 thresholds = np.arange(0, 211.75, 0.1)
@@ -1347,16 +1429,6 @@ n_remaining = slice_up_df_metric(df_new, thresholds, 'rAv', operator.le, n_remai
 
 
 # +
-def compare_window_f(a, N, b):
-    return (N - b < a) & (a < N + b)
-        
-        
-def simple_scatter(x, y, xname, yname, title=None):
-    plt.plot(x, y, 'k.')
-    plt.xlabel(xname)
-    plt.ylabel(yname)
-    plt.title(title)
-    
 
 
 # -
@@ -1366,15 +1438,20 @@ corr_list = slice_up_df_metric(df_new, thresholds, 'rAv', wf, corr_mean_var_acti
 n_remaining_win = slice_up_df_metric(df_new, thresholds, 'rAv', wf, n_remaining_action)
 rcorr_win, pval_win = zip(*corr_list)
 
-plt.plot(n_remaining, rcorr, 'k.')
-plt.xlabel("N datapoints remaining")
-plt.ylabel("Mean variance correlation")
-
-simple_scatter(x=rcorr, y=pval, xname='Pearson R', yname='P-val')
-
-
+#plt.plot(n_remaining, rcorr, 'k.')
+#plt.xlabel("N datapoints remaining")
+#plt.ylabel("Mean variance correlation")
+#plt.title("tmp")
+#save_plt()
+#plt.close()
+#
+#simple_scatter(x=rcorr, y=pval, xname='Pearson R', yname='P-val')
+#plt.title("tmp")
+#save_plt()
+#plt.close()
 
 simple_scatter(x=thresholds, y=rcorr, xname='SC threshold', yname='Pearson R')
+plt.close()
 
 # +
 # Low abundance
@@ -1385,6 +1462,7 @@ x = df_new.loc[sel, 'rAv'].values
 y = df_new.loc[sel, 'rVar'].values
 
 simple_scatter(x, y, xname='rAv', yname='rVar')
+plt.close()
 # -
 
 df_new.loc[:, 'rMax'] = np.max(df_new.loc[:, rsel].values, axis=1)
@@ -1393,11 +1471,22 @@ df_new.loc[:, 'cMax'] = np.max(df_new.loc[:, csel].values, axis=1)
 df_new.loc[:, 'cMin'] = np.min(df_new.loc[:, csel].values, axis=1)
 
 # +
-aa_max_len = 1000
+fig, ax = plt.subplots(1, 2, sharex=True)
+aa_max_len = 5_000
 sns.histplot(df_new[df_new['aa_seq_len'] <= aa_max_len], 
              x='n_possible_first_tryptic_peptides', 
              y='cMax',
-             cmap='hot')
+             cmap='hot', ax=ax[0], cbar=True)
+ax[0].set_title("Control Likelihood")
+sns.histplot(df_new[df_new['aa_seq_len'] <= aa_max_len], 
+             x='n_possible_first_tryptic_peptides', 
+             y='rMax',
+             cmap='hot', ax=ax[1], cbar=True)
+ax[1].set_title("AP Likelihood")
+plt.tight_layout()
+#plt.title("Control Likelihood")
+save_plt()
+plt.close()
 
 print("This plot can be used to formulate a data likelihood")
 print("The likelihood of the Max spectral count | n_first_tryptic_peptides")
@@ -1411,229 +1500,213 @@ print("That is indpendent of N possible first tryptic peptides")
 print("")
 
 # +
-sns.regplot(df_new, x='rAv', y='rMax')
-m=1.15
-y = df_new['rAv'].values * m
-x=df_new['rAv'].values
-
-plt.plot(x, y, 'r')
-# -
-
-sns.regplot(df_new, x='rAv', y='rMin')
-
-sns.regplot(df_new, x='cAv', y='cMax')
-
-sns.regplot(df_new, x='cAv', y='cMin')
-
-sns.regplot(df_new, x='rMin', y='rMax')
-
-
-plt.plot(df_new['rAv'], df_new['rMax'].values - df_new['rMin'], 'k.')
-
-sns.regplot(df_new, x='cMin', y='cMax')
-
-
-
-sel = df_new['rAv'] <= 12
-sns.regplot(df_new[sel], x='rAv', y='rMax')
-
-sel1 = df_new['cAv'] <=10
-sel2 = df_new['bait'] != 'LRR1'
-sel = sel1 & sel2
-sns.regplot(df_new[sel], x='cAv', y='cVar')
-
-df_new.loc[sel, csel + ['cAv']].sort_values('cAv', ascending=False).iloc[150:200, :]
-
-plt.plot(np.arange(0, 30), jax.scipy.stats.poisson.pmf(np.arange(0, 30), 15))
-
-# +
-sel2 = df_new['cAv'] <= 5
-sns.regplot(df_new[sel2], x='cAv', y='cMax')
-x=df_new.loc[sel2, 'cAv']
-m=4
-y = m * x
-
-plt.plot(x, y, 'r')
-# -
-
-y2 = np.max(df_new.loc[sel, rsel].values, axis=1)
-simple_scatter(x, y2, xname='rAv', yname='rMax')
-m=1
-y = m * x
-plt.plot(x, y, 'r')
-
-y2
-
-df_new
-
-simple_scatter(x=thresholds, y=n_remaining, xname='SC threshold', yname='N remaining')
-
-plt.hist(pval_win, bins=50)
-plt.show()
-
-simple_scatter(x=thresholds, y=rcorr_win, xname='SC threshold', yname='Win R')
-
-simple_scatter(x=thresholds, y=n_remaining_win, xname='SC threshold', yname='N remaining')
-
-
-
-sp.stats.pearsonr
-
-operator.lt(df_new['rAv'].values, 2)
-
-bait_box_plot(ds, preysel=False, var='CRL_C')
-
-
-def abundance_over_all_conditions(ds):
-    vals = []
-    for 
-
+#sns.regplot(df_new, x='rAv', y='rMax')
+#m=1.15
+#y = df_new['rAv'].values * m
+#x=df_new['rAv'].values
+#
+#plt.plot(x, y, 'r')
+## -
+#
+#sns.regplot(df_new, x='rAv', y='rMin')
+#
+#sns.regplot(df_new, x='cAv', y='cMax')
+#
+#sns.regplot(df_new, x='cAv', y='cMin')
+#
+#sns.regplot(df_new, x='rMin', y='rMax')
+#
+#
+#plt.plot(df_new['rAv'], df_new['rMax'].values - df_new['rMin'], 'k.')
+#
+#sns.regplot(df_new, x='cMin', y='cMax')
+#
+#
+#
+#sel = df_new['rAv'] <= 12
+#sns.regplot(df_new[sel], x='rAv', y='rMax')
+#
+#sel1 = df_new['cAv'] <=10
+#sel2 = df_new['bait'] != 'LRR1'
+#sel = sel1 & sel2
+#sns.regplot(df_new[sel], x='cAv', y='cVar')
+#
+#df_new.loc[sel, csel + ['cAv']].sort_values('cAv', ascending=False).iloc[150:200, :]
+#
+#plt.plot(np.arange(0, 30), jax.scipy.stats.poisson.pmf(np.arange(0, 30), 15))
+#
+## +
+#sel2 = df_new['cAv'] <= 5
+#sns.regplot(df_new[sel2], x='cAv', y='cMax')
+#x=df_new.loc[sel2, 'cAv']
+#m=4
+#y = m * x
+#
+#plt.plot(x, y, 'r')
+## -
+#
+#y2 = np.max(df_new.loc[sel, rsel].values, axis=1)
+#simple_scatter(x, y2, xname='rAv', yname='rMax')
+#m=1
+#y = m * x
+#plt.plot(x, y, 'r')
+#
+#y2
+#
+#df_new
+#
+#simple_scatter(x=thresholds, y=n_remaining, xname='SC threshold', yname='N remaining')
+#
+#plt.hist(pval_win, bins=50)
+#plt.show()
+#
+#simple_scatter(x=thresholds, y=rcorr_win, xname='SC threshold', yname='Win R')
+#
+#simple_scatter(x=thresholds, y=n_remaining_win, xname='SC threshold', yname='N remaining')
+#
+#
+#
+#sp.stats.pearsonr
+#
+#operator.lt(df_new['rAv'].values, 2)
+#
+#bait_box_plot(ds, preysel=False, var='CRL_C')
 
 # +
 # Check the double counting of the condition
-x = ds['CRL_C']
-k = 'CUL5'
-k2 = 'ELOB'
-x2 = x.sel(bait=k, condition='wt')
-
-x2[np.any((x.sel(bait=k, condition='vif').values != x.sel(bait=k2, condition='wt').values), axis=1)]
-# -
-
-x.sel(bait='CUL5')
-
+#x = ds['CRL_C']
+#k = 'CUL5'
+#k2 = 'ELOB'
+#x2 = x.sel(bait=k, condition='wt')
+#
+#x2[np.any((x.sel(bait=k, condition='vif').values != x.sel(bait=k2, condition='wt').values), axis=1)]
+## -
 
 # +
 def model2(ds, N=3062):
-    
     # wt, vif, mock
     # 
     # [condition, bait, prey, rrep]
-    
     ELOB_wt = ds.sel(condition='wt', bait='ELOB')['CRL_E'].values
     CUL5_wt = ds.sel(condition='wt', bait='CUL5')['CRL_E'].values
     CBFB_wt = ds.sel(condition='wt', bait='CBFB')['CRL_E'].values
-    
+    # 
     ELOB_vif = ds.sel(condition='vif', bait='ELOB')['CRL_E'].values
     CUL5_vif = ds.sel(condition='vif', bait='CUL5')['CRL_E'].values
     CBFB_vif = ds.sel(condition='vif', bait='CBFB')['CRL_E'].values
-    
+    # 
     ELOB_mock = ds.sel(condition='mock', bait='ELOB')['CRL_E'].values
     CUL5_mock = ds.sel(condition='mock', bait='CUL5')['CRL_E'].values
     CBFB_mock = ds.sel(condition='mock', bait='CBFB')['CRL_E'].values
-    
+    # 
     LRR1_mock = ds.sel(condition='mock', bait='LRR1')['CRL_E'].values
-    
+    # 
     ctrl_ELOB_wt = ds.sel(condition='wt', bait='ELOB')['CRL_C'].values
     ctrl_CUL5_wt = ds.sel(condition='wt', bait='CUL5')['CRL_C'].values
     ctrl_CBFB_wt = ds.sel(condition='wt', bait='CBFB')['CRL_C'].values
-    
+    # 
     ctrl_ELOB_vif = ds.sel(condition='vif', bait='ELOB')['CRL_C'].values
     ctrl_CUL5_vif = ds.sel(condition='vif', bait='CUL5')['CRL_C'].values
     ctrl_CBFB_vif = ds.sel(condition='vif', bait='CBFB')['CRL_C'].values
-    
+    # 
     ctrl_ELOB_mock = ds.sel(condition='mock', bait='ELOB')['CRL_C'].values
     ctrl_CUL5_mock = ds.sel(condition='mock', bait='CUL5')['CRL_C'].values
     ctrl_CBFB_mock = ds.sel(condition='mock', bait='CBFB')['CRL_C'].values
-    
+    # 
     ctrl_LRR1_mock = ds.sel(condition='mock', bait='LRR1')['CRL_C'].values
-    
-    
    # max_val = ds['CRL_E'].max('rrep')
-    
    # mu_Nc = np.ones((5, 3))
    # mu_alpha = np.ones((N, 5, 3))
-    
-
-    
     #N = numpyro.sample('N', dist.Normal(np.zeros(3), 5))
     #mu = numpyro.sample('mu', dist.Normal(max_val.sel(bait='ELOB').values.T, 50), sample_shape=(3062, 3))
     #numpyro.sample('sc', dist.Normal(N * mu), obs=max_val.sel(bait='ELOB').values.T)
-    
-    
-    
-    
     #N1 = numpyro.sample('N1', dist.Normal(0, 1))
     #N2 = numpyro.sample('N2', dist.Normal(0, 1))
-    
     #mu_elob = numpyro.sample('mu_elob', dist.Normal(np.mean(ELOB_wt, axis=1), np.var(ELOB_wt, axis=1)))
     #mu_cul5 = numpyro.sample('mu_cul5', dist.Normal(np.mean(CUL5_wt, axis=1), np.var(ELOB_wt, axis=1)))
-    
     #numpyro.sample('ELOB_wt', dist.Normal(mu_elob * N1, 5), obs=ELOB_wt)
     #numpyro.sample('CUL5_wt', dist.Normal(mu_cul5 * N2, 5), obs=CUL5_wt)
-    
-    
     #cell_abundance = numpyro.sample(dist.Normal(jnp.ones((3, 5))), 1)
-    
     assert ELOB_wt.shape == (3062, 4)
-    
     mu_hyper_prior = np.ones((3062, 1)) / 50
     sig_hyper_prior = np.ones((3062, 1)) / 2
-    
-    
     mu = numpyro.sample('mu', dist.Exponential(mu_hyper_prior))
     sigma = numpyro.sample('s', dist.Exponential(sig_hyper_prior))
-    
     Ncells = numpyro.sample('Nc', dist.Normal(np.ones((1, 4)), 0.5))
-    
     Ncells_rep = jnp.repeat(Ncells, 3062, axis=0)
-    
-    
     numpyro.sample('sc', dist.Normal(mu * Ncells_rep, sigma), obs=ELOB_wt)
-    
     #Ncells = cell_abundance * 1e7 
-    
     #gamma_i = numpyro.sample('gamma', dist.Beta(0.5, 0.5), sample_shape=(3062,))
     #mu_ctrl = numpyro.sample('mu0', dist.Uniform(0, 250), sample_shape=(3062,))
     #mu_wt = numpyro.sample('mu_wt', dist.Uniform(0, 250), sample_shape=(3062,))
-    
     #numpyro.sample('ELOB_wt', dist.Normal(mu_wt, 10), obs=ELOB_wt)
     #numpyro.sample('ctrl_ELOB_wt', dist.Normal(mu_ctrl * gamma_i, 10), obs=ctrl_ELOB_wt)
     
-    
-print(f"N free parameters {5 * 3 + 5 * 3 * 3062}")  
+print(f"N free parameters {h(5 * 3 + 5 * 3 * 3062)}")  
 # -
 
-df
-
 x = np.arange(0, 1, 0.01)
-y = jax.scipy.stats.beta.pdf(x, a=2 ,b=6)
-y = jax.scipy.stats.expon.pdf(x* 250, 100)
+a=2
+b=6
+y = jax.scipy.stats.beta.pdf(x, a=a ,b=b)
+#y = jax.scipy.stats.expon.pdf(x* 250, 100)
 plt.plot(x * 300, y, 'k.')
+plt.text(0.8 * 250, 2.0, f"a={a}\nb={b}")
+plt.title("Beta")
+save_plt()
+plt.close()
 
 # +
-plt.hist(np.ravel(np.std(df_new[rsel].values, axis=1)), bins=50, density=True)
+#plt.hist(np.ravel(np.std(df_new[rsel].values, axis=1)), bins=50, density=True)
+
+
+def plot_exp_dens(x, rate):
+    y = np.exp(dist.Exponential(rate).log_prob(x)) / rate
+    plt.plot(x, y, label=f"rate={rate}")
 
 x = np.arange(0, 30, 0.1)
-y = np.exp(dist.Exponential(1/2).log_prob(x)) * 1.3
-plt.plot(x, y, 'r')
+for rate in np.arange(0, 2.2, 0.2):
+    plot_exp_dens(x, rate)
+#y = np.exp(dist.Exponential(exp_rate).log_prob(x))
+plt.ylabel("Probability density / rate")
+#plt.text(25, 0.4, f"rate={exp_rate}")
+plt.legend()
+#plt.plot(x, y, 'k')
+plt.title("Exponential")
+plt.tight_layout()
+save_plt()
+plt.close()
 # -
 
 # ?dist.Normal
 
-x = np.arange(0, 300)
-plt.plot(x, np.exp(dist.Exponential(1/50).log_prob(x)))
+#x = np.arange(0, 300)
+#plt.plot(x, np.exp(dist.Exponential(1/50).log_prob(x)))
 
 sum(df_new['Av_diff'] < -10)
 
-sns.scatterplot(df_new, x='Av_diff', y='SaintScore')
+sns.scatterplot(df_new, x='Av_diff', y='SaintScore', alpha=0.1)
+plt.title("tmp")
+save_plt()
+plt.close()
 
 plt.hist(np.ravel(ds.sel(bait=["CBFB", "ELOB", "CUL5"])['CRL_E'].values), bins=100)
-plt.show()
+plt.title("tmp")
+save_plt()
+plt.close()
 
 plt.hist(np.ravel(ds.sel(bait=["CBFB", "ELOB", "CUL5"])['CRL_C'].values), bins=100)
-plt.show()
+plt.title("tmp")
+save_plt()
+plt.close()
 
 
 def model4(e_data=None, ctrl_data=None, a=None, b=None):
-
-    
     # Prior around 1/5
     if a is None:
         a = numpyro.sample('a', dist.Uniform(0.0001, 1))
     if b is None:
         b = numpyro.sample('b', dist.Uniform(0.0001, 1))
-    
-    
     numpyro.sample('y_e', dist.Exponential(a), obs=e_data)
     numpyro.sample('y_c', dist.Exponential(b), obs=ctrl_data)
 
@@ -1702,7 +1775,6 @@ def model5(a=None, b=None, y_c=None, y_e=None, poisson_sparse=True, batch_shape=
     """
     a:  experimental rate
     b:  control rate
-    
     y_e: experimental obs
     y_c: control obs
     """
@@ -1772,6 +1844,9 @@ n = 0
 y_c = np.array(df_new.iloc[n, :][csel].values, dtype=int)
 y_e = np.array(df_new.iloc[n, :][rsel].values, dtype=int)
 model_kwargs={'y_c': y_c, 'y_e': y_e}
+numpyro.render_model(model5, model_args=(None, None, y_c, y_e),
+                     render_distributions=True, render_params=True)
+
 search = do_mcmc(model5, 1, model_kwargs, num_warmup=1000, num_samples=5000)
 
 search.print_summary()
@@ -3003,34 +3078,22 @@ def model5(a=None, b=None, y_c=None, y_e=None, poisson_sparse=True, batch_shape=
     """
     a:  experimental rate
     b:  control rate
-    
     y_e: experimental obs
     y_c: control obs
     """
-    
     #max_val = np.max([np.max(y_c), np.max(y_e)])
-    
     # Assum the true rates are within 10 + 2 * max observed value
-    
-    
-    
     hyper = np.ones(batch_shape) * 200 #* max_val
-    
     if a is None:
         a = numpyro.sample('a', dist.HalfNormal(hyper))
     if b is None:
         b = numpyro.sample('b', dist.HalfNormal(hyper))
-    
     # predictive checks
     nrows, ncols = batch_shape
-    
     if y_c is None:
         b = jnp.ones((nrows, 12)) * b
-    
     if y_e is None:
         a = jnp.ones((nrows, 4)) * a
-        
-    
     numpyro.sample('y_c', dist.Poisson(b, is_sparse=poisson_sparse), obs=y_c)
     numpyro.sample('y_e', dist.Poisson(a, is_sparse=poisson_sparse), obs=y_e)
 
