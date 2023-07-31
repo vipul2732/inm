@@ -217,6 +217,10 @@ def fill_tensors(df, tensorR, tensorC, condition_name, bait_mapping, prey_mappin
         tensorC[condition_index][bait_index][prey_index] = [row[c] for c in c_cols]
     return tensorR, tensorC
 
+def format_loffset(x: str, offset=4):
+    return " " * offset + x
+
+
 def htup(x) -> tuple:
     return tuple('{:,}'.format(i) for i in x)
 
@@ -239,6 +243,13 @@ def inf_get_summary_stats(inf_data, chain_num=0):
             ds_get_summary_stats(inf_data.posterior_predictive.sel(chain=chain_num)),
             ds_get_summary_stats(inf_data.observed_data))
 
+def info_it(i):
+    return len(i)
+
+def info_unique_it(i):
+    return len(set(i))
+
+
 def init_bsasa_ref(path="../significant_cifs/BSASA_reference.csv"):
     """Initialize the BSASA reference"""
     bsasa_ref = pd.read_csv(path)
@@ -247,7 +258,7 @@ def init_bsasa_ref(path="../significant_cifs/BSASA_reference.csv"):
         pd.isna(bsasa_ref['Prey2'].values))
     return bsasa_ref
 
-def init_bait2uid(baits, conditions):
+def init_bait2uid(baits, conditions, gene2uid):
     bait2uid = {}
     for bait, genename in baits.items():
         for condition in conditions:
@@ -303,8 +314,7 @@ def init_cocomplex_matrix(nprey, preyu, preyv, cocomplex_df):
         cocomplex_matrix.loc[p2, p1] = val
     return cocomplex_matrix
 
-def init_df_all(df1, df2, df3, baits, conditions, viral_remapping):
-    bait2uid = init_bait2uid(baits, conditions)
+def init_df_all(df1, df2, df3, baits, conditions, viral_remapping, bait2uid):
     df1.loc[:, "BaitUID"] = [bait2uid[i] for i in df1["Bait"].values]
     df2.loc[:, "BaitUID"] = [bait2uid[i] for i in df2["Bait"].values]
     df3.loc[:, "BaitUID"] = [bait2uid[i] for i in df3["Bait"].values]
@@ -371,36 +381,28 @@ def init_interactions(df_all, cocomplex_df, bsasa_ref):
     cocomplex_interactions = []
     #cocomplex_interaction_saint = []
     cocomplex_interaction_labels = []
-    unknown = []
-    cocomplex_pairs = [frozenset((row['Prey1'], row['Prey2']))
-                       for i, row in cocomplex_df.iterrows()]
-    bsasa_ref_pairs = [frozenset((row['Prey1'], row['Prey2']))
-                       for i, row in bsasa_ref.iterrows()]
+    # Make the sets dictionaries for faster lookup
+    cocomplex_pairs = {frozenset((row['Prey1'], row['Prey2'])) : 0 for i, row in cocomplex_df.iterrows()}
+    bsasa_ref_pairs = {frozenset((row['Prey1'], row['Prey2'])) : 0 for i, row in bsasa_ref.iterrows()}
     for i, row in df_all.iterrows():
         bait_uid = row["BaitUID"]
         prey_uid = row["Prey"]
         pair = frozenset((bait_uid, prey_uid))
-        found = False
         if pair in cocomplex_pairs:
             cocomplex_interactions.append(1)
             cocomplex_interaction_labels.append(pair)
-            found = True
         else:
             cocomplex_interactions.append(0)
         if pair in bsasa_ref_pairs:
             direct_interaction.append(1)
             direct_interaction_labels.append(pair)
-            found = True
         else:
             direct_interaction.append(0)
-        if not found:
-            unknown.append(1)
-        else:
-            unknown.append(0)
-    unknown = np.array(unknown)
     direct_interaction = np.array(direct_interaction)
     cocomplex_interactions = np.array(cocomplex_interactions)
-    return direct_interaction, cocomplex_interactions, unknown
+    df_all.loc[:, 'bsasa_direct_interaction'] = direct_interaction
+    df_all.loc[:, 'cocomplex_interaction'] = cocomplex_interactions
+    return df_all, cocomplex_pairs, bsasa_ref_pairs 
 
 def init_tensorRandC(df_new, rsel, csel, preyu, bait, conditions, fill_tensors):
     # expeRiment tensor
@@ -429,17 +431,17 @@ def init_tensorRandC(df_new, rsel, csel, preyu, bait, conditions, fill_tensors):
         tensorR, tensorC = fill_tensors_applied(df=df_new[sel],
             tensorR=tensorR, tensorC=tensorC,condition_name=key)
     tensorC = xr.DataArray(np.array(tensorC, dtype=int),
-        dims=['condition', 'bait', 'preyu', 'crep'],
+        dims=['condition', 'bait', 'preyu', 'rep'],
         coords={'condition': conditions,
             'bait': bait,
             'preyu': preyu,
-            'crep': np.arange(0, 12)})
+            'rep': np.arange(0, len(csel))})
     tensorR = xr.DataArray(np.array(tensorR, dtype=int),
-        dims=['condition', 'bait', 'preyu', 'rrep'],
+        dims=['condition', 'bait', 'preyu', 'rep'],
         coords={'condition': conditions,
             'bait': bait,
             'preyu': preyu,
-            'rrep': np.arange(0, 4)})
+            'rep': np.arange(0, len(rsel))})
     return tensorR, tensorC
 
 def init_prey_pairs_df(rng_key, prey_set, bsasa_ref):
@@ -1119,6 +1121,18 @@ def plot_sampling(results, true_result, v0, v1, test_stat="",
         plt.show()
     return ax
     
+def pp(i, f, g = lambda x: x, printf=print):
+    """
+    Pretty print
+    i :: an iterable   object
+    f :: (i -> int)    info getter
+    g :: (str -> str)  formater
+    printf A function for printing
+    ---
+    h :: (int -> str)
+    """
+    printf(g(h(f(i))))
+
 def pval(results, true_results):
     N = len(results)
     return np.sum(results >= true_result) / N
@@ -1231,11 +1245,14 @@ def save_ax(ax):
     savename = title.replace(" ", "") + ".png"
     plt.savefig(savename, ax=ax, dpi=NOTEBOOK_DPI)
 
-def save_plt():
-    ax = plt.gca()
-    title = ax.title.get_text()
-    savename = title.replace(" ", "") + ".png"
-    plt.savefig(savename, dpi=NOTEBOOK_DPI)
+def save_plt(savename=None):
+    if savename:
+        plt.savefig(savename, NOTEBOOK_DPI)
+    else:
+        ax = plt.gca()
+        title = ax.title.get_text()
+        savename = title.replace(" ", "") + ".png"
+        plt.savefig(savename, dpi=NOTEBOOK_DPI)
 
 def score_from_df(pred_df, ref_set, a, b, score_fun):
     """
@@ -1339,6 +1356,16 @@ def two_col_union(df, a, b):
     prey = set(df[b])
     return bait | prey
 
+def tmp_scatter(df, x, y, title="tmp", plot_xy=True):
+    df.plot(x=x, y=y, title=title, kind="scatter", alpha=0.1)
+    if plot_xy:
+        x = df[x].values
+        plt.plot(x, x, label="y=x", color='r', alpha=0.1)
+    plt.tight_layout()
+    plt.legend()
+    save_plt()
+    plt.close()
+
 def un_center_and_scale_predictor(x, param_scale, min_value=1e-8, safe=True):
     if safe:
         assert x.shape[0] == param_scale.col_shape[0], (x.shape, param_scale.col_shape)
@@ -1395,6 +1422,13 @@ class UnHashableRegister:
                 break
         self.register.pop(ref_name)
         return ref_obj
+    # 
+    def __contains__(self, item):
+        for name, ref_obj in self.register.items():
+            if item is ref_obj:
+                return True
+        return False
+
 
 class HashableRegister:
     def __init__(self):
@@ -1409,6 +1443,9 @@ class HashableRegister:
     #
     def pop(self, name):
         return self.register.pop(name)
+    #
+    def __contains__(self, item):
+        return item in self.register
 
 class NameRegister:
     def __init__(self):
@@ -1430,6 +1467,10 @@ class NameRegister:
     def get_name(self, obj):
         self.set_current_register(obj)
         return self.current_register.get_name(obj)
+    #
+    def __contains__(self, item):
+        self.set_current_register(item)
+        return item in self.current_register
 
 nr = NameRegister()
 
@@ -1452,41 +1493,6 @@ nr.put(yellow, 'yellow')
 rc_dict = {'text.usetex': True,
            'font.family': 'sans-serif'}
 # -
-
-
-"""
-Displaying User information in a Pretty way
-1. Getting the information
-   info :: 
-   
-
-2. Formatting it
-
-3. Displaying it
-   - pp :: pretty print
-"""
-
-def info_it(i):
-    return len(i)
-
-def info_unique_it(i):
-    return len(set(i))
-
-def format_loffset(x: str, offset=4):
-    return " " * offset + x
-
-
-def pp(i, f, g = lambda x: x, printf=print):
-    """
-    Pretty print
-    i :: an iterable   object
-    f :: (i -> int)    info getter
-    g :: (str -> str)  formater
-    printf A function for printing
-    ---
-    h :: (int -> str)
-    """
-    printf(g(h(f(i))))
 
 bsasa_ref = init_bsasa_ref()
 bsasa_ref = remove_prey_nan(bsasa_ref)
@@ -1609,7 +1615,6 @@ print(f"N PDBS {h(len(chain_pdb_set))}")
 print(f"N UIDS {h(len(chain_uid_set))}")
 
 complexes = init_complexes(chain_pdb_set, chain_mapping)
-
 cocomplexes = init_cocomplexes(complexes)
             
 print(f"N cocomplexes {h(len(cocomplexes.keys()))}")
@@ -1628,6 +1633,16 @@ print(f"Co complex df {cocomplex_df.shape}")
 
 # +
 # Two Classes of truth from the Protein Data Bank
+
+"""
+Let's say we want python to do something in response to variable
+assignmet.
+  a = b
+
+Solutions:
+    1. Functional assignment a = f(b, *args, **kwargs)
+
+"""
 
 # +
 vals = cocomplex_df['NPDBS'].values
@@ -1659,18 +1674,123 @@ viral_remapping = {
 
 conditions = ["wt_MG132", "vif_MG132", "mock_MG132"]
 baits = {"CBFB": "PEBB_HUMAN", "ELOB": "ELOB_HUMAN", "CUL5": "CUL5_HUMAN", "LRR1": "LLR1_HUMAN"}
+bait2uid = init_bait2uid(baits, conditions, gene2uid)
 
-bait2uid = init_bait2uid(baits, conditions)
+df_all = init_df_all(df1, df2, df3, baits, conditions, viral_remapping, bait2uid)
+
+Bait2bait, Bait2condition = init_Bait2bait_Bait2condition(df_all)
+df_all.loc[:, 'bait'] = [Bait2bait[i] for i in df_all['Bait'].values]
+df_all.loc[:, 'condition'] = [Bait2condition[i] for i in df_all['Bait'].values]
+rsel = [f"r{i}" for i in range(1, 5)]
+csel = [f"c{i}" for i in range(1, 13)]
+df_all = parse_spec(df_all)
+df_new = df_all[['bait', 'condition', 'Prey', 'SaintScore', 'BFDR', 'BaitUID'] + rsel + csel]
+
+df_new.loc[:, 'PreyName'] = df_new.index
+# Update df_new based on assumed control mappings
+assert df_new.shape[0] == df_all.shape[0]
+c_cbfb = [f"c{i}" for i in (1, 2, 3, 4)] 
+c_cul5 = [f"c{i}" for i in (5, 6, 7, 8)] 
+c_elob = [f"c{i}" for i in (9, 10, 11, 12)] 
+csel= c_cbfb
+s = df_new["bait"] == "CBFB"
+df_new.loc[s, csel] = df_all.loc[s, c_cbfb].values
+s = df_new["bait"] == "CUL5"
+df_new.loc[s, csel] = df_all.loc[s, c_cul5].values 
+s = df_new["bait"] == "ELOB"
+df_new.loc[s, csel] = df_all.loc[s, c_elob].values
+# Removing extra counts
+df_new = df_new.drop(columns=c_cul5 + c_elob)
+df_new.loc[:, 'rAv'] = df_new.loc[:, rsel].mean(axis=1)
+df_new.loc[:, 'cAv'] = df_new.loc[:, csel].mean(axis=1)
+df_new.loc[:, 'rVar'] = df_new.loc[:, rsel].var(axis=1).values
+df_new.loc[:, 'cVar'] = df_new.loc[:, csel].var(axis=1).values
+df_new.loc[:, 'Av_diff'] = df_new['rAv'].values - df_new['cAv'].values
+prey2seq = {r['QueryID']: r['Q'] for i, r in chain_mapping.iterrows()}
+df_new.loc[:, 'Q'] = np.array([(prey2seq[prey] if prey in prey2seq else np.nan) for prey in df_new['Prey'].values])
+seq_lens = np.array([uid2seq_len[prey] for prey in df_new['Prey'].values])
+df_new.loc[:, 'aa_seq_len'] = seq_lens
+#df_new.loc[:, 'exp_aa_seq_len'] = np.exp(seq_lens)  # overflow
+n_first_sites = [n_first_tryptic_cleavages(uid2seq[prey]) for prey in df_new['Prey']]
+df_new.loc[:, 'n_first_tryptic_cleavage_sites'] = np.array(n_first_sites)
+df_new.loc[:, 'n_possible_first_tryptic_peptides'] = df_new.loc[
+        :,'n_first_tryptic_cleavage_sites'] + 1
+df_new.loc[:, 'rMax'] = np.max(df_new.loc[:, rsel].values, axis=1)
+df_new.loc[:, 'rMin'] = np.min(df_new.loc[:, rsel].values, axis=1)
+df_new.loc[:, 'cMax'] = np.max(df_new.loc[:, csel].values, axis=1)
+df_new.loc[:, 'cMin'] = np.min(df_new.loc[:, csel].values, axis=1)
+
+# Plot Number of Prey
+plt.close()
+fig, ax = plt.subplots(1, 1)
+g = df_new.groupby(["condition", "bait"])
+#ax = g.apply(lambda x: len(x[x['rMax']>0])).unstack(level=0).plot(kind="bar",
+#    title="tmp") 
+ax = g.apply(lambda x: len(x[x['cMax']>0])).unstack(level=0).plot(kind="bar",
+    title="tmp", ax=ax, alpha=0.5) 
+plt.ylabel("N unique prey detected")
+plt.tight_layout()
+save_plt()
+plt.close()
+
+tmp_scatter(df_new[df_new["bait"] == "CBFB"], "rAv", "cAv", title="CBFB Average")
+tmp_scatter(df_new[df_new["bait"] == "CUL5"], "rAv", "cAv", title="CUL5 Average")
+tmp_scatter(df_new[df_new["bait"] == "ELOB"], "rAv", "cAv", title="ELOB Average")
+tmp_scatter(df_new[df_new["bait"] == "LRR1"], "rAv", "cAv", title="LRR1 Average")
 
 
-df_all = init_df_all(df1, df2, df3, baits, conditions, viral_remapping)
-    
+tmp_scatter(df_new[df_new["bait"] == "CBFB"], "rVar", "cVar", title="CBFB Variance")
+tmp_scatter(df_new[df_new["bait"] == "CUL5"], "rVar", "cVar", title="CUL5 Variance")
+tmp_scatter(df_new[df_new["bait"] == "ELOB"], "rVar", "cVar", title="ELOB Variance")
+tmp_scatter(df_new[df_new["bait"] == "LRR1"], "rVar", "cVar", title="LRR1 Variance")
+
+tmp_scatter(df_new[df_new["bait"] == "CBFB"], "rMax", "cMax", title="CBFB Max")
+tmp_scatter(df_new[df_new["bait"] == "CUL5"], "rMax", "cMax", title="CUL5 Max")
+tmp_scatter(df_new[df_new["bait"] == "ELOB"], "rMax", "cMax", title="ELOB Max")
+tmp_scatter(df_new[df_new["bait"] == "LRR1"], "rMax", "cMax", title="LRR1 Max")
+
+tmp_scatter(df_new, "Av_diff", "SaintScore", title="Saint score", plot_xy=False)
+
     # +
 # X axis SAINT score, Y1 Cocomplex interactions, Y2 is 
 
 
-direct_interaction, cocomplex_interactions, unknown = init_interactions(df_all=df_all,
+df_new, cocomplex_ref_pairs, direct_ref_pairs = init_interactions(df_all=df_new,
     cocomplex_df=cocomplex_df, bsasa_ref=bsasa_ref)
+
+bait = ['CBFB', 'ELOB', 'CUL5', 'LRR1']
+conditions = ['wt', 'vif', 'mock']
+
+prey_set = sorted(list(set(df_new.index)))
+preyu = np.array(prey_set)
+preyv = np.array(prey_set)
+nprey = len(preyu)
+
+tensorR, tensorC = init_tensorRandC(
+    df_new, rsel, csel, preyu, bait, conditions, fill_tensors)
+
+sc = xr.DataArray(coords = tensorR.coords.merge(
+    "ap": np.array([1, 0])),
+    dims = ["condition", "bait", "preyu", "rep", "ap" 
+    
+preyname2uid = {row['PreyName']:row['Prey'] for i,row in df_new.iterrows()}
+uid2preyname = {val:key for key,val in preyname2uid.items()}
+
+cocomplex_df.loc[:, 'Prey1Name'] = cocomplex_df.loc[:, "Prey1"].map(
+    lambda x: uid2preyname[x])
+
+cocomplex_df.loc[:, 'Prey2Name'] = cocomplex_df.loc[:, "Prey2"].map(
+    lambda x: uid2preyname[x])
+
+cocomplex_matrix = init_cocomplex_matrix(nprey, preyu, preyv, cocomplex_df)
+bsasa_ref.loc[:, 'Prey1Name'] = bsasa_ref.loc[:, "Prey1"].map(
+    lambda x: uid2preyname[x])
+bsasa_ref.loc[:, 'Prey2Name'] = bsasa_ref.loc[:, "Prey2"].map(
+    lambda x: uid2preyname[x])
+# Long running: 2 min
+direct_matrix = init_direct_matrix(nprey, preyu, preyv, bsasa_ref)
+
+ds = xr.Dataset({'cocomplex': cocomplex_matrix, 'direct': direct_matrix, 'CRL_E':tensorR, 'CRL_C':tensorC})
 # -
 
 #npairs = math.comb(3062, 2)
@@ -1681,9 +1801,7 @@ direct_interaction, cocomplex_interactions, unknown = init_interactions(df_all=d
 
 # +
 vals = df_all['SaintScore'].values
-
 results, true_result = permutation_test(13, vals, vals[np.where(direct_interaction)], np.mean, 1000000)
-
 ax = plot_sampling(results, true_result, 0, 250000, 
                    test_stat="T(x): Mean Saint Score of 9 bait-prey pairs", 
                    title="Permutation test",
@@ -1723,6 +1841,7 @@ benchmark_summary = pd.DataFrame([len(cocomplex_df), len(bsasa_ref), len(df_all)
                           'Possible Interactions'])
 
 
+
 title="Direct Interaction Benchmark Summary"
 cols = ['Co-complex', 'Direct', 'Bait-prey']
 sns.categorical.barplot(benchmark_summary.T.iloc[:, 0:4])
@@ -1746,24 +1865,6 @@ plt.close()
 # +
 # Load in the xarrays and scores
 
-Bait2bait, Bait2condition = init_Bait2bait_Bait2condition(df_all)
-
-        
-df_all.loc[:, 'bait'] = [Bait2bait[i] for i in df_all['Bait'].values]
-
-df_all.loc[:, 'condition'] = [Bait2condition[i] for i in df_all['Bait'].values]
-
-rsel = [f"r{i}" for i in range(1, 5)]
-csel = [f"c{i}" for i in range(1, 13)]
-
-df_all = parse_spec(df_all)
-
-df_new = df_all[['bait', 'condition', 'Prey', 'SaintScore', 'BFDR'] + rsel + csel]
-
-prey_set = sorted(list(set(df_new.index)))
-preyu = np.array(prey_set)
-preyv = np.array(prey_set)
-nprey = len(preyu)
 
 edge_list = list(combinations(preyu, 2))
 
@@ -1771,33 +1872,6 @@ edge_list = list(combinations(preyu, 2))
 
 # Create a tensor filled with zeros
     
-df_new.loc[:, 'PreyName'] = df_new.index
-bait = ['CBFB', 'ELOB', 'CUL5', 'LRR1']
-conditions = ['wt', 'vif', 'mock']
-
-tensorR, tensorC = init_tensorRandC(
-    df_new, rsel, csel, preyu, bait, conditions, fill_tensors)
-    
-preyname2uid = {row['PreyName']:row['Prey'] for i,row in df_new.iterrows()}
-uid2preyname = {val:key for key,val in preyname2uid.items()}
-
-cocomplex_df.loc[:, 'Prey1Name'] = cocomplex_df.loc[:, "Prey1"].map(
-    lambda x: uid2preyname[x])
-
-cocomplex_df.loc[:, 'Prey2Name'] = cocomplex_df.loc[:, "Prey2"].map(
-    lambda x: uid2preyname[x])
-
-cocomplex_matrix = init_cocomplex_matrix(nprey, preyu, preyv, cocomplex_df)
-    
-bsasa_ref.loc[:, 'Prey1Name'] = bsasa_ref.loc[:, "Prey1"].map(
-    lambda x: uid2preyname[x])
-bsasa_ref.loc[:, 'Prey2Name'] = bsasa_ref.loc[:, "Prey2"].map(
-    lambda x: uid2preyname[x])
-# Long running: 2 min
-direct_matrix = init_direct_matrix(nprey, preyu, preyv, bsasa_ref)
-
-
-ds = xr.Dataset({'cocomplex': cocomplex_matrix, 'direct': direct_matrix, 'CRL_E':tensorR, 'CRL_C':tensorC})
 # -
 
 #df_new[df_new['condition']=='wt']
@@ -1908,10 +1982,6 @@ plt.close()
 #plt.show()
 # -
 
-df_new.loc[:, 'rAv'] = df_new.loc[:, rsel].mean(axis=1)
-df_new.loc[:, 'cAv'] = df_new.loc[:, csel].mean(axis=1)
-df_new.loc[:, 'Av_diff'] = df_new['rAv'].values - df_new['cAv'].values
-
 # +
 """
 JSON Structure for PreFilter
@@ -1935,8 +2005,6 @@ mock - mock ctrl
 
 # -
 
-prey2seq = {r['QueryID']: r['Q'] for i, r in chain_mapping.iterrows()}
-df_new.loc[:, 'Q'] = np.array([(prey2seq[prey] if prey in prey2seq else np.nan) for prey in df_new['Prey'].values])
 
 xt = np.arange(-10, 10)
 yt = np
@@ -1950,8 +2018,6 @@ plt.text(100, 30000, s)
 save_plt()
 plt.close()
 
-df_new.loc[:, 'rVar'] = df_new.loc[:, rsel].var(axis=1).values
-df_new.loc[:, 'cVar'] = df_new.loc[:, csel].var(axis=1).values
 
 # +
 
@@ -2019,14 +2085,6 @@ plt.close()
 
 # -
 
-seq_lens = np.array([uid2seq_len[prey] for prey in df_new['Prey'].values])
-df_new.loc[:, 'aa_seq_len'] = seq_lens
-df_new.loc[:, 'exp_aa_seq_len'] = np.exp(seq_lens)
-
-n_first_sites = [n_first_tryptic_cleavages(uid2seq[prey]) for prey in df_new['Prey']]
-df_new.loc[:, 'n_first_tryptic_cleavage_sites'] = np.array(n_first_sites)
-df_new.loc[:, 'n_possible_first_tryptic_peptides'] = df_new.loc[
-        :,'n_first_tryptic_cleavage_sites'] + 1
 sel = df_new['aa_seq_len'] <= 5000
 sns.histplot(df_new[sel], x='n_first_tryptic_cleavage_sites', y='aa_seq_len')
 plt.title("Number of tryptic cleavage sites and seq len")
@@ -2299,11 +2357,6 @@ y = df_new.loc[sel, 'rVar'].values
 simple_scatter(x, y, xname='rAv', yname='rVar')
 plt.close()
 # -
-
-df_new.loc[:, 'rMax'] = np.max(df_new.loc[:, rsel].values, axis=1)
-df_new.loc[:, 'rMin'] = np.min(df_new.loc[:, rsel].values, axis=1)
-df_new.loc[:, 'cMax'] = np.max(df_new.loc[:, csel].values, axis=1)
-df_new.loc[:, 'cMin'] = np.min(df_new.loc[:, csel].values, axis=1)
 
 # +
 fig, ax = plt.subplots(1, 2, sharex=True)
@@ -4747,12 +4800,6 @@ b = jnp.arange(3062 * 5 * 3).reshape((3062, 5, 3))
 (a * b)[:, :, 0]
 
 samples = mcmc.get_samples()
-
-
-
-def condition_box_plot(ds, var=''):
-    
-
 
 ds.sel(preyu='ELOC')['CRL_C']
 
