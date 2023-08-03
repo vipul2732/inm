@@ -1,3 +1,7 @@
+"""
+
+
+"""
 # ---
 # jupyter:
 #   jupytext:
@@ -16,19 +20,23 @@
 #
 # ## Conclusions
 # - Saint recovers all 9 known direct bait prey interactions and all 19 known known bait-prey co-complex interactions
+
+# Builtins
 import argparse
 import collections
+import cycler
 import functools
 import itertools
 import json
 import math
 import operator
-
+# from builtin
 from collections import namedtuple
 from functools import partial
 from itertools import combinations
 from typing import Set, FrozenSet
-
+from types import SimpleNamespace
+# third party
 import arviz as az
 import biotite
 import biotite.sequence.io
@@ -45,7 +53,7 @@ import pandas as pd
 import scipy as sp
 import seaborn as sns
 import xarray as xr
-
+# from third party
 from numpyro.diagnostics import hpdi, summary
 from numpyro import handlers
 from numpyro.contrib.funsor import config_enumerate
@@ -525,8 +533,6 @@ def model(x=None, y=None):
     m = numpyro.sample('m', dist.Normal(0, 1))
     numpyro.sample('Y', dist.Normal(m * x + b), obs=y)
 
-def model_test():
-    numpyro.sample("a", dist.Normal(0, 1))
 
 def m1(df):
     nrows = len(df)
@@ -542,6 +548,22 @@ def m1(df):
     for i in range(0, nexp):
         numpyro.sample(f'Yexp_a{i}', dist.Poisson(lambda_), obs=Yexp[:, i])
         numpyro.sample(f'Yexp_b{i}', dist.Poisson(kappa_), obs=Yexp[:, i])
+
+def mixed_model(probs, locs):
+    """Example mixture model"""
+    c = numpyro.sample("c", dist.Categorical(probs))
+    numpyro.sample("x", dist.Normal(locs[c], 0.5))
+
+def mixture_example(data):
+    K = 2 # Two mixture components
+    weights = numpyro.sample("weights", dist.Dirichlet(0.5 * jnp.ones(K)))
+    scale = numpyro.sample("scale", dist.LogNormal(0.0, 2.0))
+    with numpyro.plate("components", K):
+        locs = numpyro.sample("locs", dist.Normal(0.0, 10))
+    with numpyro.plate("data", len(data)):
+        # Local variables
+        assignment = numpyro.sample("assignment", dist.Categorical(weights))
+        numpyro.sample("obs", dist.Normal(locs[assignment], scale), obs=data)
 
 def model2(ds, N=3062):
     # wt, vif, mock
@@ -665,10 +687,8 @@ def model52_f(df_new, start, end, numpyro_model = model5,numpyro_model_kwargs = 
             batch_shape=(l, 1),
             **numpyro_model_kwargs) # partial apply for prior and post pred checks
         return namedtuple('Init', 'model kwargs meta')(model, model_kwargs, model_meta)
-    
     def init_sampling(rng_key, num_warmup, num_samples):
         return namedtuple('Init', 'rng_key num_warmup num_samples')(rng_key, num_warmup, num_samples)
-    
     def sample(model_init, sample_init):
         search = do_mcmc(model_init.model, 
                          sample_init.rng_key, 
@@ -678,13 +698,10 @@ def model52_f(df_new, start, end, numpyro_model = model5,numpyro_model_kwargs = 
         #samples = search.get_samples()
         #summary_dict = summary(samples, group_by_chain=False)
         return search
-    
-    
     #k1, k2, k3 = jax.random.split(rng_key, 3)
     #search = do_mcmc(model, k1, model_kwargs, num_warmup=1000, num_samples=5000)
     #samples = search.get_samples()
     #summary_dict = summary(samples, group_by_chain=False)
-    
     def sample_pp(model_init, sample_init):
         """
         Sample from the prior predictive distribution
@@ -693,83 +710,58 @@ def model52_f(df_new, start, end, numpyro_model = model5,numpyro_model_kwargs = 
             model = model_init.model, 
             num_samples = sample_init.num_samples
         )(sample_init.rng_key)
-    
     def sample_Pp(model_init, samples, sample_init):
         return numpyro.infer.Predictive(
             model = model_init.model, 
             posterior_samples = samples
         )(rng_key = sample_init.rng_key)
-    
     def _pre_init_InferenceData(
         search,
         pp,
         Pp,
         model_meta
     ):
-    
         coords = {'irow': np.arange(start, end), 'col': np.array([0]),
                   'rrep': np.arange(4), 'crep': np.arange(12)}
-
         dims = {'a': ['chain', 'draw', 'irow', 'col'],
                 'b': ['chain', 'draw', 'irow', 'col'],
                 'y_e': ['irow', 'rrep'], 
                 'y_c':['irow', 'crep']}
-        
-
         pred_dims = {'y_c': ['chain', 'draw', 'irow', 'col'],
                      'y_e': ['chain', 'draw', 'irow', 'col']}
-            
-        
         inf_data = az.from_numpyro(search, 
             prior=pp, posterior_predictive=Pp, coords=coords, dims=dims, pred_dims=pred_dims)
         assert inf_data is not None
         return inf_data
-        
     def rescale_model(model_meta, inf_data):
-
         # Scale Observed
         yobs = inf_data['observed_data']
-        
         inf_data.observed_data['y_c'].values = un_center_and_scale_predictor(
             yobs.y_c, model_meta['y_c'])
-        
         inf_data.observed_data['y_e'].values = un_center_and_scale_predictor(
             yobs.y_e, model_meta['y_e'])
-        
         # Scale Posterior
-        
         ufunc = parital(un_center_and_scale_predictor, param_scale=model_meta['y_e'])
-        
         inf_data.posterior.a = xr.apply_ufunc(
             ufunc, inf_data.posterior.a)
-        
-        
-        
         inf_data.posterior.a.values = un_center_and_scale_predictor(
             inf_data.posterior.a)
-
-
         return inf_data
-    
-    
     def _append_posterior_statistics(
         inf_data, 
         samples, 
         group_by_chain=False
     ):
         summary_dict = summary(samples, group_by_chain=group_by_chain)
-        
         a_rhat = summary_dict['a']['r_hat'][:, 0]
         a_neff = summary_dict['a']['n_eff'][:, 0]
         b_rhat = summary_dict['b']['r_hat'][:, 0]
         b_neff = summary_dict['b']['n_eff'][:, 0]
-        
         tmp_df = pd.DataFrame({'a_rhat': a_rhat, 'a_neff': a_neff, 'b_rhat':b_rhat, 'b_neff': b_neff})
         inf_data['posterior']['stats'] = xr.DataArray(tmp_df.values, 
                                                     coords={'irow': np.arange(start, end),
                                                     'stat': np.array(tmp_df.columns)})
         return inf_data
-    
     def init_InferenceData(
         search,
         pp,
@@ -780,14 +772,11 @@ def model52_f(df_new, start, end, numpyro_model = model5,numpyro_model_kwargs = 
         group_by_chain=False
     ):
         inf_data = _pre_init_InferenceData(search, pp, Pp, model_meta)
-        
         if rescale:
             inf_data = rescale_model(model_meta = model_meta, inf_data = inf_data)
         if append_sample_stats:
             inf_data = _append_posterior_statistics(inf_data, search.get_samples(), group_by_chain=group_by_chain)
-            
         return inf_data
-    
     return namedtuple(
         "M5F", "init_kernel init_sampling sample sample_pp sample_Pp rescale_model init_InferenceData")(
             init_kernel = init_kernel,
@@ -836,22 +825,16 @@ def model6(hyper_a, hyper_b, a=None, b=None, y_c=None, y_e=None, poisson_sparse=
     Similiar to model 5 however we place stronger priors on Poisson
     rates in the hopes of speeding up HMC
     """
-    
     if a is None:
         a = numpyro.sample('a', dist.HalfNormal(hyper_a))
     if b is None:
         b = numpyro.sample('b', dist.HalfNormal(hyper_b))
-    
     # predictive checks
     nrows, ncols = batch_shape
-    
     if y_c is None:
         b = jnp.ones((nrows, 12)) * b
-    
     if y_e is None:
         a = jnp.ones((nrows, 4)) * a
-        
-    
     numpyro.sample('y_c', dist.Poisson(b, is_sparse=poisson_sparse), obs=y_c)
     numpyro.sample('y_e', dist.Poisson(a, is_sparse=poisson_sparse), obs=y_e)
 
@@ -921,6 +904,67 @@ def model8(ds, prey_max=None):
     epsilon_hyper_prior = jnp.ones(beta_batch_shape) * max_control_obs # Prior over rates
     epsilon = numpyro.sample('epsilon', dist.HalfNormal(epsilon_hyper_prior)) # Same prior as alpha
     numpyro.sample('obs_ctrl', dist.Poisson(epsilon), obs=obs_c) # Independant of alpha * beta
+
+def model_data_from_ds(ds):
+    preyu = ds.preyu # Prey Dimension
+    bait = ds.bait   # Bait dimension
+    condition = ds.condition # infection dimension
+    rep = np.arange(0, 4) # replicate dimension
+    test = [True, False]  # control vs treatment dimension
+    n_prey = len(preyu)
+    n_bait = len(bait)
+    n_cond = len(condition)
+    n_rep = len(rep)
+    n_test = len(test)
+    coords = {'preyu': preyu, 'bait': bait, 'condition': condition,
+             'rep': rep, 'test': test}
+    dims = ['preyu', 'bait', 'condition', 'rep', 'test']
+    shape = (n_prey, n_bait, n_cond, n_rep, n_test)
+    data = np.zeros(shape, dtype=np.int64)
+    data = xr.DataArray(data=data, coords=coords, dims=dims)
+    # Assign the data
+    ds = ds.transpose('preyu', 'bait', 'condition', 'rrep', 'crep', 'preyv')
+    data = data.transpose('preyu', 'bait', 'condition', 'rep', 'test')
+    bait2_controls = {'CBFB': [0, 1, 2, 3],
+                      'CUL5': [4, 5, 6, 7],
+                      'ELOB': [8, 9, 10, 11],
+                      'LRR1': [8, 9, 10, 11]} # Assume that ELOB and LRR1 share control based on GDE counts
+    # Don't plot these controls twice
+    for bait in data.bait.values:
+        for test in [True, False]:
+            key = 'CRL_E' if test else 'CRL_C'
+            rep_cols = [0, 1, 2, 3] if test else bait2_controls[bait]
+            data.loc[:, bait, :, :, test] = ds[key].loc[:, bait, :, :].values[:, :, rep_cols]
+    assert np.sum(data.sel(bait='LRR1', condition=['wt', 'vif'])) == 0
+    data.loc[:, 'LRR1', 'wt', :, :] = -100   # These experiments weren't performed 
+    data.loc[:, 'LRR1', 'vif', :, :] = -100  # 
+    return data
+
+def model_zero_inflated_poisson(model_data, observed=True):
+    data = model_data.transpose('rep', 'preyu', 'bait', 'condition', 'test')
+    n_prey = len(data.preyu)
+    n_bait = len(data.bait)
+    n_infect = len(data.condition)
+    n_rep = len(data.rep)
+    n_test = len(data.test)
+    batch_shape =         (n_prey, n_bait, n_infect, n_test)
+    sample_shape = (n_rep, n_prey, n_bait, n_infect, n_test)
+    lam_hyper = jnp.ones(batch_shape) * 100
+    beta_alpha_hyper = jnp.ones(batch_shape) * 1.1
+    beta_beta_hyper =  jnp.ones(batch_shape) * 4.0
+    if observed:
+        data = data.values
+        assert data.shape == sample_shape
+    else:
+        data = None
+    #with numpyro.plate("rep_dim", n_rep):
+    pi = numpyro.sample('pi', dist.Beta(beta_alpha_hyper, beta_beta_hyper))
+    lambda_ = numpyro.sample('lam', dist.HalfNormal(lam_hyper))
+    numpyro.sample('sc', dist.ZeroInflatedPoisson(gate=pi, rate=lambda_), 
+                   sample_shape = (n_rep,), obs=data)
+
+def model_test():
+    numpyro.sample("a", dist.Normal(0, 1))
 
 def multi_hist(hists, bins, labels, alphas, xlabel):
     for i in range(len(hists)):
@@ -1010,18 +1054,12 @@ def parse_spec(df, spec_colname='Spec', ctrl_colname='ctrlCounts',n_spec=4, n_ct
 def phase_space_of_protein_interactions(ax):
     N = 4000
     Imax = math.comb(N, 2)
-    
-    
     #x = np.arange(1, N, 1)
     #y = sp.special.comb(x, 2)
-    
     x = np.arange(1, N)
     y0 = sp.special.comb(x, 2)
     yl = 0.004 * y0
     yu = 0.014 * y0
-    
-    
-    
     #ax.plot(x, y, 'k')
     ax.plot(x, np.log10(y0))
     ax.plot(x, np.log10(yl))
@@ -1031,21 +1069,11 @@ def phase_space_of_protein_interactions(ax):
     ax.set_ylabel("log10 N pairs")
     return ax
 
-def print_bsasa_ref(bsasa_ref):
-    sel = ~bsasa_ref['hasna'].values
-    a = set(bsasa_ref.loc[sel, 'Prey1'].values) 
-    b = set(bsasa_ref.loc[sel, 'Prey2'].values)
-    c = a.union(b)
-    s = h(len(c))
-    print((f"Of the {h(bsasa_ref.shape[0])} pairs in the BSASA reference\n"
-           f"{h(sum(bsasa_ref['hasna'].values))} are NaN\n"
-           f"{h(len(set(bsasa_ref['PDBID'].values)))} "
-           f"PDB IDs are represented\n"
-           f"{h(len(set(bsasa_ref.loc[~bsasa_ref['hasna'], 'PDBID'])))} "
-           f"PDBIDs after removing NaNs\n"
-           f"There are {h(nuid)} Uniprot IDS\n"
-           f"There are {s} Uniprot IDS"
-           f" after removing NaNs"))
+def get_user_info_bsasa_ref(bsasa_ref):
+    nrows, ncols = bsasa_ref.shape
+    n_pdb_ids = len(set(bsasa_ref['PDBID'].values))
+    n_uids = len(set(bsasa_ref["Prey1"].values).union(set(bsasa_ref["Prey2"].values)))
+    return {"shape" : (nrows, ncols), "N PDB IDs" : n_pdb_ids, "N UIDs" : n_uids}
 
 def print_prey_in_bsasa(gene2uid, prey_set):
     print(f"--Prey In BSASA--"
@@ -1181,24 +1209,19 @@ def run_and_merge_models(df_new, from_, to, step, rng_key):
     post_p = []
     log_like = []
     sample_stats = []
-    
-    
     intervals = list(range(from_, to, step))
     for i in range(len(intervals)):
         start = intervals[i]
         end = start + step
         print(start ,end)
         rng_key, k1 = jax.random.split(rng_key)
-        
         m_data = model52m_data(df_new, start, end, k1)
-        
         posterior.append(m_data.posterior)
         prior.append(m_data.prior)
         observed.append(m_data.observed_data)
         prior_p.append(m_data.prior_predictive)
         log_like.append(m_data.log_likelihood)
         sample_stats.append(m_data.sample_stats)
-    
     posterior = xr.merge(posterior)
     prior = xr.merge(prior)
     observed = xr.merge(observed)
@@ -1206,8 +1229,6 @@ def run_and_merge_models(df_new, from_, to, step, rng_key):
     post_p = xr.merge(post_p)
     log_like = xr.merge(log_like)
     sample_stats = xr.merge(sample_stats)
-    
-    
     return av.InferenceData({'posterior': posterior, 'prior': prior, 'posterior_predictive': post_p,
                             'prior_predictive': prior_p, 'log_likelihood': log_like,
                             'observed_data': observed})
@@ -1215,7 +1236,6 @@ def run_and_merge_models(df_new, from_, to, step, rng_key):
 def set2frozen_pairs(s):
     """
     s[a] -> s[f[a1, a2], ...]
-    
     The set of unordered pairs 
     """
     return set([frozenset(i) for i in combinations(s, 2)])
@@ -1399,80 +1419,155 @@ def xy_from(prey_pairs_df, col, thresholds, comp, pos_col):
         npos.append(p)
         ntot.append(nt)
     return np.array(ntot), np.array(npos)
-# Classes         
-class UnHashableRegister:
+
+class Dict2Str:
     """
-    Object -> str
+    Maps a dictionary to a string defining spacings between the
+    key value pairs.
+    e.g.
+    ------
+    lwidth = 6
+         sep = ':'
+           rgap = 4 
+    Output str
+    key1   :   value 
+    key20  :   value
     """
-    def __init__(self):
-        self.register = {} 
-    #
-    def put(self, obj, name: str):
-        assert isinstance(name, str)
-        self.register[name] = obj
-    #
-    def get_name(self, obj):
-        for name, ref_obj in self.register.items():
-            if obj is ref_obj:
-                return name
-    #
-    def pop(self, name):
-        for ref_name, ref_obj in self.register.items():
-            if name == ref_name:
-                break
-        self.register.pop(ref_name)
-        return ref_obj
-    # 
-    def __contains__(self, item):
-        for name, ref_obj in self.register.items():
-            if item is ref_obj:
-                return True
+    def __init__(self, lwidth: int, rgap: int, sep=":", key_func = None,
+                 value_func = None, lgap=0):
+        if key_func == None:
+            key_func = lambda x: x
+        if value_func == None:
+            value_func = lambda x: x
+        self.lwidth = lwidth
+        self.rgap = rgap
+        self.sep = sep
+        self.s = ""
+        self.value_func = value_func
+        self.key_func = key_func
+        self.lgap = lgap
+    def add_line(self, key, value):
+        n = len(key)
+        assert n < self.lwidth
+        remaining = self.lwidth - n
+        self.s = (" " * self.lgap + self.s + str(self.key_func(key)) + " " * remaining + 
+            self.sep + " " * self.rgap + str(self.value_func(value)) + "\n")
+    def erase(self):
+        self.s = ""
+    def __call__(self, d):
+        self.erase()
+        assert isinstance(d, dict)
+        for key, val in d.items():
+            self.add_line(key, val)
+        return self.s.removesuffix("\n")
+
+def pad_left(s: str, width: int, char=" "):
+    tmp = ""
+    lines = s.split("\n") 
+    for line in lines:
+        tmp += char * width + line + "\n"
+    return tmp.removesuffix("\n")
+
+
+def is_iterable(o):
+    try:
+        iter(o)
+        return True
+    except TypeError:
         return False
+    else:
+        raise ValueError
 
-
-class HashableRegister:
-    def __init__(self):
-        self.register = {}
-    # 
-    def put(self, obj, name):
-        assert isinstance(name, str)
-        self.register[obj] = name
-    # 
-    def get_name(self, obj):
-        return self.register[obj]
-    #
-    def pop(self, name):
-        return self.register.pop(name)
-    #
-    def __contains__(self, item):
-        return item in self.register
-
-class NameRegister:
-    def __init__(self):
-        self.hashable_register = HashableRegister() 
-        self.unhashable_register = UnHashableRegister()
-        self.current_register = None
-    #
-    def set_current_register(self, obj):
-        if isHashable(obj):
-            self.current_register = self.hashable_register
+def map_over_object(obj, func):
+    if is_iterable(obj):
+        if isinstance(obj, tuple):
+            return tuple(func(i) for i in obj)
+        elif isinstance(obj, list):
+            return [func(i) for i in obj] 
+        elif isinstance(obj, dict):
+            return {func(key) : val for key, val in obj.items()}
         else:
-            self.current_register = self.unhashable_register
-    # 
-    def put(self, obj, name):
-        assert isinstance(name, str)
-        self.set_current_register(obj)
-        self.current_register.put(obj, name)
-    # 
-    def get_name(self, obj):
-        self.set_current_register(obj)
-        return self.current_register.get_name(obj)
-    #
-    def __contains__(self, item):
-        self.set_current_register(item)
-        return item in self.current_register
+            raise ValueError # Unsupported object
+    else:
+        return func(obj)
 
-nr = NameRegister()
+class UserInfo:
+    def __init__(self, info = None):
+        self.info = info
+    def record(self, other: str):
+        if self.info == None:
+            self.info = other
+        else:
+            self.info = self.info + "\n" + other
+    def erase(self):
+        self.info = ""
+    def __repr__(self):
+        return self.info if self.info != None else super().__repr__()
+    def __getitem__(self, index):
+        lines = self.info.split("\n")
+        if isinstance(index, slice):
+            tmp = ""
+            for i in range(index.start, index.stop, index.step if index.step else 1):
+                tmp += lines[i] + "\n"
+            return UserInfo(tmp.removesuffix("\n"))
+        else:
+            return UserInfo(lines[index])
+    def __add__(self, other):
+        if isinstance(other, str):
+            return self + UserInfo(other) 
+        elif isinstance(other, UserInfo):
+             a = self.info
+             b = other.info
+             if (a == None) and (b == None):
+                 return UserInfo()
+             elif (a == None) and (b != None):
+                 return other
+             elif (a != None) and (b == None):
+                 return self
+             else:
+                 return UserInfo(self.info + "\n" + other.info)
+        else:
+            raise TypeError
+    def __len__(self):
+        return 0 if self.info == None else len(self.info.split("\n"))
+
+class UserInfoData:
+    """
+    Stores user info data as a list of tuples
+    each tuple is a key, value pair.
+    Each tuple corresponds to the next line in User Info
+    """
+    def __init__(self, data = None):
+        if data == None:
+            data = []
+        self.data = data
+    def record(self, other):
+        if isinstance(other, dict):
+            self.data = self.data + list(d.items())
+        elif isinstance(other, tuple):
+            assert len(other) == 2
+            self.data.append(other)
+        elif isinstance(other, str):
+            self.data.append((other, None))
+    def __len__(self):
+        return len(self.data)
+
+def fmt_user_info_data(user_info_data: UserInfoData, fmt_func) -> iter:
+    """
+    user_info_data:
+    fmt_func: Is a function that knows how to format a line
+    """
+    for i, data in enumerate(user_info_data.data):
+        yield fmt_func(i, data) 
+
+# Objects for returning user info
+import notepad
+pad = notepad.NotePad()
+
+#user_info = UserInfo()
+#h_map_func = partial(map_over_object, func=h) 
+#dict2_user_info_str = Dict2Str(10, 5, value_func=h_map_func)
+
 
 # Sali colors
 blue =   np.array([ 70, 90, 220, 255 ]) / 255
@@ -1482,56 +1577,52 @@ red =    np.array([197, 45, 15, 255]) / 255
 green =  np.array([50, 180, 0, 255]) / 255
 yellow = np.array([255, 204, 0, 255]) / 255
 
-nr.put(blue, 'blue')
-nr.put(black, 'black')
-nr.put(gray, 'gray')
-nr.put(red, 'red')
-nr.put(green, 'green')
-nr.put(yellow, 'yellow')
-
 #Plotting
 rc_dict = {'text.usetex': True,
            'font.family': 'sans-serif'}
+NOTEBOOK_DPI = 300
 # -
 
 bsasa_ref = init_bsasa_ref()
+pad.write("Loading BSASA Ref")
+pad.write(("shape", bsasa_ref.shape))
 bsasa_ref = remove_prey_nan(bsasa_ref)
+pad.write("Removing Nans")
+pad.write(("shape", bsasa_ref.shape))
 bsasa_ref = remove_self_interactions(bsasa_ref)
+pad.write("Removing self interactions")
+pad.write(("shape", bsasa_ref.shape))
 bsasa_ref = remove_every_other(bsasa_ref)
-nr.put(bsasa_ref, 'bsasa_ref')
+pad.write("Removing duplicates")
+pad.write(("shape", bsasa_ref.shape))
 
 # +
 uid2seq, uid2seq_len = init_uid2seq()
-nr.put(uid2seq, 'uid2seq')
 # +
 
 direct_interaction_set = init_direct_interaction_set(bsasa_ref)
 nuid = init_nuid(bsasa_ref)
-nr.put(direct_interaction_set, 'direct_interaction_set')
-nr.put(nuid, 'nuid')
 
-print_bsasa_ref(bsasa_ref)
+user_info.record("BSASA REFERENCE")
+user_info.record(pad_left(dict2_user_info_str(get_user_info_bsasa_ref(bsasa_ref)), 2))
 
 # +
 uid_total = 3_062
-NOTEBOOK_DPI = 300
 interaction_total = math.comb(uid_total, 2)
 n_possible_mapped_interactions = math.comb(nuid, 2)
 n_direct = len(direct_interaction_set)
 
 print_(uid_total, interaction_total, direct_interaction_set, nuid, n_possible_mapped_interactions)
 # -
-
 chain_mapping = pd.read_csv("../significant_cifs/chain_mapping_all.csv")
 
 # +
 table1 = pd.read_csv("../table1.csv")
 
-print(f"table 1 {h(table1.shape)}\nBSASA REF {h(bsasa_ref.shape)}")
-
 pdb_set = set(bsasa_ref['PDBID'].values)
 prey_set = set(bsasa_ref['Prey1'].values).union(bsasa_ref['Prey2'].values)
 
+print(f"table 1 {h(table1.shape)}\nBSASA REF {h(bsasa_ref.shape)}")
 print("BSASA REF NaN remove {bsasa_ref.shape}\n"
   f"N PDBS {h(len(pdb_set))}\n"
   f"N Prey {h(len(prey_set))}"
@@ -1548,7 +1639,6 @@ for i in sorted([f"CSN{i}_HUMAN" for i in range(1, 10)] + ["CSN7A_HUMAN", "CSN7B
 
 print(f"--PDBs in BSASA --")
 print(f"4n9f {'4n9f' in pdb_set}")
-
 # 4n9f is in the chain mapping vif, CUL5
 # BSASA is good, seq_id is good, aln_cols is good
 # The interaction between CBFB and Vif is supported by 6p59 C-F
@@ -1557,29 +1647,91 @@ print(f"4n9f {'4n9f' in pdb_set}")
 # ELOC:  Q15369
 # 4n9f was not in the dataframe because vif and CUL5 have a BSASA of ~ 380 square angstroms
 # ELOB and ELOC were not found in 4n9f because ... hhblits did not find 4n9f for these inputs.
-
-
-
 print(f"\nNon self {bsasa_ref.shape}")
 print("-------------------")
 
-fig, ax = plt.subplots(1, 1)
-vals = bsasa_ref['bsasa_lst'].values
-ax.hist(vals, bins=200, range=(0, int(1e4))) 
-#plt.show()
-tx = 0.5 
-ty = 0.5 
-s = f"N={h(len(vals))}"
-plt.text(tx, ty, s, transform=ax.transAxes)
-plt.title("Chain Buried Solvent Accesible Surface Area")
-plt.xlabel("BSASA (A^2)")
-plt.ylabel("Count")
-plt.vlines(500, 0, 20000, 'r', linestyles='dashed', label="500 A cutoff")
-plt.legend()
-plt.tight_layout()
-save_plt()
-plt.close()
+sali_cycler = cycler.cycler(color=[blue, black, red, gray, green, yellow])
 
+sali_style = {
+    "axes.grid": True,
+    "axes.grid.which": "both",
+    "axes.prop_cycle": sali_cycler,
+    "axes.axisbelow": True,
+    "font.size": 11.0,
+    "font.sans-serif": "Arial",
+    "patch.edgecolor": "white",
+    "patch.linewidth": 0.5
+}
+
+import matplotlib as mpl
+import matplotlib.patches as mpatches
+from typing import NamedTuple
+# We wish to prove data for attributes that are set
+# We wish to provide no data for attirbutes that are not set
+
+# 1. Implement a SimpleNamespace with default values as None
+# 2. Define data classes through inheritance
+# 3. Function that maps non default values to a dict of keyword arguemnts
+
+# Instead of steps 1, 2, and 3
+# Let's simply explicilty choose default arguemnts of None
+# For NamedTuples. This is explicit and avoids inheritance.
+# This requires a conversion function default_data2kwargs
+import flyplot as flt
+
+with mpl.rc_context(sali_style):
+    fig, ax = plt.subplots(1, 1)
+    fig_data = flt.FigData(savename="tmp.png", dpi=NOTEBOOK_DPI)
+    # Define the plotting data
+    hist_data = flt.HistData(x = vals, bins = 100, range=(0, int(1e4)),
+        label="BSASA", edgecolor="white", linewidth=0.5)
+    set_data = flt.SetData(xlabel = r"$\mathrm{\AA}^2$",
+        title = "Chain Buried Solvent Accesible Surface Area",ylabel = "Count")
+    legend_data = flt.LegendData(
+        x=500, ymin=0, ymax=1, color=red,
+        linestyle="dashed", label=r"500 $\mathrm{\AA}$ cutoff")
+    ax_data = flt.AxData(
+        set_data = set_data,
+        hist_data=hist_data,
+        axvline_data=axvline_data,
+        legend_data=legend_data)
+    # Call the plotting function
+    flt.vline_hist_with_extra_text_legend(ax, ax_data)
+    flt.savefig(fig, fig_data)
+
+def plot_historgram_with_vline(vals):
+    with mpl.rc_context(sali_style):
+        fig, ax = plt.subplots(1, 1)
+        ax = vline_hist(ax,
+           hist_kwargs = dict(
+               x=vals, bins = 100, range=(0, int(1e4)), label="BSASA", edgecolor="white", linewidth=0.5),
+           set_kwargs = dict(
+               xlabel = r"$\mathrm{\AA}^2$", title = "Chain Buried Solvent Accesible Surface Area",
+               ylabel = "Count"),
+           vline_kwargs = dict(
+               x=500, ymin=0, ymax=1, color=red, linestyle="dashed", label=r"500 $\mathrm{\AA}$ cutoff",)
+                      )
+        s = f"N={h(len(vals))}"
+        s += f"\nMax {h(int(np.max(vals)))}"
+        #ax.text(x=0.5, y=0.5, s=s, transform=ax.transAxes)
+        # Add the text string to the legend
+        ax.legend()
+        handles, labels = ax.get_legend_handles_labels()
+        handles.append(mpatches.Patch(color='none', label=s))
+        ax.legend(handles=handles)
+        fig.tight_layout()
+        fig.savefig("tmp.png", dpi=NOTEBOOK_DPI)
+        prop_cycle = plt.rcParams["axes.prop_cycle"]
+        colors = prop_cycle.by_key()
+        # The maximal value of BSASA at 916 thousand square angstroms is
+        # Tubulin latice 6u0h
+        # Tarantula heavy myosin 3dtb
+        # 6b0i      
+        # Edge case for large polymeric molecules
+        plt.close()
+
+vals = bsasa_ref['bsasa_lst'].values
+plot_histogram_with_vline(vals)
 summarize_col(bsasa_ref, 'bsasa_lst')
     
 interaction_set = init_interaction_set(bsasa_ref)
@@ -2289,11 +2441,10 @@ remaining = []
 for i in thresholds:
     remaining.append(thresh_sel(i, log_odds_ratio))
 
+fig, ax = plt.subplots(1, 1)
 remaining = np.array(remaining)
-plt.plot(thresholds, remaining)
-plt.xlabel('Log10 odds threshold')
-plt.ylabel('Data Remaining')
-plt.title("tmp")
+ax.plot(thresholds, remaining)
+ax.set(xlabel='Log10 odds threshold', ylabel='Data Remaining',title="tmp")
 save_plt()
 plt.close()
 
@@ -3238,127 +3389,103 @@ df_new.sort_values('rMax', ascending=False).loc[:,['bait']+ rsel + csel].iloc[0:
 # +
 """
 Example of Mixed Discrete and continuous HMC
-"""
 
-def mixed_model(probs, locs):
-    c = numpyro.sample("c", dist.Categorical(probs))
-    numpyro.sample("x", dist.Normal(locs[c], 0.5))
+"""
+def Nonef():
+    return None
+
+def identity(x):
+    return x
+
+def axplot(carry, xf=identity, yf=identity, plotf=identity, xlabelf=identity,
+           ylabelf=identity, titlef=identity, legendf=identity, textf=identity, extrafs = (),
+           savenamef=identity):
+    carry = xf(carry)
+    carry = yf(carry)
+    carry = plotf(carry)
+    carry = xlabelf(carry)
+    carry = ylabelf(carry)
+    carry = titlef(carry)
+    carry = legendf(carry)
+    carry = textf(carry)
+    for f in extrafs:
+        carry = f(carry)
+    carry = savenamef(carry)
+    return carry
+
+
+
+
+def axplot(fig=None, ax=None, xf=None, yf=None, plot_f=None, xlabel=None, ylabel=None, title=None,
+         savename=None, legend=None, plot_args = None, plot_kwargs=None, text=None, tx=None, ty=None,
+         transform=True
+         ):
+    x = xf()
+    y = yf(x)
+    if ax is None:
+        assert fig is None, f"If ax is None fig must also be None"
+        fig, ax = plt.subplots(1, 1)
+    if plot_kwargs is None:
+        plot_kwargs = {}
+    if plot_args is None:
+        plot_args = ()
+    plot_f(x, y, *plot_args, ax=ax, **plot_kwargs)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.set_title(title)
+    if legend:
+        ax.legend()
+    if text:
+        assert tx is not None
+        assert ty is not None
+        ax.text(tx, ty, text, transform=ax.transAxes)
+    if savename == "title":
+        save_plt()
+    elif isinstance(savename, str):
+        fig.savefig(savename + ".png", dpi=NOTEBOOK_DPI)
+    return fig, ax
+
+class UpdateableNamespace(SimpleNamespace):
+    """
+    The namespace may be updated by calling its' instance.
+    This allows for assignment through lambdas
+    """
+    def __call__(self, **kwargs):
+        return UpdateableNamespace(**vars(self), **kwargs)
+
 
 probs = jnp.array([0.15, 0.3, 0.3, 0.25])
 locs = jnp.array([-2, 0, 2, 4])
-numpyro.render_model(mixed_model, model_args=(probs, locs), render_distributions=True, render_params=True)
-
-
-# +
-# Prepare Model Data
-
-def model_data_from_ds(ds):
-    preyu = ds.preyu # Prey Dimension
-    bait = ds.bait   # Bait dimension
-    condition = ds.condition # infection dimension
-    rep = np.arange(0, 4) # replicate dimension
-    test = [True, False]  # control vs treatment dimension
-    
-    n_prey = len(preyu)
-    n_bait = len(bait)
-    n_cond = len(condition)
-    n_rep = len(rep)
-    n_test = len(test)
-    
-    
-    coords = {'preyu': preyu, 'bait': bait, 'condition': condition,
-             'rep': rep, 'test': test}
-    
-    dims = ['preyu', 'bait', 'condition', 'rep', 'test']
-    
-    shape = (n_prey, n_bait, n_cond, n_rep, n_test)
-    data = np.zeros(shape, dtype=np.int64)
-    
-    
-    
-    data = xr.DataArray(data=data, coords=coords, dims=dims)
-    
-    # Assign the data
-    ds = ds.transpose('preyu', 'bait', 'condition', 'rrep', 'crep', 'preyv')
-    data = data.transpose('preyu', 'bait', 'condition', 'rep', 'test')
-    
-    bait2_controls = {'CBFB': [0, 1, 2, 3],
-                      'CUL5': [4, 5, 6, 7],
-                      'ELOB': [8, 9, 10, 11],
-                      'LRR1': [8, 9, 10, 11]} # Assume that ELOB and LRR1 share control based on GDE counts
-    # Don't plot these controls twice
-    
-    
-    for bait in data.bait.values:
-        for test in [True, False]:
-            key = 'CRL_E' if test else 'CRL_C'
-            rep_cols = [0, 1, 2, 3] if test else bait2_controls[bait]
-            data.loc[:, bait, :, :, test] = ds[key].loc[:, bait, :, :].values[:, :, rep_cols]
-    
-    assert np.sum(data.sel(bait='LRR1', condition=['wt', 'vif'])) == 0
-    data.loc[:, 'LRR1', 'wt', :, :] = -100   # These experiments weren't performed 
-    data.loc[:, 'LRR1', 'vif', :, :] = -100  # 
-    
-    return data
-    
-    
-# -
+tmp = numpyro.render_model(mixed_model, model_args=(probs, locs), render_distributions=True, render_params=True)
 
 len(data.test)
 
-x = np.arange(0, 1, 0.01)
-y = np.exp(dist.Beta(1.1, 4.0).log_prob(x))
-plt.plot(x, y)
-plt.text(0.8, 2.0, "1.1 4.0")
-plt.savefig("Beta1-1_4-0.png", dpi=notebook_dpi)
+def cax_behavoir(carry, method): 
+    method(carry.ax, *carry.args, **carry.kwargs) 
+    return carry
 
+def cplot(c):
+    c.ax.plot(c.x, c.y, *c.plot_args, **c.plot_kwargs)
+    return c
+
+def cxlabel(c):
+    c.ax.set_xlabel(c.xlabel, *c.xlabel_args, **c.xlabel_kwargs)
+    return c
+
+
+partial(axplot,
+        xf=lambda c: c(x = np.arange(0, 1, 0.01)), 
+        yf=lambda c: c(y = np.exp.dist.Beta(c.alpha, c.beta).log_prob(c.x)),
+        xlabelf=lambda c: c(xlabel=None)
+        plotf=cplot, 
+
+
+axplot(xf = lambda : np.arange(0, 1, 0.01),
+       yf = lambda x: np.exp(dist.Beta(1.1, 4.0).log_prob(x)),
+       tx=0.8, ty=2.0, text="1.1, 4.0", title="Beta1-1_4-0", savename="title",
+       plot_f=lambda x, y, *args, ax, **kwargs: ax.plot(x, y, *args, **kwargs))
 
 # +
-def zero_inflated_poisson(model_data, observed=True):
-    
-    # Place replicates on leftmost
-    data = model_data.transpose('rep', 'preyu', 'bait', 'condition', 'test')
-    
-    n_prey = len(data.preyu)
-    n_bait = len(data.bait)
-    n_infect = len(data.condition)
-    n_rep = len(data.rep)
-    n_test = len(data.test)
-    
-    batch_shape =         (n_prey, n_bait, n_infect, n_test)
-    sample_shape = (n_rep, n_prey, n_bait, n_infect, n_test)
-    
-    lam_hyper = jnp.ones(batch_shape) * 100
-    
-    beta_alpha_hyper = jnp.ones(batch_shape) * 1.1
-    beta_beta_hyper =  jnp.ones(batch_shape) * 4.0
-    
-    if observed:
-        data = data.values
-        assert data.shape == sample_shape
-    else:
-        data = None
-    
-    #with numpyro.plate("rep_dim", n_rep):
-    pi = numpyro.sample('pi', dist.Beta(beta_alpha_hyper, beta_beta_hyper))
-    lambda_ = numpyro.sample('lam', dist.HalfNormal(lam_hyper))
-    numpyro.sample('sc', dist.ZeroInflatedPoisson(gate=pi, rate=lambda_), 
-                   sample_shape = (n_rep,), obs=data)
-    
-def mixture_example(data):
-    K = 2 # Two mixture components
-    weights = numpyro.sample("weights", dist.Dirichlet(0.5 * jnp.ones(K)))
-    scale = numpyro.sample("scale", dist.LogNormal(0.0, 2.0))
-    with numpyro.plate("components", K):
-        locs = numpyro.sample("locs", dist.Normal(0.0, 10))
-        
-    with numpyro.plate("data", len(data)):
-        # Local variables
-        
-        assignment = numpyro.sample("assignment", dist.Categorical(weights))
-        numpyro.sample("obs", dist.Normal(locs[assignment], scale), obs=data)
-        
-
     
 def run_mcmc(rng_key, model, model_data, num_samples, num_warmup, 
              extra_fields=('potential_energy','diverging'), thinning=1):
@@ -3486,7 +3613,7 @@ plt.show()
 dist.Beta(jnp.ones(2), jnp.ones(2)).to_event(1).event_shape
 
 data = model_data_from_ds(ds)
-model = zero_inflated_poisson
+model = model_zero_inflated_poisson
 start=0
 end=1000
 data = data.sel(preyu=data.preyu[start:end], bait=['CBFB', 'CUL5', 'ELOB'])
