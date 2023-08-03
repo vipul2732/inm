@@ -37,16 +37,21 @@ from itertools import combinations
 from typing import Set, FrozenSet
 from types import SimpleNamespace
 # third party
+from typing import NamedTuple
 import arviz as az
 import biotite
 import biotite.sequence.io
+import flyplot as flt
 import jax
 import jax.numpy as jnp
 import jax.scipy as jsp
 import numpy as np
 import numpyro
 import numpyro.distributions as dist
+import matplotlib as mpl
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+import notepad
 import optax
 import pathlib
 import pandas as pd
@@ -105,7 +110,7 @@ def boxen_pair(ax, vals, title, xticks, xticklabels, rc_context, ylim, ylabel=No
         return ax
 
 def colprint(name, value):
-    print(f"N {name} {value}")
+    return f"N {name} {value}"
 
 def center_and_scale_predictor(y, shift=2):
     assert y.ndim == 2
@@ -1075,16 +1080,16 @@ def get_user_info_bsasa_ref(bsasa_ref):
     n_uids = len(set(bsasa_ref["Prey1"].values).union(set(bsasa_ref["Prey2"].values)))
     return {"shape" : (nrows, ncols), "N PDB IDs" : n_pdb_ids, "N UIDs" : n_uids}
 
-def print_prey_in_bsasa(gene2uid, prey_set):
-    print(f"--Prey In BSASA--"
-      f"VIF {gene2uid['vifprotein'] in prey_set}\n"
-      f"ELOB {gene2uid['ELOB_HUMAN'] in prey_set}\n"
-      f"ELOC {gene2uid['ELOC_HUMAN'] in prey_set}\n"
-      f"LRR1 {gene2uid['LLR1_HUMAN'] in prey_set}\n"
-      f"CBFB {gene2uid['PEBB_HUMAN'] in prey_set}\n"
-      f"CUL5 {gene2uid['CUL5_HUMAN'] in prey_set}\n"
-      f"NEDD8 {gene2uid['NEDD8_HUMAN'] in prey_set}"
-    )
+def prey_in_bsasa(gene2uid, prey_set):
+    return [ 
+      ("VIF",   gene2uid['vifprotein'] in prey_set),
+      ("ELOB",  gene2uid['ELOB_HUMAN'] in prey_set),
+      ("ELOC",  gene2uid['ELOC_HUMAN'] in prey_set),
+      ("LRR1",  gene2uid['LLR1_HUMAN'] in prey_set),
+      ("CBFB",  gene2uid['PEBB_HUMAN'] in prey_set),
+      ("CUL5",  gene2uid['CUL5_HUMAN'] in prey_set),
+      ("NEDD8", gene2uid['NEDD8_HUMAN'] in prey_set)
+      ] 
 
 def print_(uid_total, interaction_total, direct_interaction_set,
         nuid, n_possible_mapped_interactions):
@@ -1302,7 +1307,7 @@ def summarize_col(df, col):
     d = {"min": np.min, "max": np.max,
          "mean": np.mean, "var": np.var}
     for key, ufunc in d.items():
-        colprint(f"{col} {key}", f(vals, ufunc))
+        yield colprint(f"{col} {key}", f(vals, ufunc))
 
 def simple_scatter(x, y, xname, yname, title=None):
     plt.plot(x, y, 'k.')
@@ -1429,14 +1434,95 @@ def is_iterable(o):
     else:
         raise ValueError
 
+def run_mcmc(rng_key, model, model_data, num_samples, num_warmup, 
+             extra_fields=('potential_energy','diverging'), thinning=1):
+    kernel = numpyro.infer.NUTS(model)
+    mcmc = MCMC(kernel, num_warmup=num_warmup, num_samples=num_samples, thinning=thinning)
+    mcmc.run(rng_key, model_data, extra_fields=extra_fields)
+    return mcmc
+
+def posterior_predictive_dist(rng_key, model, model_data, mcmc):
+    samples = mcmc.get_samples()
+    return numpyro.infer.Predictive(model, samples)(rng_key, model_data)
+
+def prior_predictive_dist(rng_key, model, model_data, num_samples=1000):
+    return numpyro.infer.Predictive(model, num_samples=num_samples)(rng_key, model_data)
+
+def get_summary_stats(mcmc):
+    sd = summary(mcmc.get_samples())
+    return {'n_eff': sd[key]['n_eff'] for key in sd.keys()} | {'r_hat': sd[key]['r_hat'] for key in sd}
+    
+
+def predictive_check(T, predictive, obs=None, vectorize=True):
+    """
+    T: mean, var, min, max, max_min_diff
+    """
+    Tpred = xr.apply_ufunc(T, predictive, input_core_dims=[["rep"]], vectorize=vectorize)
+    if obs is not None:
+        Tobs = xr.apply_ufunc(T, obs, input_core_dims=[["rep"]], vectorize=vectorize)
+    else:
+        Tobs = None
+    return Tpred, Tobs
+    
+    
+def av_pred_hist(ax, idata, kind='post', y_key='sc'):
+    obs = idata.observed_data
+    if kind == 'post':
+        pred = idata.posterior_predictive
+    elif kind == 'prior':
+        pred = idata.prior_predictive
+    ax.hist(pred[y_key])
+# +
+# Prior and posterior predictive check example
+# Checks of simulation
+
+def predictive_hist(ax, samples, observed, bins=100, vmin=0, vmax=1):
+    ax.hist(samples, bins=bins)
+    ax.vlines(observed, vmin, vmax, 'r')
+    return ax
+
+def gpt_model(data, observed=True):
+    batch_shape =     (10, 3, 3, 2)
+    sample_shape = (4, 10, 3, 3, 2)
+    assert data.shape == sample_shape
+    if not observed:
+        data = None
+    with numpyro.plate('rep', 4):
+        mu = numpyro.sample('mu', dist.Beta(jnp.ones(batch_shape), jnp.ones(batch_shape)))
+        sigma = numpyro.sample('sigma', dist.HalfNormal(jnp.ones(batch_shape)))
+        numpyro.sample('y', dist.ZeroInflatedPoisson(gate=mu, rate=sigma), obs=data)
+
+def zero_inflated_model(obs):
+    pi = numpyro.sample('pi', dist.Beta(2.3, 2))
+    alpha = numpyro.sample('alpha', dist.HalfNormal(50))
+    with numpyro.plate("obs", obs.shape[0]):
+        numpyro.sample('z', dist.ZeroInflatedPoisson(pi, rate=alpha), obs=obs)
+
+def zero_inflated_spectral_counts(obs_e, obs_c):
+    """
+    obs n prey x n replicates
+    pi or gate parameter : Proportion of 
+    """
+    n_prey, n_rep  = obs_e.shape
+    assert n_rep == 4
+    assert obs_e.shape == obs_c.shape
+    data = np.zeros((n_rep, n_prey, 2))
+    data[:,:, 0] = obs_c.T
+    data[:,:, 1] = obs_e.T
+    data = jnp.array(data, dtype=int)
+    # observed shape: (prey, replicate, experiment)
+    pi = numpyro.sample("pi", dist.Beta(jnp.ones((n_prey, 2)) * 2.0, jnp.ones((n_prey, 2)) * 2.3))
+    #pi_e = numpyro.sample("pi_e", dist.Beta(jnp.ones(n_prey) * 2.0, jnp.ones(n_prey) * 2.3))
+    #epsilon = numpyro.sample("epsilon", dist.HalfNormal(jnp.ones(n_prey) * 50))
+    lambda_hyper = np.ones((n_prey, 2)) * 100
+    lambda_hyper[:, 0] = 50
+    lambda_hyper = jnp.array(lambda_hyper)
+    lambda_ = numpyro.sample("lam", dist.HalfNormal(lambda_hyper))
+    #with numpyro.plate("data", n_rep):
+    numpyro.sample("sc", dist.ZeroInflatedPoisson(gate=pi, rate=lambda_), obs=data)
+
 # Objects for returning user info
-import notepad
 pad = notepad.NotePad()
-
-#user_info = UserInfo()
-#h_map_func = partial(map_over_object, func=h) 
-#dict2_user_info_str = Dict2Str(10, 5, value_func=h_map_func)
-
 
 # Sali colors
 blue =   np.array([ 70, 90, 220, 255 ]) / 255
@@ -1446,81 +1532,7 @@ red =    np.array([197, 45, 15, 255]) / 255
 green =  np.array([50, 180, 0, 255]) / 255
 yellow = np.array([255, 204, 0, 255]) / 255
 
-#Plotting
-rc_dict = {'text.usetex': True,
-           'font.family': 'sans-serif'}
-NOTEBOOK_DPI = 300
-# -
-
-bsasa_ref = init_bsasa_ref()
-pad.write("Loading BSASA Ref")
-pad.write(("shape", bsasa_ref.shape))
-bsasa_ref = remove_prey_nan(bsasa_ref)
-pad.write("Removing Nans")
-pad.write(("shape", bsasa_ref.shape))
-bsasa_ref = remove_self_interactions(bsasa_ref)
-pad.write("Removing self interactions")
-pad.write(("shape", bsasa_ref.shape))
-bsasa_ref = remove_every_other(bsasa_ref)
-pad.write("Removing duplicates")
-pad.write(("shape", bsasa_ref.shape))
-
-# +
-uid2seq, uid2seq_len = init_uid2seq()
-# +
-
-direct_interaction_set = init_direct_interaction_set(bsasa_ref)
-nuid = init_nuid(bsasa_ref)
-
-user_info.record("BSASA REFERENCE")
-user_info.record(pad_left(dict2_user_info_str(get_user_info_bsasa_ref(bsasa_ref)), 2))
-
-# +
-uid_total = 3_062
-interaction_total = math.comb(uid_total, 2)
-n_possible_mapped_interactions = math.comb(nuid, 2)
-n_direct = len(direct_interaction_set)
-
-print_(uid_total, interaction_total, direct_interaction_set, nuid, n_possible_mapped_interactions)
-# -
-chain_mapping = pd.read_csv("../significant_cifs/chain_mapping_all.csv")
-
-# +
-table1 = pd.read_csv("../table1.csv")
-
-pdb_set = set(bsasa_ref['PDBID'].values)
-prey_set = set(bsasa_ref['Prey1'].values).union(bsasa_ref['Prey2'].values)
-
-print(f"table 1 {h(table1.shape)}\nBSASA REF {h(bsasa_ref.shape)}")
-print("BSASA REF NaN remove {bsasa_ref.shape}\n"
-  f"N PDBS {h(len(pdb_set))}\n"
-  f"N Prey {h(len(prey_set))}"
-)
-
-gene2uid = {key:val for key, val in table1.values}
-uid2gene = {val:key for key,val in gene2uid.items()}
-
-print_prey_in_bsasa(gene2uid=gene2uid, prey_set=prey_set)
-
-for i in sorted([f"CSN{i}_HUMAN" for i in range(1, 10)] + ["CSN7A_HUMAN", "CSN7B_HUMAN"]):
-    if i in gene2uid:
-        print(f"{i.removesuffix('_HUMAN')} {gene2uid[i] in prey_set}")
-
-print(f"--PDBs in BSASA --")
-print(f"4n9f {'4n9f' in pdb_set}")
-# 4n9f is in the chain mapping vif, CUL5
-# BSASA is good, seq_id is good, aln_cols is good
-# The interaction between CBFB and Vif is supported by 6p59 C-F
-# ELOB interacts with ELOC in 7jto
-# ELOB:  Q15370
-# ELOC:  Q15369
-# 4n9f was not in the dataframe because vif and CUL5 have a BSASA of ~ 380 square angstroms
-# ELOB and ELOC were not found in 4n9f because ... hhblits did not find 4n9f for these inputs.
-print(f"\nNon self {bsasa_ref.shape}")
-print("-------------------")
-
 sali_cycler = cycler.cycler(color=[blue, black, red, gray, green, yellow])
-
 sali_style = {
     "axes.grid": True,
     "axes.grid.which": "both",
@@ -1532,21 +1544,396 @@ sali_style = {
     "patch.linewidth": 0.5
 }
 
-import matplotlib as mpl
-import matplotlib.patches as mpatches
-from typing import NamedTuple
-# We wish to prove data for attributes that are set
-# We wish to provide no data for attirbutes that are not set
+#Plotting
+rc_dict = {'text.usetex': True,
+           'font.family': 'sans-serif'}
+NOTEBOOK_DPI = 300
+# -
 
-# 1. Implement a SimpleNamespace with default values as None
-# 2. Define data classes through inheritance
-# 3. Function that maps non default values to a dict of keyword arguemnts
+bsasa_ref = init_bsasa_ref()
+pad.write(("Loading Buried Solvent Accessible Surface Area Reference", bsasa_ref.shape))
 
-# Instead of steps 1, 2, and 3
-# Let's simply explicilty choose default arguemnts of None
-# For NamedTuples. This is explicit and avoids inheritance.
-# This requires a conversion function default_data2kwargs
-import flyplot as flt
+bsasa_ref = remove_prey_nan(bsasa_ref)
+pad.write(("Removing Nans", bsasa_ref.shape)) 
+bsasa_ref = remove_self_interactions(bsasa_ref)
+pad.write(("Removing self interactions", bsasa_ref.shape))
+bsasa_ref = remove_every_other(bsasa_ref)
+pad.write(("Removing duplicates", bsasa_ref.shape))
+pdb_set = set(bsasa_ref['PDBID'].values)
+prey_set = set(bsasa_ref['Prey1'].values).union(bsasa_ref['Prey2'].values)
+pad.write(("N PDB Files in BSASA REF", len(pdb_set)))
+nuid = init_nuid(bsasa_ref)
+pad.write(("N uids represented in BSASA ref", nuid)) 
+
+# +
+uid2seq, uid2seq_len = init_uid2seq()
+pad.write(("Reading Primary Amino Acid Sequences", len(uid2seq))
+# +
+
+direct_interaction_set = init_direct_interaction_set(bsasa_ref)
+pad.write(("N pairwise direct interactions found", len(direct_interaction_set)))
+
+# +
+uid_total = 3_062
+pad.write(("N Expected Uniprot IDs", uid_total))
+
+interaction_total = math.comb(uid_total, 2)
+pad.write(("Size of interaction space", interaction_total))
+
+n_possible_mapped_interactions = math.comb(nuid, 2)
+pad.write(("Maximal possible size of reference interactions", n_possible_mapped_interactions))
+
+n_direct = len(direct_interaction_set)
+
+# -
+table1 = pd.read_csv("../table1.csv")
+pad.write(("Table 1: Maps PreyGene to Uniprot ID", table1.shape))
+
+gene2uid = {key:val for key, val in table1.values}
+uid2gene = {val:key for key,val in gene2uid.items()}
+
+pad.write("-- Prey in BSASA--")
+pad.write(prey_in_bsasa(gene2uid=gene2uid, prey_set=prey_set))
+
+for i in sorted([f"CSN{i}_HUMAN" for i in range(1, 10)] + ["CSN7A_HUMAN", "CSN7B_HUMAN"]):
+    if i in gene2uid:
+        pad.write((f"{i.removesuffix('_HUMAN')}", gene2uid[i] in prey_set))
+
+pad.write("-- PDBs in BSASA --")
+pad.write((f"4n9f", '4n9f' in pdb_set))
+
+#summarize_col(bsasa_ref, 'bsasa_lst')
+    
+interaction_set = init_interaction_set(bsasa_ref)
+n_possible_interactions = math.comb(uid_total, 2)
+n_possible_found_interactions = math.comb(len(prey_set), 2)
+npdbs_per_interaction = init_npdbs_per_interaction(bsasa_ref, interaction_set)
+        
+# Filter by percent sequence identity
+chain_mapping = pd.read_csv("../significant_cifs/chain_mapping_all.csv")
+pad.write(("Loading chain mapping", chain_mapping.shape))
+sel = chain_mapping['bt_aln_percent_seq_id'] >= 0.3
+chain_mapping = chain_mapping[sel]
+pad.write(("Chains over 30% sequence identity", chain_mapping.shape))
+
+chain_pdb_set = set(chain_mapping['PDBID'].values)
+chain_uid_set = set(chain_mapping['QueryID'].values)
+pad.write(("N PDBS in chain mapping",  len(chain_pdb_set)))
+pad.write(("N UIDS in chain mapping",  len(chain_uid_set)))
+
+complexes = init_complexes(chain_pdb_set, chain_mapping)
+cocomplexes = init_cocomplexes(complexes)
+pad.write(("N cocomplexes", len(cocomplexes.keys())))
+
+cocomplex_uid_set = init_cocomplex_uid_set(cocomplexes)
+# Long Running Cell
+cocomplex_pairs = list(combinations(cocomplex_uid_set, 2))
+
+cocomplex_df = init_cocomplex_df(cocomplex_pairs, cocomplexes)
+pad.write("Co-complex df", cocomplex_df.shape)
+df1, df2, df3 = init_dfs()
+
+viral_remapping = {
+"vifprotein"          :   "P69723",
+"polpolyprotein"      :   "Q2A7R5",
+"nefprotein"     :        "P18801",
+"tatprotein"         :    "P0C1K3",
+"gagpolyprotein"     :    "P12493",
+"revprotein"          :   "P69718",
+"envpolyprotein"      :   "O12164"}
+
+conditions = ["wt_MG132", "vif_MG132", "mock_MG132"]
+pad.write(("N conditions", len(conditions)))
+baits = {"CBFB": "PEBB_HUMAN", "ELOB": "ELOB_HUMAN", "CUL5": "CUL5_HUMAN", "LRR1": "LLR1_HUMAN"}
+bait2uid = init_bait2uid(baits, conditions, gene2uid)
+
+df_all = init_df_all(df1, df2, df3, baits, conditions, viral_remapping, bait2uid)
+pad.write(("DF ALL", df_all.shape))
+Bait2bait, Bait2condition = init_Bait2bait_Bait2condition(df_all)
+df_all.loc[:, 'bait'] = [Bait2bait[i] for i in df_all['Bait'].values]
+df_all.loc[:, 'condition'] = [Bait2condition[i] for i in df_all['Bait'].values]
+rsel = [f"r{i}" for i in range(1, 5)]
+csel = [f"c{i}" for i in range(1, 13)]
+df_all = parse_spec(df_all)
+df_new = df_all[['bait', 'condition', 'Prey', 'SaintScore', 'BFDR', 'BaitUID'] + rsel + csel]
+pad.write(("DF NEW", df_new.shape))
+
+df_new.loc[:, 'PreyName'] = df_new.index
+# Update df_new based on assumed control mappings
+assert df_new.shape[0] == df_all.shape[0]
+c_cbfb = [f"c{i}" for i in (1, 2, 3, 4)] 
+c_cul5 = [f"c{i}" for i in (5, 6, 7, 8)] 
+c_elob = [f"c{i}" for i in (9, 10, 11, 12)] 
+pad.write(("Assumed CBFB control mapping", c_cbfb))
+pad.write(("Assumed CUL5 control mapping", c_cul5))
+pad.write(("Assumed ELOB control mapping", c_elob))
+csel= c_cbfb
+s = df_new["bait"] == "CBFB"
+df_new.loc[s, csel] = df_all.loc[s, c_cbfb].values
+s = df_new["bait"] == "CUL5"
+df_new.loc[s, csel] = df_all.loc[s, c_cul5].values 
+s = df_new["bait"] == "ELOB"
+df_new.loc[s, csel] = df_all.loc[s, c_elob].values
+# Removing extra counts
+df_new = df_new.drop(columns=c_cul5 + c_elob)
+pad.write(("DF NEW - Remove Extra Counts", df_new.shape))
+df_new.loc[:, 'rAv'] = df_new.loc[:, rsel].mean(axis=1)
+df_new.loc[:, 'cAv'] = df_new.loc[:, csel].mean(axis=1)
+df_new.loc[:, 'rVar'] = df_new.loc[:, rsel].var(axis=1).values
+df_new.loc[:, 'cVar'] = df_new.loc[:, csel].var(axis=1).values
+df_new.loc[:, 'Av_diff'] = df_new['rAv'].values - df_new['cAv'].values
+df_new.loc[:, 'rMax'] = np.max(df_new.loc[:, rsel].values, axis=1)
+df_new.loc[:, 'rMin'] = np.min(df_new.loc[:, rsel].values, axis=1)
+df_new.loc[:, 'cMax'] = np.max(df_new.loc[:, csel].values, axis=1)
+df_new.loc[:, 'cMin'] = np.min(df_new.loc[:, csel].values, axis=1)
+pad.write(("DF New - Add summary stats", df_new.shape))
+prey2seq = {r['QueryID']: r['Q'] for i, r in chain_mapping.iterrows()}
+df_new.loc[:, 'Q'] = np.array([(prey2seq[prey] if prey in prey2seq else np.nan) for prey in df_new['Prey'].values])
+seq_lens = np.array([uid2seq_len[prey] for prey in df_new['Prey'].values])
+df_new.loc[:, 'aa_seq_len'] = seq_lens
+#df_new.loc[:, 'exp_aa_seq_len'] = np.exp(seq_lens)  # overflow
+n_first_sites = [n_first_tryptic_cleavages(uid2seq[prey]) for prey in df_new['Prey']]
+df_new.loc[:, 'n_first_tryptic_cleavage_sites'] = np.array(n_first_sites)
+df_new.loc[:, 'n_possible_first_tryptic_peptides'] = df_new.loc[
+        :,'n_first_tryptic_cleavage_sites'] + 1
+pad.write(("DF NEW - Add sequence info", df_new.shape))
+
+df_new, cocomplex_ref_pairs, direct_ref_pairs = init_interactions(df_all=df_new,
+    cocomplex_df=cocomplex_df, bsasa_ref=bsasa_ref)
+pad.write(("DF NEW - Init interactions", df_new.shape))
+bait = ['CBFB', 'ELOB', 'CUL5', 'LRR1']
+conditions = ['wt', 'vif', 'mock']
+
+prey_set = sorted(list(set(df_new.index)))
+preyu = np.array(prey_set)
+preyv = np.array(prey_set)
+nprey = len(preyu)
+
+tensorR, tensorC = init_tensorRandC(
+    df_new, rsel, csel, preyu, bait, conditions, fill_tensors)
+pad.write(("Tensor Replicate", tensorR.shape))
+pad.write(("Tensor Control", tensorC.shape))
+
+sc = xr.DataArray(coords = tensorR.coords.merge([tensorR, tensorC]),
+    "ap": np.array([1, 0])),
+    dims = ["condition", "bait", "preyu", "rep", "ap"]) 
+pad.write(("Spectral Counts", sc.shape))
+
+    
+preyname2uid = {row['PreyName']:row['Prey'] for i,row in df_new.iterrows()}
+uid2preyname = {val:key for key,val in preyname2uid.items()}
+
+cocomplex_df.loc[:, 'Prey1Name'] = cocomplex_df.loc[:, "Prey1"].map(
+    lambda x: uid2preyname[x])
+
+cocomplex_df.loc[:, 'Prey2Name'] = cocomplex_df.loc[:, "Prey2"].map(
+    lambda x: uid2preyname[x])
+
+cocomplex_matrix = init_cocomplex_matrix(nprey, preyu, preyv, cocomplex_df)
+bsasa_ref.loc[:, 'Prey1Name'] = bsasa_ref.loc[:, "Prey1"].map(
+    lambda x: uid2preyname[x])
+bsasa_ref.loc[:, 'Prey2Name'] = bsasa_ref.loc[:, "Prey2"].map(
+    lambda x: uid2preyname[x])
+# Long running: 2 min
+direct_matrix = init_direct_matrix(nprey, preyu, preyv, bsasa_ref)
+
+ds = xr.Dataset({'cocomplex': cocomplex_matrix, 'direct': direct_matrix, 'CRL_E':tensorR, 'CRL_C':tensorC})
+
+benchmark_summary = pd.DataFrame([len(cocomplex_df), len(bsasa_ref), len(df_all),
+    sum(unknown), sum(direct_interaction), sum(cocomplex_interactions),math.comb(3062, 2)],
+    columns=["N"], index=['PDB Co-complex', 'PDB Direct', 'Bait-prey',
+                          'Bait-prey absent in PDB',
+                          'Bait-prey Direct',
+                          'Bait-prey cocomplex',
+                          'Possible Interactions'])
+pad.write(("Benchmark Summary", benchmark_summary.shape))
+edge_list = list(combinations(preyu, 2))
+prey_pairs_df = init_prey_pairs_df(jax.random.PRNGKey(13), prey_set, bsasa_ref)
+
+# Append Cocomplex labels to DataFrame
+df_new = update_df_new_PDB_COCOMPLEX(df_new, ds)
+pad.write(("Add cocomplex labels to DF NEW", df_new.shape))
+
+base = "../../benchmark/data/cullin/PRIDE/PXD009012/"
+evidence = pd.concat(
+    [pd.read_csv(i, sep="\t") for i in [
+        base + "MaxQuant_results_CBFB_HIV_APMS/RH022_evidence.txt"]])#,
+        #base + "MaxQuant_results_CUL5_HIV_APMS/evidence.txt",
+        #base + "MaxQuant_results_ELOB_HIV_APMS/evidence.txt"]])
+proteinGroups = pd.read_csv(base + "MaxQuant_results_CBFB_HIV_APMS/proteinGroups.txt", sep="\t")
+proteinGroups[proteinGroups['Protein IDs'] == 'vifprotein'].iloc[:, [0, 2, 3, 8, 9, 
+                                        10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 25, 33]]
+sel = evidence['Raw file'] == 'FU20151020-04'
+evidence[evidence['Proteins']=='vifprotein'].loc[sel, 
+            ['Peptide ID', 'MS/MS Count', 'Number of scans', 'Raw file']]
+
+pad.write("Modeling Begin")
+nuts_kernal = numpyro.infer.NUTS(model)
+mcmc = numpyro.infer.MCMC(nuts_kernal, num_warmup=500, num_samples=1000)
+rng_key = jax.random.PRNGKey(13)
+mcmc.run(rng_key, x=df_new['rAv'].values, y=df_new['rVar'].values, extra_fields=('potential_energy',))
+mcmc.print_summary()
+
+df_test = df_new
+nuts_kernal = numpyro.infer.NUTS(m1)
+mcmc = numpyro.infer.MCMC(nuts_kernal, num_warmup=1000, num_samples=1000)
+rng_key = jax.random.PRNGKey(13)
+mcmc.run(rng_key, df_test, extra_fields=('potential_energy',))
+
+samples = mcmc.get_samples()
+
+dsel = ds.sel(bait=['CBFB', 'ELOB', 'CUL5'])
+ctrl_data = np.ravel(dsel['CRL_C'].values)
+e_data = np.ravel(dsel['CRL_E'].values)
+nuts_kernal = numpyro.infer.NUTS(model4)
+mcmc = numpyro.infer.MCMC(nuts_kernal, num_warmup=1000, num_samples=10000, thinning=2)
+rng_key = jax.random.PRNGKey(13)
+mcmc.run(rng_key, e_data=e_data, ctrl_data=ctrl_data, extra_fields=('potential_energy',))
+mcmc.print_summary()
+posterior_samples = mcmc.get_samples()
+posterior_predictive = numpyro.infer.Predictive(model4, posterior_samples)(jax.random.PRNGKey(1))
+prior = numpyro.infer.Predictive(model4, num_samples=1000)(jax.random.PRNGKey(2))
+m4_data = az.from_numpyro(mcmc, prior=prior, posterior_predictive=posterior_predictive)
+
+n = 0
+y_c = np.array(df_new.iloc[n, :][csel].values, dtype=int)
+y_e = np.array(df_new.iloc[n, :][rsel].values, dtype=int)
+model_kwargs={'y_c': y_c, 'y_e': y_e}
+numpyro.render_model(model5, model_args=(None, None, y_c, y_e, True, ()),
+                     render_distributions=True, render_params=True)
+search = do_mcmc(model5, 1, model_kwargs, num_warmup=1000, num_samples=5000)
+search.print_summary()
+posterior_samples = search.get_samples()
+prior = numpyro.infer.Predictive(model5, num_samples=500)
+posterior_predictive = numpyro.infer.Predictive(model5, posterior_samples)
+
+start=10
+end=20#len(df_new)
+l = end - start
+y_c = df_new.iloc[start:end, :][csel].values
+y_e = df_new.iloc[start:end, :][rsel].values
+
+kd = {'hyper_a': (np.mean(y_e, axis=1).reshape((l, 1)) + 10) * 1.5,
+      'hyper_b': (np.mean(y_c, axis=1).reshape((l, 1)) + 10) * 1.5}
+m5f = model52_f(df_new, start=start, end=end, numpyro_model=model6,
+               numpyro_model_kwargs=kd)
+kernel = m5f.init_kernel(rescale_model=False)
+sample_init = m5f.init_sampling(jax.random.PRNGKey(13), num_warmup=1000, num_samples=1000)
+search = m5f.sample(kernel, sample_init)
+sample_init = m5f.init_sampling(PRNGKey(12), num_warmup=500, num_samples=500)
+pp = m5f.sample_pp(kernel, sample_init)
+sample_init = m5f.init_sampling(PRNGKey(11), num_warmup = 500, num_samples = 500)
+Pp = m5f.sample_Pp(kernel, search.get_samples(), sample_init)
+inf_data10_20 = m5f.init_InferenceData(search, pp, Pp, kernel.meta, rescale=False, append_sample_stats=True)
+
+#model = model8
+nuts_kernal = numpyro.infer.NUTS(model)
+mcmc = numpyro.infer.MCMC(nuts_kernal, num_warmup=1000, num_samples=1000, thinning=1)
+rng_key = jax.random.PRNGKey(13)
+mcmc.run(rng_key, ds_sel, extra_fields=('potential_energy',))
+samples = mcmc.get_samples(group_by_chain=False)
+summary_dict = summary(mcmc.get_samples(group_by_chain=True))
+posterior_predictive = numpyro.infer.Predictive(model, samples)(jax.random.PRNGKey(1),
+                                                                ds_sel)
+prior_predictive = numpyro.infer.Predictive(model, 
+                                            num_samples=1000)(PRNGKey(2), ds_sel)
+i8data = az.from_numpyro(mcmc, 
+        coords={'bait': ['CBFB', 'CUL5', 'ELOB'], 'condition': ds_sel.condition.values,
+                'rrep': ds_sel.rrep.values,
+                'preyu': ds_sel.preyu.values[0:prey_max]},
+        dims={'alpha': ['bait', 'condition', 'rrep'],
+              'beta': ['preyu', 'bait', 'condition', 'rrep'],
+              'epsilon': ['preyu', 'bait', 'condition', 'rrep']})
+
+# Zero inflated Poisson
+data = model_data_from_ds(ds)
+start=0
+end=1000
+data = data.sel(preyu=data.preyu[start:end], bait=['CBFB', 'CUL5', 'ELOB'])
+numpyro.render_model(model, model_args=(data, True), render_distributions=True, render_params=True)
+num_samples = 1000
+mcmc = run_mcmc(PRNGKey(0), 
+                model_zero_inflated_poisson, 
+                data,
+                num_samples=num_samples,
+                num_warmup=500)
+posterior_predictive = numpyro.infer.Predictive(model_zero_inflated_poisson,
+    posterior_samples=mcmc.get_samples())(PRNGKey(1), data, observed=False)
+prior_predictive = numpyro.infer.Predictive(model_zero_inflated_poisson, num_samples=num_samples)(
+    PRNGKey(2), data, observed=False)
+dims = {"lam": ["preyu", "bait", "condition", "test"],
+        "pi": ["preyu", "bait", "condition", "test"],
+        "sc": ["rep", "preyu", "bait", "condition", "test"]}
+coords = {key: val for key, val in data.coords.items()} | {'draw': np.arange(0, num_samples)}
+izdata = az.from_numpyro(mcmc, 
+                        coords=coords, 
+                        dims=dims,
+                        pred_dims = {'sc': ['draw', 'preyu', 'bait', 'condition', 'test']},
+                        posterior_predictive=posterior_predictive,
+                        prior=prior_predictive)
+
+"""
+Some functions to benchmark AP-MS scoring functions
+"""
+tp_over_pp_score_from_df = partial(score_from_df, score_fun=tp_over_pp_score)
+tp_from_df = partial(score_from_df, score_fun=tp)
+ref_set = ref_df2ref_set(bsasa_ref, 'Prey1Name', 'Prey2Name')
+tmp = df_new
+f1 = partial(tp_from_df, a='bait', b='PreyName')
+f2 = partial(tp_over_pp_score_from_df, a='bait', b='PreyName')
+f3 = lambda sub_df, ref_set: len(sub_df)
+t = np.arange(0, 1, 0.01)
+col = 'SaintScore'
+#tp_scores = scores_from_df(tmp, t, col, ref_set, f1)
+#tp_over_pp_scores = scores_from_df(tmp, t, col, ref_set, f2)
+scores = scores_from_df_fast(tmp, t, col, ref_set, [f1, f3])
+df_new.loc[:, "PostCertainty"] = posterior_certainties.values
+df_new.loc[:, "PriorCertainty"] = prior_certainties.values
+# N direct interactions
+n_possible_interactions = math.comb(len(set(df_new['PreyName'].values)),2)
+n_direct = len(set(bsasa_ref_pairs))
+thresholds = np.arange(0, 1, 0.05)
+saint_predictions = []
+posterior_predictions = []
+prior_predictions = []
+for threshold in thresholds:
+    saint_subdf = df_new.loc[df_new['SaintScore'] >= threshold]
+    prior_subdf = df_new.loc[df_new['PriorCertainty'] >= threshold]
+    post_subdf  = df_new.loc[df_new['PostCertainty'] >= threshold]
+    saint_predictions.append(df2pp_tp(saint_subdf, threshold))
+    prior_predictions.append(df2pp_tp(prior_subdf, threshold))
+    posterior_predictions.append(df2pp_tp(post_subdf, threshold))
+    print(threshold)
+saint_predictions_arr = np.array(saint_predictions)
+prior_predictions_arr = np.array(prior_predictions)
+postr_predictions_arr = np.array(posterior_predictions)
+#saint_predictions[:, 0] = sp.special.comb(saint_predictions[:, 0], 2)
+fig, ax = plt.subplots(1, 1)
+step = 1000
+xend = n_possible_interactions
+xstart=0
+every = 1e4
+x = np.arange(0, xend, every)
+y = sp.stats.hypergeom.median(M=n_possible_interactions,
+                           n=n_direct, N=x)
+Null = sp.stats.hypergeom(M=n_possible_interactions, n=n_direct, N=x)
+#ylower = Null.ppf(0.1)
+#yupper = Null.ppf(0.9)
+#yerr = np.array([ylower, yupper])
+yerr = Null.var()
+y = Null.median()
+ax.errorbar(x, y, yerr=yerr, alpha=0.2, label='Hypergeometric Null')
+ax.set_xlabel("Predicted prey pairs")
+ax.set_ylabel("Recovered PDB direct Interactions")
+#xy_plot(ax, x, y, '.', alpha=0.4, xlabel="$n$ predicited positives", ylabel="Recovered PDBs")
+ax.plot(saint_predictions_arr[:, 0], saint_predictions_arr[:, 1], label='Saint All Prey')
+ax.plot(prior_predictions_arr[:, 0], prior_predictions_arr[:, 1], label='Prior certainty')
+ax.plot(postr_predictions_arr[:, 0], postr_predictions_arr[:, 1], label="Posterior certainty")
+ax.legend()
+ax.set_xlim((xstart, xend))
+#ax.set_ylim((0, 500))
+plt.savefig("null_benchmark.png", dpi=notebook_dpi)
+    
 
 with mpl.rc_context(sali_style):
     fig, ax = plt.subplots(1, 1)
@@ -1568,178 +1955,10 @@ with mpl.rc_context(sali_style):
     flt.vline_hist_with_extra_text_legend(ax, ax_data)
     flt.savefig(fig, fig_data)
 
-def plot_historgram_with_vline(vals):
-    with mpl.rc_context(sali_style):
-        fig, ax = plt.subplots(1, 1)
-        ax = vline_hist(ax,
-           hist_kwargs = dict(
-               x=vals, bins = 100, range=(0, int(1e4)), label="BSASA", edgecolor="white", linewidth=0.5),
-           set_kwargs = dict(
-               xlabel = r"$\mathrm{\AA}^2$", title = "Chain Buried Solvent Accesible Surface Area",
-               ylabel = "Count"),
-           vline_kwargs = dict(
-               x=500, ymin=0, ymax=1, color=red, linestyle="dashed", label=r"500 $\mathrm{\AA}$ cutoff",)
-                      )
-        s = f"N={h(len(vals))}"
-        s += f"\nMax {h(int(np.max(vals)))}"
-        #ax.text(x=0.5, y=0.5, s=s, transform=ax.transAxes)
-        # Add the text string to the legend
-        ax.legend()
-        handles, labels = ax.get_legend_handles_labels()
-        handles.append(mpatches.Patch(color='none', label=s))
-        ax.legend(handles=handles)
-        fig.tight_layout()
-        fig.savefig("tmp.png", dpi=NOTEBOOK_DPI)
-        prop_cycle = plt.rcParams["axes.prop_cycle"]
-        colors = prop_cycle.by_key()
-        # The maximal value of BSASA at 916 thousand square angstroms is
-        # Tubulin latice 6u0h
-        # Tarantula heavy myosin 3dtb
-        # 6b0i      
-        # Edge case for large polymeric molecules
-        plt.close()
-
 vals = bsasa_ref['bsasa_lst'].values
 plot_histogram_with_vline(vals)
-summarize_col(bsasa_ref, 'bsasa_lst')
-    
-interaction_set = init_interaction_set(bsasa_ref)
-
-n_possible_interactions = math.comb(uid_total, 2)
-n_possible_found_interactions = math.comb(len(prey_set), 2)
-
-print(f"N possible interactions {h(n_possible_interactions)}\n"
-      f"N possible found interactions "
-      f"{h(n_possible_found_interactions)}\n"
-      f"N interactions found {h(len(interaction_set))}")
-
-
-print('----Per Interaction----')
-
-
-npdbs_per_interaction = init_npdbs_per_interaction(bsasa_ref, interaction_set)
-        
-
-print("\nCHAIN MAPPING")
-print("---------")
-
-# Filter by percent sequence identity
-sel = chain_mapping['bt_aln_percent_seq_id'] >= 0.3
-print(f"chain_mapping {chain_mapping.shape}")
-chain_mapping = chain_mapping[sel]
-print(f"30% SeqID {chain_mapping.shape}")
-
-chain_pdb_set = set(chain_mapping['PDBID'].values)
-chain_uid_set = set(chain_mapping['QueryID'].values)
-
-print(f"N PDBS {h(len(chain_pdb_set))}")
-print(f"N UIDS {h(len(chain_uid_set))}")
-
-complexes = init_complexes(chain_pdb_set, chain_mapping)
-cocomplexes = init_cocomplexes(complexes)
-            
-print(f"N cocomplexes {h(len(cocomplexes.keys()))}")
-
-cocomplex_uid_set = init_cocomplex_uid_set(cocomplexes)
-# Long Running Cell
-cocomplex_pairs = list(combinations(cocomplex_uid_set, 2))
-
-cocomplex_df = init_cocomplex_df(cocomplex_pairs, cocomplexes)
-
-print(f"Co complex df {cocomplex_df.shape}")
-# -
-
-#npairs = math.comb(3062, 2)
-#nobs = math.comb(1400, 2)
-
 # +
-# Two Classes of truth from the Protein Data Bank
 
-"""
-Let's say we want python to do something in response to variable
-assignmet.
-  a = b
-
-Solutions:
-    1. Functional assignment a = f(b, *args, **kwargs)
-
-"""
-
-# +
-vals = cocomplex_df['NPDBS'].values
-title = "N PDBS per Cocomplex prey pair"
-savename = title.replace(" ", "") + ".png"
-plt.title(title)
-plt.hist(vals, bins=(len(set(vals)) // 1), range=(0, 600))
-plt.xlabel("N PDBS")
-plt.ylabel("Count")
-plt.tight_layout()
-plt.savefig(savename, dpi=NOTEBOOK_DPI)
-plt.close()
-#plt.show()
-
-# +
-# Test the SAINT scores
-# Test only bait prey interactions
-
-df1, df2, df3 = init_dfs()
-
-viral_remapping = {
-"vifprotein"          :   "P69723",
-"polpolyprotein"      :   "Q2A7R5",
-"nefprotein"     :        "P18801",
-"tatprotein"         :    "P0C1K3",
-"gagpolyprotein"     :    "P12493",
-"revprotein"          :   "P69718",
-"envpolyprotein"      :   "O12164"}
-
-conditions = ["wt_MG132", "vif_MG132", "mock_MG132"]
-baits = {"CBFB": "PEBB_HUMAN", "ELOB": "ELOB_HUMAN", "CUL5": "CUL5_HUMAN", "LRR1": "LLR1_HUMAN"}
-bait2uid = init_bait2uid(baits, conditions, gene2uid)
-
-df_all = init_df_all(df1, df2, df3, baits, conditions, viral_remapping, bait2uid)
-
-Bait2bait, Bait2condition = init_Bait2bait_Bait2condition(df_all)
-df_all.loc[:, 'bait'] = [Bait2bait[i] for i in df_all['Bait'].values]
-df_all.loc[:, 'condition'] = [Bait2condition[i] for i in df_all['Bait'].values]
-rsel = [f"r{i}" for i in range(1, 5)]
-csel = [f"c{i}" for i in range(1, 13)]
-df_all = parse_spec(df_all)
-df_new = df_all[['bait', 'condition', 'Prey', 'SaintScore', 'BFDR', 'BaitUID'] + rsel + csel]
-
-df_new.loc[:, 'PreyName'] = df_new.index
-# Update df_new based on assumed control mappings
-assert df_new.shape[0] == df_all.shape[0]
-c_cbfb = [f"c{i}" for i in (1, 2, 3, 4)] 
-c_cul5 = [f"c{i}" for i in (5, 6, 7, 8)] 
-c_elob = [f"c{i}" for i in (9, 10, 11, 12)] 
-csel= c_cbfb
-s = df_new["bait"] == "CBFB"
-df_new.loc[s, csel] = df_all.loc[s, c_cbfb].values
-s = df_new["bait"] == "CUL5"
-df_new.loc[s, csel] = df_all.loc[s, c_cul5].values 
-s = df_new["bait"] == "ELOB"
-df_new.loc[s, csel] = df_all.loc[s, c_elob].values
-# Removing extra counts
-df_new = df_new.drop(columns=c_cul5 + c_elob)
-df_new.loc[:, 'rAv'] = df_new.loc[:, rsel].mean(axis=1)
-df_new.loc[:, 'cAv'] = df_new.loc[:, csel].mean(axis=1)
-df_new.loc[:, 'rVar'] = df_new.loc[:, rsel].var(axis=1).values
-df_new.loc[:, 'cVar'] = df_new.loc[:, csel].var(axis=1).values
-df_new.loc[:, 'Av_diff'] = df_new['rAv'].values - df_new['cAv'].values
-prey2seq = {r['QueryID']: r['Q'] for i, r in chain_mapping.iterrows()}
-df_new.loc[:, 'Q'] = np.array([(prey2seq[prey] if prey in prey2seq else np.nan) for prey in df_new['Prey'].values])
-seq_lens = np.array([uid2seq_len[prey] for prey in df_new['Prey'].values])
-df_new.loc[:, 'aa_seq_len'] = seq_lens
-#df_new.loc[:, 'exp_aa_seq_len'] = np.exp(seq_lens)  # overflow
-n_first_sites = [n_first_tryptic_cleavages(uid2seq[prey]) for prey in df_new['Prey']]
-df_new.loc[:, 'n_first_tryptic_cleavage_sites'] = np.array(n_first_sites)
-df_new.loc[:, 'n_possible_first_tryptic_peptides'] = df_new.loc[
-        :,'n_first_tryptic_cleavage_sites'] + 1
-df_new.loc[:, 'rMax'] = np.max(df_new.loc[:, rsel].values, axis=1)
-df_new.loc[:, 'rMin'] = np.min(df_new.loc[:, rsel].values, axis=1)
-df_new.loc[:, 'cMax'] = np.max(df_new.loc[:, csel].values, axis=1)
-df_new.loc[:, 'cMin'] = np.min(df_new.loc[:, csel].values, axis=1)
 
 # Plot Number of Prey
 plt.close()
@@ -1771,47 +1990,16 @@ tmp_scatter(df_new[df_new["bait"] == "ELOB"], "rMax", "cMax", title="ELOB Max")
 tmp_scatter(df_new[df_new["bait"] == "LRR1"], "rMax", "cMax", title="LRR1 Max")
 
 tmp_scatter(df_new, "Av_diff", "SaintScore", title="Saint score", plot_xy=False)
-
-    # +
-# X axis SAINT score, Y1 Cocomplex interactions, Y2 is 
-
-
-df_new, cocomplex_ref_pairs, direct_ref_pairs = init_interactions(df_all=df_new,
-    cocomplex_df=cocomplex_df, bsasa_ref=bsasa_ref)
-
-bait = ['CBFB', 'ELOB', 'CUL5', 'LRR1']
-conditions = ['wt', 'vif', 'mock']
-
-prey_set = sorted(list(set(df_new.index)))
-preyu = np.array(prey_set)
-preyv = np.array(prey_set)
-nprey = len(preyu)
-
-tensorR, tensorC = init_tensorRandC(
-    df_new, rsel, csel, preyu, bait, conditions, fill_tensors)
-
-sc = xr.DataArray(coords = tensorR.coords.merge(
-    "ap": np.array([1, 0])),
-    dims = ["condition", "bait", "preyu", "rep", "ap" 
-    
-preyname2uid = {row['PreyName']:row['Prey'] for i,row in df_new.iterrows()}
-uid2preyname = {val:key for key,val in preyname2uid.items()}
-
-cocomplex_df.loc[:, 'Prey1Name'] = cocomplex_df.loc[:, "Prey1"].map(
-    lambda x: uid2preyname[x])
-
-cocomplex_df.loc[:, 'Prey2Name'] = cocomplex_df.loc[:, "Prey2"].map(
-    lambda x: uid2preyname[x])
-
-cocomplex_matrix = init_cocomplex_matrix(nprey, preyu, preyv, cocomplex_df)
-bsasa_ref.loc[:, 'Prey1Name'] = bsasa_ref.loc[:, "Prey1"].map(
-    lambda x: uid2preyname[x])
-bsasa_ref.loc[:, 'Prey2Name'] = bsasa_ref.loc[:, "Prey2"].map(
-    lambda x: uid2preyname[x])
-# Long running: 2 min
-direct_matrix = init_direct_matrix(nprey, preyu, preyv, bsasa_ref)
-
-ds = xr.Dataset({'cocomplex': cocomplex_matrix, 'direct': direct_matrix, 'CRL_E':tensorR, 'CRL_C':tensorC})
+vals = cocomplex_df['NPDBS'].values
+title = "N PDBS per Cocomplex prey pair"
+savename = title.replace(" ", "") + ".png"
+plt.title(title)
+plt.hist(vals, bins=(len(set(vals)) // 1), range=(0, 600))
+plt.xlabel("N PDBS")
+plt.ylabel("Count")
+plt.tight_layout()
+plt.savefig(savename, dpi=NOTEBOOK_DPI)
+plt.close()
 # -
 
 #npairs = math.comb(3062, 2)
@@ -1853,14 +2041,6 @@ print("H0: Cocomplex bait-prey interactions have no relation to Saint Score")
 
 # +
 # N unknown
-benchmark_summary = pd.DataFrame([len(cocomplex_df), len(bsasa_ref), len(df_all),
-    sum(unknown), sum(direct_interaction), sum(cocomplex_interactions),math.comb(3062, 2)],
-    columns=["N"], index=['PDB Co-complex', 'PDB Direct', 'Bait-prey',
-                          'Bait-prey absent in PDB',
-                          'Bait-prey Direct',
-                          'Bait-prey cocomplex',
-                          'Possible Interactions'])
-
 
 
 title="Direct Interaction Benchmark Summary"
@@ -1887,7 +2067,6 @@ plt.close()
 # Load in the xarrays and scores
 
 
-edge_list = list(combinations(preyu, 2))
 
 # Bait, condition, preyu, r, c
 
@@ -1965,17 +2144,13 @@ plt.close()
 # +
 # -
 
-prey_pairs_df = init_prey_pairs_df(jax.random.PRNGKey(13), prey_set, bsasa_ref)
 # DataSet
 print(f"N direct {h(np.sum(np.tril(ds['direct'] > 0, k=-1)))}")
 print(f"N cocomplex {h(np.sum(np.tril(ds['cocomplex'] > 0, k=-1)))}")
 
 # +
-# Append Cocomplex labels to DataFrame
 
-df_new = update_df_new_PDB_COCOMPLEX(df_new, ds)
 x, y = xy_from(df_new, 'SaintScore', np.arange(1, 0, -0.05), comp=operator.ge, pos_col='PDB_COCOMPLEX')
-
 pos_col = 'PDB_COCOMPLEX'
 npairs = len(df_new)
 npdb_pos = sum(df_new[pos_col].values)
@@ -2004,25 +2179,6 @@ plt.close()
 # -
 
 # +
-"""
-JSON Structure for PreFilter
-
-There is 1 control shared between wt and vif conditions
-There is 1 control for the mock
-
-- vif/wt ctrl
-- mock ctrl
-- wt
-- vif
-- mock
--rsel (4)
--csel (12)
-
-vif - vif/wt ctrl
-wt  - vig/wt ctrl
-mock - mock ctrl
-"""
-
 
 # -
 
@@ -2218,27 +2374,6 @@ ax = sns.regplot(x='cAv', y="cVar", data=df_new)
 plt.plot(x, y)
 plt.title("Control Data")
 
-
-# -
-
-nuts_kernal = numpyro.infer.NUTS(model)
-mcmc = numpyro.infer.MCMC(nuts_kernal, num_warmup=500, num_samples=1000)
-rng_key = jax.random.PRNGKey(13)
-mcmc.run(rng_key, x=df_new['rAv'].values, y=df_new['rVar'].values, extra_fields=('potential_energy',))
-
-mcmc.print_summary()
-
-
-# +
-    
-# -
-
-df_test = df_new
-nuts_kernal = numpyro.infer.NUTS(m1)
-mcmc = numpyro.infer.MCMC(nuts_kernal, num_warmup=1000, num_samples=1000)
-rng_key = jax.random.PRNGKey(13)
-mcmc.run(rng_key, df_test, extra_fields=('potential_energy',))
-
 # ## Probabalistic Filter
 #
 # The model is
@@ -2249,7 +2384,6 @@ mcmc.run(rng_key, df_test, extra_fields=('potential_energy',))
 #
 #
 
-samples = mcmc.get_samples()
 
 # +
 # First create a function that reads in a vector of
@@ -2550,30 +2684,8 @@ plt.title("tmp")
 save_plt()
 plt.close()
 
-# +
-dsel = ds.sel(bait=['CBFB', 'ELOB', 'CUL5'])
-ctrl_data = np.ravel(dsel['CRL_C'].values)
-e_data = np.ravel(dsel['CRL_E'].values)
-
-nuts_kernal = numpyro.infer.NUTS(model4)
-mcmc = numpyro.infer.MCMC(nuts_kernal, num_warmup=1000, num_samples=10000, thinning=2)
-rng_key = jax.random.PRNGKey(13)
-mcmc.run(rng_key, e_data=e_data, ctrl_data=ctrl_data, extra_fields=('potential_energy',))
-# -
-
-mcmc.print_summary()
-
-posterior_samples = mcmc.get_samples()
-
-posterior_predictive = numpyro.infer.Predictive(model4, posterior_samples)(jax.random.PRNGKey(1))
-
-
 
 posterior_predictive['y_c'].shape
-
-prior = numpyro.infer.Predictive(model4, num_samples=1000)(jax.random.PRNGKey(2))
-
-m4_data = az.from_numpyro(mcmc, prior=prior, posterior_predictive=posterior_predictive)
 
 az.plot_trace(m4_data['sample_stats'], var_names=['lp'])
 
@@ -2612,25 +2724,7 @@ nuts_kernal = numpyro.infer.NUTS(model4)
 mcmc = numpyro.infer.MCMC(nuts_kernal, num_warmup=1000, num_samples=10000, thinning=2)
 rng_key = jax.random.PRNGKey(13)
 mcmc.run(rng_key, e_data=e_data, ctrl_data=ctrl_data, extra_fields=('potential_energy',))
-
 model = model5
-n = 0
-y_c = np.array(df_new.iloc[n, :][csel].values, dtype=int)
-y_e = np.array(df_new.iloc[n, :][rsel].values, dtype=int)
-model_kwargs={'y_c': y_c, 'y_e': y_e}
-
-numpyro.render_model(model5, model_args=(None, None, y_c, y_e, True, ()),
-                     render_distributions=True, render_params=True)
-
-search = do_mcmc(model5, 1, model_kwargs, num_warmup=1000, num_samples=5000)
-
-search.print_summary()
-
-posterior_samples = search.get_samples()
-
-prior = numpyro.infer.Predictive(model5, num_samples=500)
-
-posterior_predictive = numpyro.infer.Predictive(model5, posterior_samples)
 
 # +
 hists = [posterior_samples['a'], posterior_samples['b'], posterior_samples['a'] - posterior_samples['b']]
@@ -2653,33 +2747,6 @@ end = 100
 # +
 # Variants - number of chains
 # Keep the model as a variable
-start=10
-end=20#len(df_new)
-l = end - start
-y_c = df_new.iloc[start:end, :][csel].values
-y_e = df_new.iloc[start:end, :][rsel].values
-
-kd = {'hyper_a': (np.mean(y_e, axis=1).reshape((l, 1)) + 10) * 1.5,
-      'hyper_b': (np.mean(y_c, axis=1).reshape((l, 1)) + 10) * 1.5}
-
-# +
-m5f = model52_f(df_new, start=start, end=end, numpyro_model=model6,
-               numpyro_model_kwargs=kd)
-
-kernel = m5f.init_kernel(rescale_model=False)
-
-
-sample_init = m5f.init_sampling(jax.random.PRNGKey(13), num_warmup=1000, num_samples=1000)
-search = m5f.sample(kernel, sample_init)
-# -
-
-sample_init = m5f.init_sampling(PRNGKey(12), num_warmup=500, num_samples=500)
-pp = m5f.sample_pp(kernel, sample_init)
-
-sample_init = m5f.init_sampling(PRNGKey(11), num_warmup = 500, num_samples = 500)
-Pp = m5f.sample_Pp(kernel, search.get_samples(), sample_init)
-
-inf_data10_20 = m5f.init_InferenceData(search, pp, Pp, kernel.meta, rescale=False, append_sample_stats=True)
 
 
 # +
@@ -2691,9 +2758,6 @@ step = 10
 crops = range(0, len(tmp), 1000)
 start = 0
 
-
-    
-    
 for stop in crops:
     if stop == 0:
         continue
@@ -2715,8 +2779,6 @@ idata = concat_inf(idata, i_now)
 
 
 # -
-
-idata
 
 # +
 #ufunc = partial(un_center_and_scale_predictor, param_scale = kernel.meta['y_e'], safe=False)
@@ -3075,95 +3137,6 @@ b = df_new[c1].values
 (a @ b.T).shape
 
 # +
-"""
-Some functions to benchmark AP-MS scoring functions
-"""
-
-tp_over_pp_score_from_df = partial(score_from_df, score_fun=tp_over_pp_score)
-tp_from_df = partial(score_from_df, score_fun=tp)
-
-# -
-
-
-# +
-ref_set = ref_df2ref_set(bsasa_ref, 'Prey1Name', 'Prey2Name')
-tmp = df_new
-f1 = partial(tp_from_df, a='bait', b='PreyName')
-f2 = partial(tp_over_pp_score_from_df, a='bait', b='PreyName')
-f3 = lambda sub_df, ref_set: len(sub_df)
-t = np.arange(0, 1, 0.01)
-col = 'SaintScore'
-
-#tp_scores = scores_from_df(tmp, t, col, ref_set, f1)
-#tp_over_pp_scores = scores_from_df(tmp, t, col, ref_set, f2)
-
-scores = scores_from_df_fast(tmp, t, col, ref_set, [f1, f3])
-# -
-
-df_new.loc[:, "PostCertainty"] = posterior_certainties.values
-df_new.loc[:, "PriorCertainty"] = prior_certainties.values
-
-# +
-# N direct interactions
-n_possible_interactions = math.comb(len(set(df_new['PreyName'].values)),2)
-n_direct = len(set(bsasa_ref_pairs))
-
-
-
-# +
-thresholds = np.arange(0, 1, 0.05)
-saint_predictions = []
-posterior_predictions = []
-prior_predictions = []
-
-
-for threshold in thresholds:
-    saint_subdf = df_new.loc[df_new['SaintScore'] >= threshold]
-    prior_subdf = df_new.loc[df_new['PriorCertainty'] >= threshold]
-    post_subdf  = df_new.loc[df_new['PostCertainty'] >= threshold]
-    saint_predictions.append(df2pp_tp(saint_subdf, threshold))
-    prior_predictions.append(df2pp_tp(prior_subdf, threshold))
-    posterior_predictions.append(df2pp_tp(post_subdf, threshold))
-    print(threshold)
-
-# +
-saint_predictions_arr = np.array(saint_predictions)
-prior_predictions_arr = np.array(prior_predictions)
-postr_predictions_arr = np.array(posterior_predictions)
-
-#saint_predictions[:, 0] = sp.special.comb(saint_predictions[:, 0], 2)
-# -
-
-postr_predictions_arr
-
-# +
-fig, ax = plt.subplots(1, 1)
-step = 1000
-xend = n_possible_interactions
-xstart=0
-every = 1e4
-x = np.arange(0, xend, every)
-y = sp.stats.hypergeom.median(M=n_possible_interactions,
-                           n=n_direct, N=x)
-
-Null = sp.stats.hypergeom(M=n_possible_interactions, n=n_direct, N=x)
-#ylower = Null.ppf(0.1)
-#yupper = Null.ppf(0.9)
-#yerr = np.array([ylower, yupper])
-yerr = Null.var()
-y = Null.median()
-ax.errorbar(x, y, yerr=yerr, alpha=0.2, label='Hypergeometric Null')
-ax.set_xlabel("Predicted prey pairs")
-ax.set_ylabel("Recovered PDB direct Interactions")
-
-#xy_plot(ax, x, y, '.', alpha=0.4, xlabel="$n$ predicited positives", ylabel="Recovered PDBs")
-ax.plot(saint_predictions_arr[:, 0], saint_predictions_arr[:, 1], label='Saint All Prey')
-ax.plot(prior_predictions_arr[:, 0], prior_predictions_arr[:, 1], label='Prior certainty')
-ax.plot(postr_predictions_arr[:, 0], postr_predictions_arr[:, 1], label="Posterior certainty")
-ax.legend()
-ax.set_xlim((xstart, xend))
-#ax.set_ylim((0, 500))
-plt.savefig("null_benchmark.png", dpi=notebook_dpi)
 
 # Compare control counts
 tmp = ds.sel(bait=['CBFB', 'CUL5', 'ELOB'])
@@ -3198,39 +3171,9 @@ model = partial(model8, prey_max=prey_max)
 numpyro.render_model(model8, model_args=(ds_sel, None), render_distributions=True, render_params=True)
 
 
-
-#model = model8
-nuts_kernal = numpyro.infer.NUTS(model)
-mcmc = numpyro.infer.MCMC(nuts_kernal, num_warmup=1000, num_samples=1000, thinning=1)
-rng_key = jax.random.PRNGKey(13)
-mcmc.run(rng_key, ds_sel, extra_fields=('potential_energy',))
-
-# +
-# Toy mixture model with discrete enumeration
-
-     
-
-# -
-
 pickle.dump(model, open("model_test.p", "wb"))
-
 m = pickle.load(open("model_test.p", "rb"))
 
-# +
-samples = mcmc.get_samples(group_by_chain=False)
-summary_dict = summary(mcmc.get_samples(group_by_chain=True))
-posterior_predictive = numpyro.infer.Predictive(model, samples)(jax.random.PRNGKey(1),
-                                                                ds_sel)
-prior_predictive = numpyro.infer.Predictive(model, 
-                                            num_samples=1000)(PRNGKey(2), ds_sel)
-
-i8data = az.from_numpyro(mcmc, 
-        coords={'bait': ['CBFB', 'CUL5', 'ELOB'], 'condition': ds_sel.condition.values,
-                'rrep': ds_sel.rrep.values,
-                'preyu': ds_sel.preyu.values[0:prey_max]},
-        dims={'alpha': ['bait', 'condition', 'rrep'],
-              'beta': ['preyu', 'bait', 'condition', 'rrep'],
-              'epsilon': ['preyu', 'bait', 'condition', 'rrep']})
 # -
 
 az.plot_trace(i8data.sample_stats['lp'])
@@ -3355,85 +3298,6 @@ axplot(xf = lambda : np.arange(0, 1, 0.01),
        plot_f=lambda x, y, *args, ax, **kwargs: ax.plot(x, y, *args, **kwargs))
 
 # +
-    
-def run_mcmc(rng_key, model, model_data, num_samples, num_warmup, 
-             extra_fields=('potential_energy','diverging'), thinning=1):
-    kernel = numpyro.infer.NUTS(model)
-    mcmc = MCMC(kernel, num_warmup=num_warmup, num_samples=num_samples, thinning=thinning)
-    mcmc.run(rng_key, model_data, extra_fields=extra_fields)
-    
-    return mcmc
-
-def posterior_predictive_dist(rng_key, model, model_data, mcmc):
-    samples = mcmc.get_samples()
-    return numpyro.infer.Predictive(model, samples)(rng_key, model_data)
-
-def prior_predictive_dist(rng_key, model, model_data, num_samples=1000):
-    return numpyro.infer.Predictive(model, num_samples=num_samples)(rng_key, model_data)
-
-def get_summary_stats(mcmc):
-    sd = summary(mcmc.get_samples())
-    return {'n_eff': sd[key]['n_eff'] for key in sd.keys()} | {'r_hat': sd[key]['r_hat'] for key in sd}
-    
-
-def predictive_check(T, predictive, obs=None, vectorize=True):
-    """
-    T: mean, var, min, max, max_min_diff
-    """
-    
-    Tpred = xr.apply_ufunc(T, predictive, input_core_dims=[["rep"]], vectorize=vectorize)
-    
-    if obs is not None:
-        Tobs = xr.apply_ufunc(T, obs, input_core_dims=[["rep"]], vectorize=vectorize)
-    else:
-        Tobs = None
-    
-    return Tpred, Tobs
-    
-    
-def av_pred_hist(ax, idata, kind='post', y_key='sc'):
-    obs = idata.observed_data
-    if kind == 'post':
-        pred = idata.posterior_predictive
-    elif kind == 'prior':
-        pred = idata.prior_predictive
-        
-    ax.hist(pred[y_key])
-        
-    
-    
-
-    
-    
-
-# +
-# Prior and posterior predictive check example
-# Checks of simulation
-
-
-def predictive_hist(ax, samples, observed, bins=100, vmin=0, vmax=1):
-    ax.hist(samples, bins=bins)
-    ax.vlines(observed, vmin, vmax, 'r')
-    return ax
-
-
-
-# -
-
-def gpt_model(data, observed=True):
-    
-    
-    batch_shape =     (10, 3, 3, 2)
-    sample_shape = (4, 10, 3, 3, 2)
-    assert data.shape == sample_shape
-    if not observed:
-        data = None
-        
-    with numpyro.plate('rep', 4):
-        mu = numpyro.sample('mu', dist.Beta(jnp.ones(batch_shape), jnp.ones(batch_shape)))
-        sigma = numpyro.sample('sigma', dist.HalfNormal(jnp.ones(batch_shape)))
-        numpyro.sample('y', dist.ZeroInflatedPoisson(gate=mu, rate=sigma), obs=data)
-
 
 numpyro.render_model(gpt_model, model_args=(jnp.ones((4, 10, 3, 3, 2)), False), 
                      render_distributions=True, render_params=True)
@@ -3481,50 +3345,6 @@ plt.show()
 
 dist.Beta(jnp.ones(2), jnp.ones(2)).to_event(1).event_shape
 
-data = model_data_from_ds(ds)
-model = model_zero_inflated_poisson
-start=0
-end=1000
-data = data.sel(preyu=data.preyu[start:end], bait=['CBFB', 'CUL5', 'ELOB'])
-numpyro.render_model(model, model_args=(data, True), render_distributions=True, render_params=True)
-
-# +
-#data = model_data.sel(bait=['CBFB', 'CUL5', 'ELOB'])
-num_samples = 1000
-mcmc = run_mcmc(PRNGKey(0), 
-                model, 
-                data,
-                num_samples=num_samples,
-                num_warmup=500)
-
-
-# -
-
-posterior_predictive = numpyro.infer.Predictive(model,
-                        posterior_samples=mcmc.get_samples())(
-    PRNGKey(1), data, observed=False
-)
-
-# +
-prior_predictive = numpyro.infer.Predictive(model, num_samples=num_samples)(
-    PRNGKey(2), data, observed=False
-)
-
-#prior_predictive = prior_predictive_dist(PRNGKey(2), model, data)
-
-# +
-dims = {"lam": ["preyu", "bait", "condition", "test"],
-        "pi": ["preyu", "bait", "condition", "test"],
-        "sc": ["rep", "preyu", "bait", "condition", "test"]}
-
-coords = {key: val for key, val in data.coords.items()} | {'draw': np.arange(0, num_samples)}
-izdata = az.from_numpyro(mcmc, 
-                        coords=coords, 
-                        dims=dims,
-                        pred_dims = {'sc': ['draw', 'preyu', 'bait', 'condition', 'test']},
-                        posterior_predictive=posterior_predictive,
-                        prior=prior_predictive)
-# -
 
 az.plot_trace(izdata.sample_stats, var_names=['lp'])
 plt.tight_layout()
@@ -3570,9 +3390,6 @@ ax.legend()
 
 plt.show()
 plt.savefig("ZeroIPoissBeta11_4.png")
-# -
-
-
 
 def obs_scatter(o, pp, Pp, iz=True, xlabel="Observed sample variance", ylabel="Simluated mean sample variance"):
     if iz:
@@ -3600,7 +3417,6 @@ fig.savefig("ZeroIPoissBeta1-1_4_1000_prey.png", dpi=notebook_dpi)
 fig, ax = obs_scatter(np.ravel(var_obs), np.ravel(var_pp), np.ravel(var_Pp), iz=False)
 ax.set_ylim((0, 400))
 fig.savefig("ZeroIPoissBeta23_2_1000_preyZoom.png", dpi=notebook_dpi)
-
 
 # +
 @jax.jit
@@ -3756,59 +3572,6 @@ plt.hist(np.ravel(ds['CRL_E'].values), bins=100, alpha=0.9, range=(0, 50))
 
 plt.show()
 # -
-
-
-
-# +
-# Pi, the probability of extra zeros
-# 
-
-
-def zero_inflated_model(obs):
-    
-    pi = numpyro.sample('pi', dist.Beta(2.3, 2))
-    alpha = numpyro.sample('alpha', dist.HalfNormal(50))
-    with numpyro.plate("obs", obs.shape[0]):
-        numpyro.sample('z', dist.ZeroInflatedPoisson(pi, rate=alpha), obs=obs)
-        
-    
-    
-
-# +
-def zero_inflated_spectral_counts(obs_e, obs_c):
-    """
-    obs n prey x n replicates
-    
-    pi or gate parameter : Proportion of 
-    """
-    n_prey, n_rep  = obs_e.shape
-    assert n_rep == 4
-    assert obs_e.shape == obs_c.shape
-    
-    data = np.zeros((n_rep, n_prey, 2))
-    data[:,:, 0] = obs_c.T
-    data[:,:, 1] = obs_e.T
-    data = jnp.array(data, dtype=int)
-    
-    # observed shape: (prey, replicate, experiment)
-    pi = numpyro.sample("pi", dist.Beta(jnp.ones((n_prey, 2)) * 2.0, jnp.ones((n_prey, 2)) * 2.3))
-    #pi_e = numpyro.sample("pi_e", dist.Beta(jnp.ones(n_prey) * 2.0, jnp.ones(n_prey) * 2.3))
-    #epsilon = numpyro.sample("epsilon", dist.HalfNormal(jnp.ones(n_prey) * 50))
-    
-    lambda_hyper = np.ones((n_prey, 2)) * 100
-    lambda_hyper[:, 0] = 50
-    lambda_hyper = jnp.array(lambda_hyper)
-    
-    lambda_ = numpyro.sample("lam", dist.HalfNormal(lambda_hyper))
-    #with numpyro.plate("data", n_rep):
-    numpyro.sample("sc", dist.ZeroInflatedPoisson(gate=pi, rate=lambda_), obs=data)
-        
-        
-    
-# -
-
-
-
 numpyro.render_model(zero_inflated_spectral_counts,
                     model_args=(obs_e, obs_c),
                     render_params=True,
@@ -3837,8 +3600,6 @@ plt.plot(x, y)
 kernel = MixedHMC(HMC(mixed_model, trajectory_length=1.2), num_discrete_updates=20)
 mcmc = MCMC(kernel, num_warmup=10000, num_samples=10000)
 mcmc.run(jax.random.PRNGKey(0), probs, locs)
-
-jsp.special.expit
 
 samples_m = mcmc.get_samples()
 mcmc.print_summary()
@@ -3880,25 +3641,6 @@ az.plot_trace(m8data.sample_stats['lp'])
 # ## Key conclusions for modeling
 #
 
-base = "../../benchmark/data/cullin/PRIDE/PXD009012/"
-evidence = pd.concat(
-    [pd.read_csv(i, sep="\t") for i in [
-        base + "MaxQuant_results_CBFB_HIV_APMS/RH022_evidence.txt"]])#,
-        #base + "MaxQuant_results_CUL5_HIV_APMS/evidence.txt",
-        #base + "MaxQuant_results_ELOB_HIV_APMS/evidence.txt"]])
-
-proteinGroups = pd.read_csv(base + "MaxQuant_results_CBFB_HIV_APMS/proteinGroups.txt", sep="\t")
-
-proteinGroups.columns
-
-proteinGroups[proteinGroups['Protein IDs'] == 'vifprotein'].iloc[:, [0, 2, 3, 8, 9, 
-                                        10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 25, 33]]
-
-df_new.loc['vifprotein'][rsel]
-
-len(set(df_new[df_new['bait']=='CBFB']['Prey'].values))
-
-evidence[evidence['Proteins'] == 'A0FGR8']
 
 plt.hist(evidence['Length'].values, bins=45)
 plt.show()
@@ -3908,23 +3650,13 @@ plt.xlabel("MS/MS Count")
 plt.show()
 print(f"Min Max {np.min(evidence['MS/MS Count'].values), np.max(evidence['MS/MS Count'].values)}")
 
-sel = evidence['Raw file'] == 'FU20151020-04'
-evidence[evidence['Proteins']=='vifprotein'].loc[sel, 
-            ['Peptide ID', 'MS/MS Count', 'Number of scans', 'Raw file']]
-
-evidence.columns
-
 plt.plot(evidence['Length'].values, evidence['MS/MS Count'].values, 'b.', alpha=0.01)
 plt.show()
-
-evidence.columns
 
 """
 What is a protein's spectral count? The sum of peptide spectral counts.
 What is a peptide spectral count? The number of MS/MS spectra that map to the peptide.
-
 0 to 17, often 1 MS/MS spectra match to a peptide.
-
 """
 
 """
@@ -3933,7 +3665,6 @@ Evidence.txt feature
 - Length
 - Missed cleavages
 - RawFile - match the condition / experimental design
-
 """
 
 
