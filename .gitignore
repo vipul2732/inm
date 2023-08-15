@@ -8,3 +8,4 @@ significant_cifs/*.gz
 significant_cifs/*.bio.mmtf
 significant_cifs/*.cif
 significant_cifs/*.csv
+*.png
