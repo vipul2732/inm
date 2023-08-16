@@ -33,9 +33,11 @@ bsasa_ref = init_bsasa_ref()
 
 pad.write(("Loading Buried Solvent Accessible Surface Area Reference", bsasa_ref.shape))
 
-pdb_set = set(bsasa_ref['PDBID'].values)
 
+pdb_set = set(bsasa_ref['PDBID'].values)
 pad.write(("N PDB Files in BSASA REF", len(pdb_set)))
+bsasa_ref_nuid = init_nuid(bsasa_ref)
+pad.write(("N uids represented in BSASA ref", bsasa_ref_nuid)) 
 
 bsasa_ref = remove_prey_nan(bsasa_ref)
 pad.write(("Removing Nans", bsasa_ref.shape)) 
@@ -43,29 +45,36 @@ bsasa_ref = remove_self_interactions(bsasa_ref)
 pad.write(("Removing self interactions", bsasa_ref.shape))
 bsasa_ref = remove_every_other(bsasa_ref)
 pad.write(("Removing duplicates", bsasa_ref.shape))
-pdb_set = set(bsasa_ref['PDBID'].values)
 prey_set = set(bsasa_ref['Prey1'].values).union(bsasa_ref['Prey2'].values)
+
+pdb_set = set(bsasa_ref['PDBID'].values)
 pad.write(("N PDB Files in BSASA REF", len(pdb_set)))
-nuid = init_nuid(bsasa_ref)
-pad.write(("N uids represented in BSASA ref", nuid)) 
+bsasa_ref_nuid = init_nuid(bsasa_ref)
+pad.write(("N uids represented in BSASA ref", bsasa_ref_nuid)) 
 
 uid2seq, uid2seq_len = init_uid2seq()
 pad.write(("Reading Primary Amino Acid Sequences", len(uid2seq)))
 
 direct_interaction_set = init_direct_interaction_set(bsasa_ref)
-pad.write(("N pairwise direct interactions found", len(direct_interaction_set)))
+n_direct = len(direct_interaction_set)
+pad.write(("N pairwise direct interactions found", n_direct))
 
 # +
 uid_total = 3_062
 pad.write(("N Expected Uniprot IDs", uid_total))
 
-interaction_total = math.comb(uid_total, 2)
-pad.write(("Size of interaction space", interaction_total))
+n_possible_pairs = math.comb(uid_total, 2)
+pad.write(("Size of interaction space", n_possible_pairs))
 
-n_possible_mapped_interactions = math.comb(nuid, 2)
-pad.write(("Maximal possible size of reference interactions", n_possible_mapped_interactions))
+bsasa_ref_n_possible_pairs = math.comb(bsasa_ref_nuid, 2)
+pad.write(("Maximal possible size of reference interactions", bsasa_ref_n_possible_pairs))
 
-n_direct = len(direct_interaction_set)
+dataset_balance_total = n_direct / n_possible_pairs
+dataset_balance_matched = n_direct / bsasa_ref_n_possible_pairs
+
+pad.write(("percent dataset balance", dataset_balance_total * 100))
+pad.write(("percent matched balance", dataset_balance_matched * 100))
+
 
 # -
 table1 = pd.read_csv("../table1.csv")
@@ -77,9 +86,7 @@ uid2gene = {val:key for key,val in gene2uid.items()}
 pad.write("-- Prey in BSASA--")
 pad.write(prey_in_bsasa(gene2uid=gene2uid, prey_set=prey_set))
 
-for i in sorted([f"CSN{i}_HUMAN" for i in range(1, 10)] + ["CSN7A_HUMAN", "CSN7B_HUMAN"]):
-    if i in gene2uid:
-        pad.write((f"{i.removesuffix('_HUMAN')}", gene2uid[i] in prey_set))
+write_prey_in_BSASA_2pad(pad, gene2uid, prey_set)
 
 pad.write("-- PDBs in BSASA --")
 pad.write((f"4n9f", '4n9f' in pdb_set))
@@ -97,7 +104,7 @@ pad.write(("Loading chain mapping", chain_mapping.shape))
 sel = chain_mapping['bt_aln_percent_seq_id'] >= 0.3
 chain_mapping = chain_mapping[sel]
 pad.write(("Chains over 30% sequence identity", chain_mapping.shape))
-
+# How many pdb ids and uids are there?
 chain_pdb_set = set(chain_mapping['PDBID'].values)
 chain_uid_set = set(chain_mapping['QueryID'].values)
 pad.write(("N PDBS in chain mapping",  len(chain_pdb_set)))
@@ -107,139 +114,114 @@ complexes = init_complexes(chain_pdb_set, chain_mapping)
 cocomplexes = init_cocomplexes(complexes)
 pad.write(("N cocomplexes", len(cocomplexes.keys())))
 
-cocomplex_uid_set = init_cocomplex_uid_set(cocomplexes)
-# Long Running Cell
-cocomplex_pairs = list(combinations(cocomplex_uid_set, 2))
+cocomplex_edge_id__cocomplex_edge = init_cocomplex_edge_id__cocomplex_edge(
+        cocomplexes)
+pad.write(("N cocomplex edges",
+           len(cocomplex_edge_id__cocomplex_edge.keys())))
 
-cocomplex_df = init_cocomplex_df(cocomplex_pairs, cocomplexes)
-pad.write("Co-complex df", cocomplex_df.shape)
+cocomplex_uid_set = init_cocomplex_uid_set(cocomplexes)
+
+# Long Running Cell
+#cocomplex_pairs = list(combinations(cocomplex_uid_set, 2))
+
+#cocomplex_df = init_cocomplex_df(cocomplex_pairs, cocomplexes)
+#pad.write("Co-complex df", cocomplex_df.shape)
 
 df1, df2, df3 = init_dfs()
 
-viral_remapping = {
-"vifprotein"          :   "P69723",
-"polpolyprotein"      :   "Q2A7R5",
-"nefprotein"     :        "P18801",
-"tatprotein"         :    "P0C1K3",
-"gagpolyprotein"     :    "P12493",
-"revprotein"          :   "P69718",
-"envpolyprotein"      :   "O12164"}
-
 conditions = ["wt_MG132", "vif_MG132", "mock_MG132"]
 pad.write(("N conditions", len(conditions)))
-baits = {"CBFB": "PEBB_HUMAN", "ELOB": "ELOB_HUMAN", "CUL5": "CUL5_HUMAN", "LRR1": "LLR1_HUMAN"}
-bait2uid = init_bait2uid(baits, conditions, gene2uid)
+bait2uid = init_bait2uid(conditions, gene2uid)
+df_all = init_df_all(df1, df2, df3, bait2uid)
+df_all = update_df_all_bait_and_condition(df_all)
 
-df_all = init_df_all(df1, df2, df3, baits, conditions, viral_remapping, bait2uid)
-pad.write(("DF ALL", df_all.shape))
-Bait2bait, Bait2condition = init_Bait2bait_Bait2condition(df_all)
-df_all.loc[:, 'bait'] = [Bait2bait[i] for i in df_all['Bait'].values]
-df_all.loc[:, 'condition'] = [Bait2condition[i] for i in df_all['Bait'].values]
 rsel = [f"r{i}" for i in range(1, 5)]
 csel = [f"c{i}" for i in range(1, 13)]
+
 df_all = parse_spec(df_all)
+pad.write(("DF ALL", df_all.shape))
+
 df_new = df_all[['bait', 'condition', 'Prey', 'SaintScore', 'BFDR', 'BaitUID'] + rsel + csel]
 pad.write(("DF NEW", df_new.shape))
 
-df_new.loc[:, 'PreyName'] = df_new.index
+def set_PreyName_as_index(df_new):
+    df_new.loc[:, 'PreyName'] = df_new.index
+    return df_new
+
+df_new = set_PreyName_as_index(df_new)
+
 # Update df_new based on assumed control mappings
 assert df_new.shape[0] == df_all.shape[0]
-c_cbfb = [f"c{i}" for i in (1, 2, 3, 4)] 
-c_cul5 = [f"c{i}" for i in (5, 6, 7, 8)] 
-c_elob = [f"c{i}" for i in (9, 10, 11, 12)] 
-pad.write(("Assumed CBFB control mapping", c_cbfb))
-pad.write(("Assumed CUL5 control mapping", c_cul5))
-pad.write(("Assumed ELOB control mapping", c_elob))
-csel= c_cbfb
-s = df_new["bait"] == "CBFB"
-df_new.loc[s, csel] = df_all.loc[s, c_cbfb].values
-s = df_new["bait"] == "CUL5"
-df_new.loc[s, csel] = df_all.loc[s, c_cul5].values 
-s = df_new["bait"] == "ELOB"
-df_new.loc[s, csel] = df_all.loc[s, c_elob].values
+df_new, control_mappings  = update_df_new_based_on_assumed_control_mappings(df_new)
+
+pad.write(("Assumed CBFB control mapping", control_mappings["cbfb"]))
+pad.write(("Assumed CUL5 control mapping", control_mappings["cul5"]))
+pad.write(("Assumed ELOB control mapping", control_mappings["elob"]))
+
 # Removing extra counts
 df_new = df_new.drop(columns=c_cul5 + c_elob)
 pad.write(("DF NEW - Remove Extra Counts", df_new.shape))
-df_new.loc[:, 'rAv'] = df_new.loc[:, rsel].mean(axis=1)
-df_new.loc[:, 'cAv'] = df_new.loc[:, csel].mean(axis=1)
-df_new.loc[:, 'rVar'] = df_new.loc[:, rsel].var(axis=1).values
-df_new.loc[:, 'cVar'] = df_new.loc[:, csel].var(axis=1).values
-df_new.loc[:, 'Av_diff'] = df_new['rAv'].values - df_new['cAv'].values
-df_new.loc[:, 'rMax'] = np.max(df_new.loc[:, rsel].values, axis=1)
-df_new.loc[:, 'rMin'] = np.min(df_new.loc[:, rsel].values, axis=1)
-df_new.loc[:, 'cMax'] = np.max(df_new.loc[:, csel].values, axis=1)
-df_new.loc[:, 'cMin'] = np.min(df_new.loc[:, csel].values, axis=1)
+
+df_new = update_df_new_with_summary_stats(df_new)
 pad.write(("DF New - Add summary stats", df_new.shape))
-prey2seq = {r['QueryID']: r['Q'] for i, r in chain_mapping.iterrows()}
-df_new.loc[:, 'Q'] = np.array([(prey2seq[prey] if prey in prey2seq else np.nan) for prey in df_new['Prey'].values])
-seq_lens = np.array([uid2seq_len[prey] for prey in df_new['Prey'].values])
-df_new.loc[:, 'aa_seq_len'] = seq_lens
+
+df_new = update_df_new_with_query_aa_sequence(df_new, chain_mapping)
+
+df_new = update_df_new_with_aa_seq_len(uid2seq_len, df_new)
+
 #df_new.loc[:, 'exp_aa_seq_len'] = np.exp(seq_lens)  # overflow
-n_first_sites = [n_first_tryptic_cleavages(uid2seq[prey]) for prey in df_new['Prey']]
-df_new.loc[:, 'n_first_tryptic_cleavage_sites'] = np.array(n_first_sites)
-df_new.loc[:, 'n_possible_first_tryptic_peptides'] = df_new.loc[
-        :,'n_first_tryptic_cleavage_sites'] + 1
+df_new = update_df_new_with_tryptic_sites(df_new, uid2seq_len)
 pad.write(("DF NEW - Add sequence info", df_new.shape))
 
 df_new, cocomplex_ref_pairs, direct_ref_pairs = init_interactions(df_all=df_new, cocomplex_df=cocomplex_df, bsasa_ref=bsasa_ref)
     
 pad.write(("DF NEW - Init interactions", df_new.shape))
 bait = ['CBFB', 'ELOB', 'CUL5', 'LRR1']
-conditions = ['wt', 'vif', 'mock']
 
 prey_set = sorted(list(set(df_new.index)))
 preyu = np.array(prey_set)
 preyv = np.array(prey_set)
 nprey = len(preyu)
 
+#Initialize tensors
 tensorR, tensorC = init_tensorRandC(
-    df_new, rsel, csel, preyu, bait, conditions, fill_tensors)
+    df_new, rsel, csel, preyu, bait, fill_tensors)
+
 pad.write(("Tensor Replicate", tensorR.shape))
 pad.write(("Tensor Control", tensorC.shape))
 
-coords = {"AP": [True, False]} | dict(tensorR.coords)  
+spectral_count_xarray = init_spectral_count_xarray(
+        tensorR, tensorC)
 
-sc = xr.DataArray(coords = coords, dims = ["AP", "condition", "bait", "preyu", "rep"]) 
-sc.isel(AP=0)[:] = tensorR
-sc.isel(AP=1)[:] = tensorC
-    
-pad.write(("Spectral Counts", sc.shape))
+pad.write(("Spectral Counts", spectral_count_xarray.shape))
 
-    
 preyname2uid = {row['PreyName']:row['Prey'] for i,row in df_new.iterrows()}
 uid2preyname = {val:key for key,val in preyname2uid.items()}
 
-
-cocomplex_df.loc[:, 'Prey1Name'] = cocomplex_df.loc[:, "Prey1"].map(
-    lambda x: uid2preyname[x])
-
-cocomplex_df.loc[:, 'Prey2Name'] = cocomplex_df.loc[:, "Prey2"].map(
-    lambda x: uid2preyname[x])
+cocomplex_df = update_cocomplex_df_with_PreyXNames(
+        cocomplex_df, uid2preyname)
 
 cocomplex_matrix = init_cocomplex_matrix(nprey, preyu, preyv, cocomplex_df)
-bsasa_ref.loc[:, 'Prey1Name'] = bsasa_ref.loc[:, "Prey1"].map(
-    lambda x: uid2preyname[x])
-bsasa_ref.loc[:, 'Prey2Name'] = bsasa_ref.loc[:, "Prey2"].map(
-    lambda x: uid2preyname[x])
+
+bsasa_ref = update_bsasa_ref_with_PreyXNames(bsasa_ref, uid2preyname)
 # Long running: 2 min
 direct_matrix = init_direct_matrix(nprey, preyu, preyv, bsasa_ref)
 
-ds = xr.Dataset({'cocomplex': cocomplex_matrix, 'direct': direct_matrix, 'CRL_E':tensorR, 'CRL_C':tensorC})
-
-benchmark_summary = pd.DataFrame([len(cocomplex_df), len(bsasa_ref), len(df_all),
-    sum(unknown), sum(direct_interaction), sum(cocomplex_interactions),math.comb(3062, 2)],
-    columns=["N"], index=['PDB Co-complex', 'PDB Direct', 'Bait-prey',
-                          'Bait-prey absent in PDB',
-                          'Bait-prey Direct',
-                          'Bait-prey cocomplex',
-                          'Possible Interactions'])
-pad.write(("Benchmark Summary", benchmark_summary.shape))
-edge_list = list(combinations(preyu, 2))
-prey_pairs_df = init_prey_pairs_df(jax.random.PRNGKey(13), prey_set, bsasa_ref)
-
+ds = xr.Dataset({'cocomplex': cocomplex_matrix,
+                 'direct': direct_matrix,
+                 'CRL_E':tensorR,
+                 'CRL_C':tensorC})
 # Append Cocomplex labels to DataFrame
 df_new = update_df_new_PDB_COCOMPLEX(df_new, ds)
 pad.write(("Add cocomplex labels to DF NEW", df_new.shape))
+
+benchmark_summary = init_benchmark_summary(
+        cocomplex_df, bsasa_ref, df_all, unknown, direct_interaction,
+        cocomplex_interactions)
+pad.write(("Benchmark Summary", benchmark_summary.shape))
+
+edge_list = list(combinations(preyu, 2))
+prey_pairs_df = init_prey_pairs_df(jax.random.PRNGKey(13), prey_set, bsasa_ref)
 
 base = "../../benchmark/data/cullin/PRIDE/PXD009012/"
 evidence = pd.concat(
@@ -1712,63 +1694,6 @@ def Nonef():
 def identity(x):
     return x
 
-def axplot(carry, xf=identity, yf=identity, plotf=identity, xlabelf=identity,
-           ylabelf=identity, titlef=identity, legendf=identity, textf=identity, extrafs = (),
-           savenamef=identity):
-    carry = xf(carry)
-    carry = yf(carry)
-    carry = plotf(carry)
-    carry = xlabelf(carry)
-    carry = ylabelf(carry)
-    carry = titlef(carry)
-    carry = legendf(carry)
-    carry = textf(carry)
-    for f in extrafs:
-        carry = f(carry)
-    carry = savenamef(carry)
-    return carry
-
-
-
-
-def axplot(fig=None, ax=None, xf=None, yf=None, plot_f=None, xlabel=None, ylabel=None, title=None,
-         savename=None, legend=None, plot_args = None, plot_kwargs=None, text=None, tx=None, ty=None,
-         transform=True
-         ):
-    x = xf()
-    y = yf(x)
-    if ax is None:
-        assert fig is None, f"If ax is None fig must also be None"
-        fig, ax = plt.subplots(1, 1)
-    if plot_kwargs is None:
-        plot_kwargs = {}
-    if plot_args is None:
-        plot_args = ()
-    plot_f(x, y, *plot_args, ax=ax, **plot_kwargs)
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel(ylabel)
-    ax.set_title(title)
-    if legend:
-        ax.legend()
-    if text:
-        assert tx is not None
-        assert ty is not None
-        ax.text(tx, ty, text, transform=ax.transAxes)
-    if savename == "title":
-        save_plt()
-    elif isinstance(savename, str):
-        fig.savefig(savename + ".png", dpi=NOTEBOOK_DPI)
-    return fig, ax
-
-class UpdateableNamespace(SimpleNamespace):
-    """
-    The namespace may be updated by calling its' instance.
-    This allows for assignment through lambdas
-    """
-    def __call__(self, **kwargs):
-        return UpdateableNamespace(**vars(self), **kwargs)
-
-
 probs = jnp.array([0.15, 0.3, 0.3, 0.25])
 locs = jnp.array([-2, 0, 2, 4])
 tmp = numpyro.render_model(mixed_model, model_args=(probs, locs), render_distributions=True, render_params=True)
@@ -1786,13 +1711,6 @@ def cplot(c):
 def cxlabel(c):
     c.ax.set_xlabel(c.xlabel, *c.xlabel_args, **c.xlabel_kwargs)
     return c
-
-
-partial(axplot,
-        xf=lambda c: c(x = np.arange(0, 1, 0.01)), 
-        yf=lambda c: c(y = np.exp.dist.Beta(c.alpha, c.beta).log_prob(c.x)),
-        xlabelf=lambda c: c(xlabel=None)
-        plotf=cplot, 
 
 
 axplot(xf = lambda : np.arange(0, 1, 0.01),
@@ -2416,14 +2334,14 @@ d = (min_o - min_Pp)['y_e'].values
 ppc_boxen([a, b, c, d])
 
 def in_hpdi(x, arr, prob, hpdi_fun=hpdi):
-"""
-HPDI: Narrowest Interval with probability mass of prob
-Is it in the narrowest interval with 0.9 probability mass?
-Is it in the narrowest interval 
-1. Apply Test statistic
-2. Compute HPDI at row
-3. Check 
-"""
+    """
+    HPDI: Narrowest Interval with probability mass of prob
+    Is it in the narrowest interval with 0.9 probability mass?
+    Is it in the narrowest interval 
+    1. Apply Test statistic
+    2. Compute HPDI at row
+    3. Check 
+    """
     i = hpdi_fun(arr, prob)
     if i[0] < x < i[1]:
         return True
@@ -2575,7 +2493,6 @@ plt.plot(np.arange(len(y)), sorted(y, reverse=True), 'k.')
 plt.ylabel('Out of distribution score')
 # -
 
-np.min([lower, observed], axis=0).
 
 # ?np.min
 

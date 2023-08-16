@@ -1,5 +1,6 @@
 from _BSASA_imports import *
 
+#Begin functions
 def action_f(rng_key, df, start, stop):
     print(start, stop)
     return m5crop2idata(rng_key, df, start, stop)
@@ -215,7 +216,9 @@ def init_bsasa_ref(path="../significant_cifs/BSASA_reference.csv"):
         pd.isna(bsasa_ref['Prey2'].values))
     return bsasa_ref
 
-def init_bait2uid(baits, conditions, gene2uid):
+def init_bait2uid(conditions, gene2uid, baits=None):
+    if baits == None:
+        baits = {"CBFB": "PEBB_HUMAN", "ELOB": "ELOB_HUMAN", "CUL5": "CUL5_HUMAN", "LRR1": "LLR1_HUMAN"}
     bait2uid = {}
     for bait, genename in baits.items():
         for condition in conditions:
@@ -271,7 +274,66 @@ def init_cocomplex_matrix(nprey, preyu, preyv, cocomplex_df):
         cocomplex_matrix.loc[p2, p1] = val
     return cocomplex_matrix
 
-def init_df_all(df1, df2, df3, baits, conditions, viral_remapping, bait2uid):
+def update_df_all_bait_and_condition(df_all):
+    Bait2bait, Bait2condition = init_Bait2bait_Bait2condition(df_all)
+    df_all.loc[:, 'bait'] = [Bait2bait[i] for i in df_all['Bait'].values]
+    df_all.loc[:, 'condition'] = [Bait2condition[i] for i in df_all['Bait'].values]
+    return df_all
+
+def update_df_new_based_on_assumed_control_mappings(
+        df_new):
+    c_cbfb = [f"c{i}" for i in (1, 2, 3, 4)] 
+    c_cul5 = [f"c{i}" for i in (5, 6, 7, 8)] 
+    c_elob = [f"c{i}" for i in (9, 10, 11, 12)] 
+    csel= c_cbfb
+    s = df_new["bait"] == "CBFB"
+    df_new.loc[s, csel] = df_all.loc[s, c_cbfb].values
+    s = df_new["bait"] == "CUL5"
+    df_new.loc[s, csel] = df_all.loc[s, c_cul5].values 
+    s = df_new["bait"] == "ELOB"
+    df_new.loc[s, csel] = df_all.loc[s, c_elob].values
+    control_mappings = {"cbfb": c_cbfb, "cul5": c_cul5, "elob": c_elob}
+    return df_new, control_mappings
+
+def update_df_new_with_aa_seq_len(uid2seq_len, df_new): 
+    seq_lens = np.array([uid2seq_len[prey] for prey in df_new['Prey'].values])
+    df_new.loc[:, 'aa_seq_len'] = seq_lens
+    return df_new
+
+def update_df_new_with_tryptic_sites(df_new, uid2seq_len):
+    n_first_sites = [n_first_tryptic_cleavages(uid2seq[prey]) for prey in df_new['Prey']]
+    df_new.loc[:, 'n_first_tryptic_cleavage_sites'] = np.array(n_first_sites)
+    df_new.loc[:, 'n_possible_first_tryptic_peptides'] = df_new.loc[
+            :,'n_first_tryptic_cleavage_sites'] + 1
+    return df_new
+
+def update_df_new_with_query_aa_sequence(df_new, chain_mapping):
+    prey2seq = {r['QueryID']: r['Q'] for i, r in chain_mapping.iterrows()}
+    df_new.loc[:, 'Q'] = np.array([(prey2seq[prey]
+        if prey in prey2seq else np.nan) for prey in df_new['Prey'].values])
+    return df_new
+
+def update_df_new_with_summary_stats(df_new):
+    df_new.loc[:, 'rAv'] = df_new.loc[:, rsel].mean(axis=1)
+    df_new.loc[:, 'cAv'] = df_new.loc[:, csel].mean(axis=1)
+    df_new.loc[:, 'rVar'] = df_new.loc[:, rsel].var(axis=1).values
+    df_new.loc[:, 'cVar'] = df_new.loc[:, csel].var(axis=1).values
+    df_new.loc[:, 'Av_diff'] = df_new['rAv'].values - df_new['cAv'].values
+    df_new.loc[:, 'rMax'] = np.max(df_new.loc[:, rsel].values, axis=1)
+    df_new.loc[:, 'rMin'] = np.min(df_new.loc[:, rsel].values, axis=1)
+    df_new.loc[:, 'cMax'] = np.max(df_new.loc[:, csel].values, axis=1)
+    df_new.loc[:, 'cMin'] = np.min(df_new.loc[:, csel].values, axis=1)
+    return df_new
+
+def init_df_all(df1, df2, df3, bait2uid):
+    viral_remapping = {
+    "vifprotein"          :   "P69723",
+    "polpolyprotein"      :   "Q2A7R5",
+    "nefprotein"     :        "P18801",
+    "tatprotein"         :    "P0C1K3",
+    "gagpolyprotein"     :    "P12493",
+    "revprotein"          :   "P69718",
+    "envpolyprotein"      :   "O12164"}
     df1.loc[:, "BaitUID"] = [bait2uid[i] for i in df1["Bait"].values]
     df2.loc[:, "BaitUID"] = [bait2uid[i] for i in df2["Bait"].values]
     df3.loc[:, "BaitUID"] = [bait2uid[i] for i in df3["Bait"].values]
@@ -282,6 +344,10 @@ def init_df_all(df1, df2, df3, baits, conditions, viral_remapping, bait2uid):
     return df_all
 
 def init_complexes(chain_pdb_set, chain_mapping) -> dict:
+    """Takes all uniprot ids at a given pdb id and puts them
+    in a dict keyed by pdbid
+    (a, b -> {pdb_id : frozenset(uid_str...)})
+    """
     complexes = {}
     for pdb_id in chain_pdb_set:
         sel = chain_mapping['PDBID'] == pdb_id
@@ -291,12 +357,29 @@ def init_complexes(chain_pdb_set, chain_mapping) -> dict:
     return complexes
 
 def init_cocomplexes(complexes):
+    """Filters out self complexes"""
     cocomplexes = {}
     for pdb_id, fset in complexes.items():
         if len(fset) > 1:
             cocomplexes[pdb_id] = fset
     return cocomplexes
 
+def init_cocomplex_edge_id__cocomplex_edge(cocomplexes):
+    """
+    Build a dictionary of cocomplex edge ids
+    """
+    d = {}
+    eid = 0
+    for pdb_id, fset in cocomplexes.items():
+        assert len(fset) > 1
+        combos = list(combinations(fset, 2))
+        combos = [frozenset(x) for x in combos]
+        for pair in combos:
+            if pair not in d:
+                d[pair] = eid
+                eid += 1
+    return {val: key for key, val in d.items()}
+        
 def init_cocomplex_uid_set(cocomplexes):
     cocomplex_uid_set = []
     for pdb_id, fset in cocomplexes.items():
@@ -331,6 +414,38 @@ def init_direct_interaction_set(bsasa_ref) -> set:
     return {frozenset(
         (r['Prey1'], r['Prey2'])) : "" for i, r in bsasa_ref.loc[sel, :].iterrows()}
 
+def init_spectral_count_xarray(tensorR, tensorC):
+    coords = {"AP": [True, False]} | dict(tensorR.coords)  
+    sc = xr.DataArray(coords = coords, dims = ["AP", "condition", "bait", "preyu", "rep"]) 
+    sc.isel(AP=0)[:] = tensorR
+    sc.isel(AP=1)[:] = tensorC
+    return sc
+
+def update_cocomplex_df_with_PreyXNames(cocomplex_df, uid2preyname):
+    cocomplex_df.loc[:, 'Prey1Name'] = cocomplex_df.loc[:, "Prey1"].map(
+        lambda x: uid2preyname[x])
+    
+    cocomplex_df.loc[:, 'Prey2Name'] = cocomplex_df.loc[:, "Prey2"].map(
+        lambda x: uid2preyname[x])
+    return cocomplex_df
+
+def update_bsasa_ref_with_PreyXNames(bsasa_ref, uid2preyname):
+    bsasa_ref.loc[:, 'Prey1Name'] = bsasa_ref.loc[:, "Prey1"].map(
+        lambda x: uid2preyname[x])
+    bsasa_ref.loc[:, 'Prey2Name'] = bsasa_ref.loc[:, "Prey2"].map(
+        lambda x: uid2preyname[x])
+    return bsasa_ref
+
+def init_benchmark_summary(cocomplex_df, bsasa_ref, df_all, unknown,
+    direct_interaction, cocomplex_interactions):
+    benchmark_summary = pd.DataFrame([len(cocomplex_df), len(bsasa_ref), len(df_all),
+    sum(unknown), sum(direct_interaction), sum(cocomplex_interactions),math.comb(3062, 2)],
+    columns=["N"], index=['PDB Co-complex', 'PDB Direct', 'Bait-prey',
+                          'Bait-prey absent in PDB',
+                          'Bait-prey Direct',
+                          'Bait-prey cocomplex',
+                          'Possible Interactions'])
+    return benchmark_summary
 def init_interactions(df_all, cocomplex_df, bsasa_ref):
     #direct_interaction_saint = []
     direct_interaction = []
@@ -361,8 +476,11 @@ def init_interactions(df_all, cocomplex_df, bsasa_ref):
     df_all.loc[:, 'cocomplex_interaction'] = cocomplex_interactions
     return df_all, cocomplex_pairs, bsasa_ref_pairs 
 
-def init_tensorRandC(df_new, rsel, csel, preyu, bait, conditions, fill_tensors):
+def init_tensorRandC(df_new, rsel, csel, preyu, bait, fill_tensors, 
+                     conditions = None):
     # expeRiment tensor
+    if conditions == None:
+        conditions = ['wt', 'vif', 'mock']
     tensorR = [[[[0 for _ in rsel]
                 for _ in range(len(preyu))]
                 for _ in range(len(bait))]
@@ -570,6 +688,91 @@ def model2(ds, N=3062):
     #gamma_i = numpyro.sample('gamma', dist.Beta(0.5, 0.5), sample_shape=(3062,))
     #mu_ctrl = numpyro.sample('mu0', dist.Uniform(0, 250), sample_shape=(3062,))
     #mu_wt = numpyro.sample('mu_wt', dist.Uniform(0, 250), sample_shape=(3062,))
+    #numpyro.sample('ELOB_wt', dist.Normal(mu_wt, 10), obs=ELOB_wt)
+    #numpyro.sample('ctrl_ELOB_wt', dist.Normal(mu_ctrl * gamma_i, 10), obs=ctrl_ELOB_wt)
+
+def model3(ds, N=3062):
+    
+    # wt, vif, mock
+    # 
+    # [condition, bait, prey, rrep]
+    
+    ELOB_wt = ds.sel(condition='wt', bait='ELOB')['CRL_E'].values
+    CUL5_wt = ds.sel(condition='wt', bait='CUL5')['CRL_E'].values
+    CBFB_wt = ds.sel(condition='wt', bait='CBFB')['CRL_E'].values
+    
+    ELOB_vif = ds.sel(condition='vif', bait='ELOB')['CRL_E'].values
+    CUL5_vif = ds.sel(condition='vif', bait='CUL5')['CRL_E'].values
+    CBFB_vif = ds.sel(condition='vif', bait='CBFB')['CRL_E'].values
+    
+    ELOB_mock = ds.sel(condition='mock', bait='ELOB')['CRL_E'].values
+    CUL5_mock = ds.sel(condition='mock', bait='CUL5')['CRL_E'].values
+    CBFB_mock = ds.sel(condition='mock', bait='CBFB')['CRL_E'].values
+    
+    LRR1_mock = ds.sel(condition='mock', bait='LRR1')['CRL_E'].values
+    
+    ctrl_ELOB_wt = ds.sel(condition='wt', bait='ELOB')['CRL_C'].values
+    ctrl_CUL5_wt = ds.sel(condition='wt', bait='CUL5')['CRL_C'].values
+    ctrl_CBFB_wt = ds.sel(condition='wt', bait='CBFB')['CRL_C'].values
+    
+    ctrl_ELOB_vif = ds.sel(condition='vif', bait='ELOB')['CRL_C'].values
+    ctrl_CUL5_vif = ds.sel(condition='vif', bait='CUL5')['CRL_C'].values
+    ctrl_CBFB_vif = ds.sel(condition='vif', bait='CBFB')['CRL_C'].values
+    
+    ctrl_ELOB_mock = ds.sel(condition='mock', bait='ELOB')['CRL_C'].values
+    ctrl_CUL5_mock = ds.sel(condition='mock', bait='CUL5')['CRL_C'].values
+    ctrl_CBFB_mock = ds.sel(condition='mock', bait='CBFB')['CRL_C'].values
+    
+    ctrl_LRR1_mock = ds.sel(condition='mock', bait='LRR1')['CRL_C'].values
+
+   # max_val = ds['CRL_E'].max('rrep')
+    
+   # mu_Nc = np.ones((5, 3))
+   # mu_alpha = np.ones((N, 5, 3))
+    
+
+    
+    #N = numpyro.sample('N', dist.Normal(np.zeros(3), 5))
+    #mu = numpyro.sample('mu', dist.Normal(max_val.sel(bait='ELOB').values.T, 50), sample_shape=(3062, 3))
+    #numpyro.sample('sc', dist.Normal(N * mu), obs=max_val.sel(bait='ELOB').values.T)
+    
+    
+    
+    
+    #N1 = numpyro.sample('N1', dist.Normal(0, 1))
+    #N2 = numpyro.sample('N2', dist.Normal(0, 1))
+    
+    #mu_elob = numpyro.sample('mu_elob', dist.Normal(np.mean(ELOB_wt, axis=1), np.var(ELOB_wt, axis=1)))
+    #mu_cul5 = numpyro.sample('mu_cul5', dist.Normal(np.mean(CUL5_wt, axis=1), np.var(ELOB_wt, axis=1)))
+    
+    #numpyro.sample('ELOB_wt', dist.Normal(mu_elob * N1, 5), obs=ELOB_wt)
+    #numpyro.sample('CUL5_wt', dist.Normal(mu_cul5 * N2, 5), obs=CUL5_wt)
+    
+    
+    #cell_abundance = numpyro.sample(dist.Normal(jnp.ones((3, 5))), 1)
+    
+    assert ELOB_wt.shape == (3062, 4)
+    
+    mu_hyper_prior = np.ones((3062, 1)) / 50
+    sig_hyper_prior = np.ones((3062, 1)) / 2
+    
+    
+    mu = numpyro.sample('mu', dist.Exponential(mu_hyper_prior))
+    sigma = numpyro.sample('s', dist.Exponential(sig_hyper_prior))
+    
+    Ncells = numpyro.sample('Nc', dist.Normal(np.ones((1, 4)), 0.5))
+    
+    Ncells_rep = jnp.repeat(Ncells, 3062, axis=0)
+    
+    
+    numpyro.sample('sc', dist.Normal(mu * Ncells_rep, sigma), obs=ELOB_wt)
+    
+    #Ncells = cell_abundance * 1e7 
+    
+    #gamma_i = numpyro.sample('gamma', dist.Beta(0.5, 0.5), sample_shape=(3062,))
+    #mu_ctrl = numpyro.sample('mu0', dist.Uniform(0, 250), sample_shape=(3062,))
+    #mu_wt = numpyro.sample('mu_wt', dist.Uniform(0, 250), sample_shape=(3062,))
+    
     #numpyro.sample('ELOB_wt', dist.Normal(mu_wt, 10), obs=ELOB_wt)
     #numpyro.sample('ctrl_ELOB_wt', dist.Normal(mu_ctrl * gamma_i, 10), obs=ctrl_ELOB_wt)
     
@@ -1505,3 +1708,8 @@ def ppc_boxen(boxes,
     plt.ylabel("Spectral Count Difference", **font_dict)
     #plt.text(2.5, 50, "T: Min", **font_dict)
     plt.grid()
+
+def write_prey_in_BSASA_2pad(pad, gene2uid, prey_set):
+    for i in sorted([f"CSN{i}_HUMAN" for i in range(1, 10)] + ["CSN7A_HUMAN", "CSN7B_HUMAN"]):
+        if i in gene2uid:
+            pad.write((f"{i.removesuffix('_HUMAN')}", gene2uid[i] in prey_set))
