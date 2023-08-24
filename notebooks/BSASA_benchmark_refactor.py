@@ -1,191 +1,222 @@
 from _BSASA_functions import *
+from types import SimpleNamespace
+import plot_data
 
 # Objects for returning user info
 pad = notepad.NotePad()
+# init bsasa_reference
+bsasa_reference = SimpleNamespace()
+bsasa_reference.df = init_bsasa_ref()
+pad.write(("Loading Buried Solvent Accessible Surface Area Reference",
+           bsasa_reference.df.shape))
 
-# Sali colors
-blue =   np.array([ 70, 90, 220, 255 ]) / 255
-black =  np.array([  0., 0.,  0.,  0.])
-gray =   np.array([ 55, 55,  55, 255 ]) / 255
-red =    np.array([197, 45, 15, 255]) / 255
-green =  np.array([50, 180, 0, 255]) / 255
-yellow = np.array([255, 204, 0, 255]) / 255
+# Add pdb and uid info
+bsasa_reference.pdb_set = set(bsasa_reference.df['PDBID'].values)
+pad.write(("N PDB Files in BSASA REF", len(bsasa_reference.pdb_set)))
+bsasa_reference.nuid = init_nuid(bsasa_reference.df)
+pad.write(("N uids represented in BSASA ref", bsasa_reference.nuid)) 
 
-sali_cycler = cycler.cycler(color=[blue, black, red, gray, green, yellow])
-sali_style = {
-    "axes.grid": True,
-    "axes.grid.which": "both",
-    "axes.prop_cycle": sali_cycler,
-    "axes.axisbelow": True,
-    "font.size": 11.0,
-    "font.sans-serif": "Arial",
-    "patch.edgecolor": "white",
-    "patch.linewidth": 0.5
-}
+# Remove nans
+bsasa_reference.df  = remove_prey_nan(bsasa_reference.df)
+pad.write(("Removing Nans", bsasa_reference.df.shape)) 
 
-#Plotting
-rc_dict = {'text.usetex': True,
-           'font.family': 'sans-serif'}
-NOTEBOOK_DPI = 300
-# -
+# Remove duplicates
+bsasa_reference.df  = remove_self_interactions(bsasa_reference.df)
+pad.write(("Removing self interactions", bsasa_reference.df.shape))
+bsasa_reference.df  = remove_every_other(bsasa_reference.df)
+pad.write(("Removing duplicates", bsasa_reference.df.shape))
+bsasa_reference.prey_set = set(
+        bsasa_reference.df['Prey1'].values).union(
+        bsasa_reference.df['Prey2'].values)
 
-bsasa_ref = init_bsasa_ref()
+# update the pdb set        
+bsasa_reference.pdb_set = set(bsasa_reference.df['PDBID'].values)
+bsasa_reference.nuid = init_nuid(bsasa_reference.df)
+pad.write(("N PDB Files in BSASA REF", len(bsasa_reference.pdb_set)))
+pad.write(("N uids represented in BSASA ref",
+           bsasa_reference.nuid)) 
 
-pad.write(("Loading Buried Solvent Accessible Surface Area Reference", bsasa_ref.shape))
+# Summarize direct interactions
+bsasa_reference.direct_interaction_set = init_direct_interaction_set(
+        bsasa_reference.df)
+bsasa_reference.n_direct = len(bsasa_reference.direct_interaction_set)
+pad.write(("N pairwise direct interactions found",
+           bsasa_reference.n_direct))
 
-
-pdb_set = set(bsasa_ref['PDBID'].values)
-pad.write(("N PDB Files in BSASA REF", len(pdb_set)))
-bsasa_ref_nuid = init_nuid(bsasa_ref)
-pad.write(("N uids represented in BSASA ref", bsasa_ref_nuid)) 
-
-bsasa_ref = remove_prey_nan(bsasa_ref)
-pad.write(("Removing Nans", bsasa_ref.shape)) 
-bsasa_ref = remove_self_interactions(bsasa_ref)
-pad.write(("Removing self interactions", bsasa_ref.shape))
-bsasa_ref = remove_every_other(bsasa_ref)
-pad.write(("Removing duplicates", bsasa_ref.shape))
-prey_set = set(bsasa_ref['Prey1'].values).union(bsasa_ref['Prey2'].values)
-
-pdb_set = set(bsasa_ref['PDBID'].values)
-pad.write(("N PDB Files in BSASA REF", len(pdb_set)))
-bsasa_ref_nuid = init_nuid(bsasa_ref)
-pad.write(("N uids represented in BSASA ref", bsasa_ref_nuid)) 
-
+# Load fastas
+fasta = SimpleNamespace()
 uid2seq, uid2seq_len = init_uid2seq()
-pad.write(("Reading Primary Amino Acid Sequences", len(uid2seq)))
-
-direct_interaction_set = init_direct_interaction_set(bsasa_ref)
-n_direct = len(direct_interaction_set)
-pad.write(("N pairwise direct interactions found", n_direct))
+fasta.uid2seq = uid2seq.copy()
+fasta.uid2seq_len = uid2seq_len.copy()
+fasta.nuid = len(fasta.uid2seq)
+del uid2seq
+del uid2seq_len
+pad.write(("Reading Primary Amino Acid Sequences",
+           fasta.nuid))
 
 # +
-uid_total = 3_062
-pad.write(("N Expected Uniprot IDs", uid_total))
+#uid_total = 3_062
+#pad.write(("N Expected Uniprot IDs", uid_total))
+# Summarize fasta interaction space
 
-n_possible_pairs = math.comb(uid_total, 2)
-pad.write(("Size of interaction space", n_possible_pairs))
+fasta.n_possible_pairwise_combinations = math.comb(
+        fasta.nuid, 2)
+pad.write(("Size of interaction space",
+           fasta.n_possible_pairwise_combinations))
+bsasa_reference.n_possible_pairwise_combinations = math.comb(
+        bsasa_reference.nuid, 2)
+pad.write(("Maximal possible size of reference interactions",
+           bsasa_reference.nuid))
 
-bsasa_ref_n_possible_pairs = math.comb(bsasa_ref_nuid, 2)
-pad.write(("Maximal possible size of reference interactions", bsasa_ref_n_possible_pairs))
-
-dataset_balance_total = n_direct / n_possible_pairs
-dataset_balance_matched = n_direct / bsasa_ref_n_possible_pairs
+# How many positive cases are there?
+dataset_balance_total = bsasa_reference.n_direct / fasta.n_possible_pairwise_combinations
+dataset_balance_matched = bsasa_reference.n_direct / bsasa_reference.n_possible_pairwise_combinations
 
 pad.write(("percent dataset balance", dataset_balance_total * 100))
 pad.write(("percent matched balance", dataset_balance_matched * 100))
 
-
-# -
-table1 = pd.read_csv("../table1.csv")
-pad.write(("Table 1: Maps PreyGene to Uniprot ID", table1.shape))
-
-gene2uid = {key:val for key, val in table1.values}
-uid2gene = {val:key for key,val in gene2uid.items()}
-
+# Get the previously calculated mappings
+auth_prey_gene_and_uid = SimpleNamespace()
+auth_prey_gene_and_uid.df = pd.read_csv("../table1.csv")
+pad.write(("Table 1: Maps PreyGene to Uniprot ID",
+           auth_prey_gene_and_uid.shape))
+auth_prey_gene_and_uid.gene2uid = {
+        key:val for key, val in auth_prey_gene_and_uid.df.values}
+auth_prey_gene_and_uid.uid2gene = {
+     val:key for key,val in auth_prey_gene_and_uid.gene2uid.items()}
 pad.write("-- Prey in BSASA--")
-pad.write(prey_in_bsasa(gene2uid=gene2uid, prey_set=prey_set))
+pad.write(prey_in_bsasa(
+    gene2uid=auth_prey_gene_and_uid.gene2uid,
+    prey_set=bsasa_reference.prey_set))
 
-write_prey_in_BSASA_2pad(pad, gene2uid, prey_set)
-
+# Check for expected PDBs
+write_prey_in_BSASA_2pad(pad,
+    auth_prey_gene_and_uid.gene2uid, bsasa_reference.prey_set)
 pad.write("-- PDBs in BSASA --")
-pad.write((f"4n9f", '4n9f' in pdb_set))
+pad.write((f"4n9f", '4n9f' in bsasa_reference.pdb_set))
 
 #summarize_col(bsasa_ref, 'bsasa_lst')
-    
-interaction_set = init_interaction_set(bsasa_ref)
-n_possible_interactions = math.comb(uid_total, 2)
-n_possible_found_interactions = math.comb(len(prey_set), 2)
-npdbs_per_interaction = init_npdbs_per_interaction(bsasa_ref, interaction_set)
-        
+bsasa_reference.interaction_set = init_interaction_set(bsasa_ref)
+#n_possible_interactions = math.comb(uid_total, 2)
+#n_possible_found_interactions = math.comb(len(prey_set), 2)
+#npdbs_per_interaction = init_npdbs_per_interaction(bsasa_ref, interaction_set)
 # Filter by percent sequence identity
-chain_mapping = pd.read_csv("../significant_cifs/chain_mapping_all.csv")
-pad.write(("Loading chain mapping", chain_mapping.shape))
-sel = chain_mapping['bt_aln_percent_seq_id'] >= 0.3
-chain_mapping = chain_mapping[sel]
+# Map PDB chains to Uniprot Queries
+
+chain_mapping = SimpleNamespace()
+chain_mapping.df  = pd.read_csv("../significant_cifs/chain_mapping_all.csv")
+pad.write(("Loading chain mapping", chain_mapping.df.shape))
+sel = chain_mapping.df['bt_aln_percent_seq_id'] >= 0.3
+chain_mapping.df = chain_mapping.df[sel]
 pad.write(("Chains over 30% sequence identity", chain_mapping.shape))
 # How many pdb ids and uids are there?
-chain_pdb_set = set(chain_mapping['PDBID'].values)
-chain_uid_set = set(chain_mapping['QueryID'].values)
-pad.write(("N PDBS in chain mapping",  len(chain_pdb_set)))
-pad.write(("N UIDS in chain mapping",  len(chain_uid_set)))
 
-complexes = init_complexes(chain_pdb_set, chain_mapping)
-cocomplexes = init_cocomplexes(complexes)
-pad.write(("N cocomplexes", len(cocomplexes.keys())))
+chain_mapping.pdb_set = set(chain_mapping.df['PDBID'].values)
+chain_mapping.uid_set = set(chain_mapping.df['QueryID'].values)
+pad.write(("N PDBS in chain mapping",  len(chain_mapping.pdb_set)))
+pad.write(("N UIDS in chain mapping",  len(chain_mapping.uid_set)))
 
-cocomplex_edge_id__cocomplex_edge = init_cocomplex_edge_id__cocomplex_edge(
-        cocomplexes)
+chain_mapping.complexes = init_complexes(
+        chain_mapping.pdb_set, chain_mapping.df)
+
+chain_mapping.cocomplexes = SimpleNamespace()
+
+chain_mapping.cocomplexes.pdb_id__uid_fset  = init_cocomplexes(chain_mapping.complexes)
+pad.write(("N cocomplexes", len(chain_mapping.cocomplexes.pdb_id__uid_fset.keys())))
+chain_mapping.cocomplexes.edge_id__cocomplex_edge = init_cocomplex_edge_id__cocomplex_edge(
+        chain_mapping.cocomplexes.pdb_id__uid_fset)
 pad.write(("N cocomplex edges",
-           len(cocomplex_edge_id__cocomplex_edge.keys())))
+           len(chain_mapping.cocomplexes.edge_id__cocomplex_edge.keys())))
 
-cocomplex_uid_set = init_cocomplex_uid_set(cocomplexes)
+chain_mapping.cocomplexes.uid_set = init_cocomplex_uid_set(chain_mapping.cocomplexes.pdb_id__uid_fset)
 
 # Long Running Cell
-#cocomplex_pairs = list(combinations(cocomplex_uid_set, 2))
+chain_mapping.cocomplexes.pairs = list(combinations(chain_mapping.cocomplexes.uid_set, 2))
 
-#cocomplex_df = init_cocomplex_df(cocomplex_pairs, cocomplexes)
-#pad.write("Co-complex df", cocomplex_df.shape)
+chain_mapping.cocomplexes.df = init_cocomplex_df(
+        chain_mapping.cocomplexes.pairs, chain_mapping.cocomplexes.pdb_id__uid_fset)
 
+pad.write(("Co-complex df", chain_mapping.cocomplexes.df.shape))
+
+cullin_data = SimpleNamespace()
 df1, df2, df3 = init_dfs()
+cullin_data.df1 = df1
+cullin_data.df2 = df2
+cullin_data.df2 = df3
 
-conditions = ["wt_MG132", "vif_MG132", "mock_MG132"]
-pad.write(("N conditions", len(conditions)))
-bait2uid = init_bait2uid(conditions, gene2uid)
-df_all = init_df_all(df1, df2, df3, bait2uid)
-df_all = update_df_all_bait_and_condition(df_all)
+cullin_data.df_all = init_df_all(df1, df2, df3, auth_prey_gene_and_uid.gene2uid)
+cullin_data.df_all = update_df_all_bait_and_condition(cullin_data.df_all)
 
-rsel = [f"r{i}" for i in range(1, 5)]
-csel = [f"c{i}" for i in range(1, 13)]
+cullin_data.rsel = [f"r{i}" for i in range(1, 5)]
+cullin_data.csel = [f"c{i}" for i in range(1, 13)]
+cullin_data.df_all = parse_spec(cullin_data.df_all)
+pad.write(("DF ALL", cullin_data.df_all.shape))
 
-df_all = parse_spec(df_all)
-pad.write(("DF ALL", df_all.shape))
+cullin_data.df_new = cullin_data.df_all[['bait', 'condition', 'Prey', 'SaintScore', 'BFDR', 'BaitUID'] + cullin_data.rsel + cullin_data.csel]
 
-df_new = df_all[['bait', 'condition', 'Prey', 'SaintScore', 'BFDR', 'BaitUID'] + rsel + csel]
-pad.write(("DF NEW", df_new.shape))
-
-def set_PreyName_as_index(df_new):
-    df_new.loc[:, 'PreyName'] = df_new.index
-    return df_new
-
-df_new = set_PreyName_as_index(df_new)
+pad.write(("DF NEW", cullin_data.df_new.shape))
+cullin_data.df_new = set_PreyName_as_index(cullin_data.df_new)
 
 # Update df_new based on assumed control mappings
-assert df_new.shape[0] == df_all.shape[0]
-df_new, control_mappings  = update_df_new_based_on_assumed_control_mappings(df_new)
+assert cullin_data.df_new.shape[0] == cullin_data.df_all.shape[0]
+df_new, control_mappings  = update_df_new_based_on_assumed_control_mappings(cullin_data.df_new)
 
-pad.write(("Assumed CBFB control mapping", control_mappings["cbfb"]))
-pad.write(("Assumed CUL5 control mapping", control_mappings["cul5"]))
-pad.write(("Assumed ELOB control mapping", control_mappings["elob"]))
+cullin_data.df_new = df_new.copy()
+cullin_data.control_mappings = control_mappings.copy()
+del df_new
+del control_mappings
+
+pad.write(("Assumed CBFB control mapping", cullin_data.control_mappings["cbfb"]))
+pad.write(("Assumed CUL5 control mapping", cullin_data.control_mappings["cul5"]))
+pad.write(("Assumed ELOB control mapping", cullin_data.control_mappings["elob"]))
 
 # Removing extra counts
-df_new = df_new.drop(columns=c_cul5 + c_elob)
-pad.write(("DF NEW - Remove Extra Counts", df_new.shape))
+cullin_data.df_new = cullin_data.df_new.drop(columns=(
+    cullin_data.control_mappings["cul5"] + cullin_data.control_mappings["elob"]))
+pad.write(("DF NEW - Remove Extra Counts", cullin_data.df_new.shape))
 
-df_new = update_df_new_with_summary_stats(df_new)
-pad.write(("DF New - Add summary stats", df_new.shape))
+cullin_data.df_new = update_df_new_with_summary_stats(cullin_data.df_new)
+pad.write(("DF New - Add summary stats", cullin_data.df_new.shape))
 
-df_new = update_df_new_with_query_aa_sequence(df_new, chain_mapping)
-
-df_new = update_df_new_with_aa_seq_len(uid2seq_len, df_new)
+cullin_data.df_new = update_df_new_with_query_aa_sequence(cullin_data.df_new, chain_mapping.df)
+cullin_data.df_new = update_df_new_with_aa_seq_len(fasta.uid2seq_len, cullin_data.df_new)
 
 #df_new.loc[:, 'exp_aa_seq_len'] = np.exp(seq_lens)  # overflow
-df_new = update_df_new_with_tryptic_sites(df_new, uid2seq_len)
-pad.write(("DF NEW - Add sequence info", df_new.shape))
+cullin_data.df_new = update_df_new_with_tryptic_sites(cullin_data.df_new, fasta.uid2seq_len,
+    fasta.uid2seq)
+pad.write(("DF NEW - Add sequence info", cullin_data.df_new.shape))
 
-df_new, cocomplex_ref_pairs, direct_ref_pairs = init_interactions(df_all=df_new, cocomplex_df=cocomplex_df, bsasa_ref=bsasa_ref)
-    
+# Error
+# 
+df_new, cocomplex_ref_pairs, direct_ref_pairs = init_interactions(
+        df_all=cullin_data.df_new,
+        cocomplex_df=chain_mapping.cocomplexes.df,
+        bsasa_ref=bsasa_reference.df)
+
+cullin_data.df_new = df_new.copy()
+bsasa_reference.cocomplex_ref_pairs = cocomplex_ref_pairs.copy()
+bsasa_reference.direct_ref_pairs = direct_ref_pairs.copy() 
+
+del df_new
+
+
 pad.write(("DF NEW - Init interactions", df_new.shape))
 bait = ['CBFB', 'ELOB', 'CUL5', 'LRR1']
 
-prey_set = sorted(list(set(df_new.index)))
-preyu = np.array(prey_set)
-preyv = np.array(prey_set)
-nprey = len(preyu)
+cullin_data.prey_set = sorted(list(set(cullin_data.df_new.index)))
+cullin_data.preyu = np.array(cullin_data.prey_set)
+cullin_data.preyv = np.array(cullin_data.prey_set)
+cullin_data.nprey = len(cullin_data.preyu)
 
+cullin_data.csel = [f"c{i}" for i in range(1, 5)]
 #Initialize tensors
 tensorR, tensorC = init_tensorRandC(
-    df_new, rsel, csel, preyu, bait, fill_tensors)
+    cullin_data.df_new,
+    cullin_data.rsel,
+    cullin_data.csel,
+    cullin_data.preyu,
+    bait,
+    fill_tensors)
 
 pad.write(("Tensor Replicate", tensorR.shape))
 pad.write(("Tensor Control", tensorC.shape))
@@ -195,33 +226,94 @@ spectral_count_xarray = init_spectral_count_xarray(
 
 pad.write(("Spectral Counts", spectral_count_xarray.shape))
 
-preyname2uid = {row['PreyName']:row['Prey'] for i,row in df_new.iterrows()}
-uid2preyname = {val:key for key,val in preyname2uid.items()}
+cullin_data.preyname2uid = {
+        row['PreyName']:row['Prey'] for i,row in cullin_data.df_new.iterrows()}
+cullin_data.uid2preyname = {
+        val:key for key,val in cullin_data.preyname2uid.items()}
 
-cocomplex_df = update_cocomplex_df_with_PreyXNames(
-        cocomplex_df, uid2preyname)
+chain_mapping.cocomplex_df = update_cocomplex_df_with_PreyXNames(
+        chain_mapping.cocomplex_df, cullin_data.uid2preyname)
 
-cocomplex_matrix = init_cocomplex_matrix(nprey, preyu, preyv, cocomplex_df)
+cocomplex_matrix = init_cocomplex_matrix(
+        cullin_data.nprey,
+        cullin_data.preyu,
+        cullin_data.preyv,
+        chain_mapping.cocomplexes.df)
 
-bsasa_ref = update_bsasa_ref_with_PreyXNames(bsasa_ref, uid2preyname)
+bsasa_reference.df = update_bsasa_ref_with_PreyXNames(bsasa_reference.df, cullin_data.uid2preyname)
 # Long running: 2 min
-direct_matrix = init_direct_matrix(nprey, preyu, preyv, bsasa_ref)
+direct_matrix = init_direct_matrix(
+        cullin_data.nprey,
+        cullin_data.preyu,
+        cullin_data.preyv, bsasa_reference.df)
 
 ds = xr.Dataset({'cocomplex': cocomplex_matrix,
                  'direct': direct_matrix,
                  'CRL_E':tensorR,
                  'CRL_C':tensorC})
+
 # Append Cocomplex labels to DataFrame
-df_new = update_df_new_PDB_COCOMPLEX(df_new, ds)
+cullin_data.df_new = update_df_new_PDB_COCOMPLEX(cullin_data.df_new, ds)
 pad.write(("Add cocomplex labels to DF NEW", df_new.shape))
 
-benchmark_summary = init_benchmark_summary(
-        cocomplex_df, bsasa_ref, df_all, unknown, direct_interaction,
-        cocomplex_interactions)
-pad.write(("Benchmark Summary", benchmark_summary.shape))
+# Benchmark cos sim on cocomplex reference
 
-edge_list = list(combinations(preyu, 2))
-prey_pairs_df = init_prey_pairs_df(jax.random.PRNGKey(13), prey_set, bsasa_ref)
+cos_sim_matrix, mag_v = cosin_sim_df2cos_sim_matrix(
+        spectral_counts2cosin_sim_df(spectral_count_xarray))
+
+
+# Benchmark cos sim on direct reference
+direct_benchmark = SimpleNamespace()
+direct_benchmark.reference = SimpleNamespace()
+direct_benchmark.reference.matrix = (direct_matrix > 1).copy()
+direct_benchmark.prediction = SimpleNamespace()
+direct_benchmark.prediction.cosine_similarity = SimpleNamespace()
+direct_benchmark.prediction.cosine_similarity.matrix = cos_sim_matrix
+direct_benchmark.reference.matrix = direct_benchmark.reference.matrix.sel(
+        preyu=direct_benchmark.prediction.cosine_similarity.matrix.preyu,
+        preyv=direct_benchmark.prediction.cosine_similarity.matrix.preyv,)
+direct_benchmark.reference.n_edges = np.sum(np.tril(
+    direct_benchmark.reference.matrix, k=-1))
+direct_benchmark.reference.n_possible_edges = math.comb(
+        len(direct_benchmark.reference.matrix), 2)
+direct_benchmark.thresholds = np.arange(0, 1.01, 0.01)
+pps, tps = pp_tp_from_pairwise_prediction_matrix_and_ref(
+        direct_benchmark.reference.matrix,
+        direct_benchmark.prediction.cosine_similarity.matrix,
+        direct_benchmark.thresholds)
+
+direct_benchmark.prediction.cosine_similarity.pps = np.array(pps) 
+direct_benchmark.prediction.cosine_similarity.tps = np.array(tps) 
+direct_benchmark.prediction.cosine_similarity.ppr = (
+    direct_benchmark.prediction.cosine_similarity.pps /
+    direct_benchmark.reference.n_possible_edges
+    )
+direct_benchmark.prediction.cosine_similarity.tpr = (
+    direct_benchmark.prediction.cosine_similarity.tps /
+    direct_benchmark.reference.n_edges
+    )
+direct_benchmark.prediction.cosine_similarity.auc = (
+    sklearn.metrics.auc(
+        x = direct_benchmark.prediction.cosine_similarity.ppr,
+        y = direct_benchmark.prediction.cosine_similarity.tpr,
+        )
+    )
+
+# Benchmark cos sim on cocomplex reference
+cocomplex_benchmark = SimpleNamespace()
+
+cocomplex_benchmark.reference_matrix = cocomplex_matrix
+
+
+#benchmark_summary = init_benchmark_summary(
+#        chain_mapping.cocomplexes.df,
+#        bsasa_reference.df,
+#        cullin_data.df_all, unknown, direct_interaction,
+#        cocomplex_interactions)
+#pad.write(("Benchmark Summary", benchmark_summary.shape))
+#
+#edge_list = list(combinations(preyu, 2))
+#prey_pairs_df = init_prey_pairs_df(jax.random.PRNGKey(13), prey_set, bsasa_ref)
 
 base = "../../benchmark/data/cullin/PRIDE/PXD009012/"
 evidence = pd.concat(
@@ -2521,12 +2613,6 @@ q_func(m_data.prior_predictive.sel(chain=0)['y_c'].reduce(np.min, dim='crep')).T
 
 m_data.observed_data.reduce(np.min, dim=['crep', 'rrep'])
 
-
-
-# ?np.mean
-
-# +
-
 #m_data.posterior_predictive.sel(chain=0)['y_c'].reduce(np.mean, dim='crep').reduce(q_func, dim='draw')
 # -
 
@@ -2540,13 +2626,6 @@ hpdi(m_data.posterior['a'].values, axis=1)
 
 predictive_check(m_data.sel(irow=0))
 
-# +
-
-
-
-
-# -
-
 m_data.posterior_predictive['y_c'].mean('crep')
 
 xr.apply_ufunc(np.mean, m_data.posterior)
@@ -2558,18 +2637,6 @@ m_data.prior_predictive
 m_data.prior_predictive['y_c'].shape
 
 neff_rhat = {'a_r_hat': summary_dict['a']['r_hat']}
-
-
-
-m_data
-
-
-
-m_data
-
-m_data
-
-m_data
 
 samples = search.get_samples()
 
@@ -2627,8 +2694,6 @@ mcmc = numpyro.infer.MCMC(nuts_kernal, num_warmup=1000, num_samples=50000, thinn
 rng_key = jax.random.PRNGKey(13)
 mcmc.run(rng_key, ds=ds, extra_fields=('potential_energy',))
 
-df1
-
 posterior_samples = mcmc.get_samples()
 
 posterior_predictive = numpyro.infer.Predictive(model2, posterior_samples)(jax.random.PRNGKey(1), ds)
@@ -2647,98 +2712,10 @@ post = numpyro_data['posterior']
 
 az.plot_trace(post.sel(mu_dim_0=np.arange(0, 2)), var_names=['s'])
 
-post
-
-numpyro_data
-
 numpyro_data['posterior']
 
 
-def model3(ds, N=3062):
     
-    # wt, vif, mock
-    # 
-    # [condition, bait, prey, rrep]
-    
-    ELOB_wt = ds.sel(condition='wt', bait='ELOB')['CRL_E'].values
-    CUL5_wt = ds.sel(condition='wt', bait='CUL5')['CRL_E'].values
-    CBFB_wt = ds.sel(condition='wt', bait='CBFB')['CRL_E'].values
-    
-    ELOB_vif = ds.sel(condition='vif', bait='ELOB')['CRL_E'].values
-    CUL5_vif = ds.sel(condition='vif', bait='CUL5')['CRL_E'].values
-    CBFB_vif = ds.sel(condition='vif', bait='CBFB')['CRL_E'].values
-    
-    ELOB_mock = ds.sel(condition='mock', bait='ELOB')['CRL_E'].values
-    CUL5_mock = ds.sel(condition='mock', bait='CUL5')['CRL_E'].values
-    CBFB_mock = ds.sel(condition='mock', bait='CBFB')['CRL_E'].values
-    
-    LRR1_mock = ds.sel(condition='mock', bait='LRR1')['CRL_E'].values
-    
-    ctrl_ELOB_wt = ds.sel(condition='wt', bait='ELOB')['CRL_C'].values
-    ctrl_CUL5_wt = ds.sel(condition='wt', bait='CUL5')['CRL_C'].values
-    ctrl_CBFB_wt = ds.sel(condition='wt', bait='CBFB')['CRL_C'].values
-    
-    ctrl_ELOB_vif = ds.sel(condition='vif', bait='ELOB')['CRL_C'].values
-    ctrl_CUL5_vif = ds.sel(condition='vif', bait='CUL5')['CRL_C'].values
-    ctrl_CBFB_vif = ds.sel(condition='vif', bait='CBFB')['CRL_C'].values
-    
-    ctrl_ELOB_mock = ds.sel(condition='mock', bait='ELOB')['CRL_C'].values
-    ctrl_CUL5_mock = ds.sel(condition='mock', bait='CUL5')['CRL_C'].values
-    ctrl_CBFB_mock = ds.sel(condition='mock', bait='CBFB')['CRL_C'].values
-    
-    ctrl_LRR1_mock = ds.sel(condition='mock', bait='LRR1')['CRL_C'].values
-    
-    
-   # max_val = ds['CRL_E'].max('rrep')
-    
-   # mu_Nc = np.ones((5, 3))
-   # mu_alpha = np.ones((N, 5, 3))
-    
-
-    
-    #N = numpyro.sample('N', dist.Normal(np.zeros(3), 5))
-    #mu = numpyro.sample('mu', dist.Normal(max_val.sel(bait='ELOB').values.T, 50), sample_shape=(3062, 3))
-    #numpyro.sample('sc', dist.Normal(N * mu), obs=max_val.sel(bait='ELOB').values.T)
-    
-    
-    
-    
-    #N1 = numpyro.sample('N1', dist.Normal(0, 1))
-    #N2 = numpyro.sample('N2', dist.Normal(0, 1))
-    
-    #mu_elob = numpyro.sample('mu_elob', dist.Normal(np.mean(ELOB_wt, axis=1), np.var(ELOB_wt, axis=1)))
-    #mu_cul5 = numpyro.sample('mu_cul5', dist.Normal(np.mean(CUL5_wt, axis=1), np.var(ELOB_wt, axis=1)))
-    
-    #numpyro.sample('ELOB_wt', dist.Normal(mu_elob * N1, 5), obs=ELOB_wt)
-    #numpyro.sample('CUL5_wt', dist.Normal(mu_cul5 * N2, 5), obs=CUL5_wt)
-    
-    
-    #cell_abundance = numpyro.sample(dist.Normal(jnp.ones((3, 5))), 1)
-    
-    assert ELOB_wt.shape == (3062, 4)
-    
-    mu_hyper_prior = np.ones((3062, 1)) / 50
-    sig_hyper_prior = np.ones((3062, 1)) / 2
-    
-    
-    mu = numpyro.sample('mu', dist.Exponential(mu_hyper_prior))
-    sigma = numpyro.sample('s', dist.Exponential(sig_hyper_prior))
-    
-    Ncells = numpyro.sample('Nc', dist.Normal(np.ones((1, 4)), 0.5))
-    
-    Ncells_rep = jnp.repeat(Ncells, 3062, axis=0)
-    
-    
-    numpyro.sample('sc', dist.Normal(mu * Ncells_rep, sigma), obs=ELOB_wt)
-    
-    #Ncells = cell_abundance * 1e7 
-    
-    #gamma_i = numpyro.sample('gamma', dist.Beta(0.5, 0.5), sample_shape=(3062,))
-    #mu_ctrl = numpyro.sample('mu0', dist.Uniform(0, 250), sample_shape=(3062,))
-    #mu_wt = numpyro.sample('mu_wt', dist.Uniform(0, 250), sample_shape=(3062,))
-    
-    #numpyro.sample('ELOB_wt', dist.Normal(mu_wt, 10), obs=ELOB_wt)
-    #numpyro.sample('ctrl_ELOB_wt', dist.Normal(mu_ctrl * gamma_i, 10), obs=ctrl_ELOB_wt)
 
 az.plot_forest(numpyro_data, var_names="N")
 

@@ -267,9 +267,11 @@ def init_cocomplex_matrix(nprey, preyu, preyv, cocomplex_df):
     cocomplex_matrix = xr.DataArray(np.zeros((nprey, nprey)), 
         coords={"preyu": preyu, "preyv": preyv}, dims=["preyu", "preyv"])
     for i, r in cocomplex_df.iterrows():
-        p1 = r['Prey1Name']
-        p2 = r['Prey2Name']
+        p1 = r['Prey1']
+        p2 = r['Prey2']
         val = r['NPDBS']
+        assert p1 in preyu, p1
+        assert p2 in preyu, p2
         cocomplex_matrix.loc[p1, p2] = val
         cocomplex_matrix.loc[p2, p1] = val
     return cocomplex_matrix
@@ -287,11 +289,11 @@ def update_df_new_based_on_assumed_control_mappings(
     c_elob = [f"c{i}" for i in (9, 10, 11, 12)] 
     csel= c_cbfb
     s = df_new["bait"] == "CBFB"
-    df_new.loc[s, csel] = df_all.loc[s, c_cbfb].values
+    df_new.loc[s, csel] = df_new.loc[s, c_cbfb].values
     s = df_new["bait"] == "CUL5"
-    df_new.loc[s, csel] = df_all.loc[s, c_cul5].values 
+    df_new.loc[s, csel] = df_new.loc[s, c_cul5].values 
     s = df_new["bait"] == "ELOB"
-    df_new.loc[s, csel] = df_all.loc[s, c_elob].values
+    df_new.loc[s, csel] = df_new.loc[s, c_elob].values
     control_mappings = {"cbfb": c_cbfb, "cul5": c_cul5, "elob": c_elob}
     return df_new, control_mappings
 
@@ -300,7 +302,7 @@ def update_df_new_with_aa_seq_len(uid2seq_len, df_new):
     df_new.loc[:, 'aa_seq_len'] = seq_lens
     return df_new
 
-def update_df_new_with_tryptic_sites(df_new, uid2seq_len):
+def update_df_new_with_tryptic_sites(df_new, uid2seq_len, uid2seq):
     n_first_sites = [n_first_tryptic_cleavages(uid2seq[prey]) for prey in df_new['Prey']]
     df_new.loc[:, 'n_first_tryptic_cleavage_sites'] = np.array(n_first_sites)
     df_new.loc[:, 'n_possible_first_tryptic_peptides'] = df_new.loc[
@@ -313,7 +315,11 @@ def update_df_new_with_query_aa_sequence(df_new, chain_mapping):
         if prey in prey2seq else np.nan) for prey in df_new['Prey'].values])
     return df_new
 
-def update_df_new_with_summary_stats(df_new):
+def update_df_new_with_summary_stats(df_new, rsel=None, csel=None):
+    if rsel == None:
+        rsel = [f"r{i}" for i in range(1, 5)]
+    if csel == None:
+        csel = [f"c{i}" for i in range(1, 5)]
     df_new.loc[:, 'rAv'] = df_new.loc[:, rsel].mean(axis=1)
     df_new.loc[:, 'cAv'] = df_new.loc[:, csel].mean(axis=1)
     df_new.loc[:, 'rVar'] = df_new.loc[:, rsel].var(axis=1).values
@@ -325,7 +331,7 @@ def update_df_new_with_summary_stats(df_new):
     df_new.loc[:, 'cMin'] = np.min(df_new.loc[:, csel].values, axis=1)
     return df_new
 
-def init_df_all(df1, df2, df3, bait2uid):
+def init_df_all(df1, df2, df3, gene2uid, conditions=None):
     viral_remapping = {
     "vifprotein"          :   "P69723",
     "polpolyprotein"      :   "Q2A7R5",
@@ -334,6 +340,12 @@ def init_df_all(df1, df2, df3, bait2uid):
     "gagpolyprotein"     :    "P12493",
     "revprotein"          :   "P69718",
     "envpolyprotein"      :   "O12164"}
+    
+    if conditions == None:
+        conditions = ["wt_MG132", "vif_MG132", "mock_MG132"]
+    #pad.write(("N conditions", len(conditions)))
+    bait2uid = init_bait2uid(conditions, gene2uid)
+
     df1.loc[:, "BaitUID"] = [bait2uid[i] for i in df1["Bait"].values]
     df2.loc[:, "BaitUID"] = [bait2uid[i] for i in df2["Bait"].values]
     df3.loc[:, "BaitUID"] = [bait2uid[i] for i in df3["Bait"].values]
@@ -342,6 +354,10 @@ def init_df_all(df1, df2, df3, bait2uid):
     df_all.loc[:, "Prey"] = [viral_remapping[i]
         if i in viral_remapping else i for i in df_all['Prey'].values]
     return df_all
+
+def set_PreyName_as_index(df_new):
+    df_new.loc[:, 'PreyName'] = df_new.index
+    return df_new
 
 def init_complexes(chain_pdb_set, chain_mapping) -> dict:
     """Takes all uniprot ids at a given pdb id and puts them
@@ -1713,3 +1729,92 @@ def write_prey_in_BSASA_2pad(pad, gene2uid, prey_set):
     for i in sorted([f"CSN{i}_HUMAN" for i in range(1, 10)] + ["CSN7A_HUMAN", "CSN7B_HUMAN"]):
         if i in gene2uid:
             pad.write((f"{i.removesuffix('_HUMAN')}", gene2uid[i] in prey_set))
+
+def spectral_counts2cosin_sim_df(spectral_counts_xarray):
+    data = {}
+    for bait in spectral_counts_xarray.bait:
+        for condition in spectral_count_xarray.condition:
+            for ap in spectral_count_xarray.AP:
+                for rep in spectral_count_xarray.rep:
+                    val = spectral_count_xarray.sel(condition=condition,
+                        bait=bait, rep=rep, AP=ap)
+                    ap_key = "ap" if ap else "ctrl"
+                    key = bait.item() + "_" + condition.item() + "_" + ap_key + "_" + str(rep.item())
+                    data[key] = val.values
+    df = pd.DataFrame(data)
+    df.index = spectral_count_xarray.preyu
+    # Drop zeros
+    sel = np.sum(df.values, axis=1) !=0
+    df = df[sel]
+    return df
+
+def cosin_sim_df2cos_sim_matrix(cosin_sim_df):
+    df = cosin_sim_df
+    matrix = df.values @ df.values.T
+    mag_v = np.sqrt(np.sum(np.square(df.values), axis=1))   
+    mag_v = mag_v.reshape(mag_v.shape + (1,))
+    matrix = matrix / mag_v
+    matrix = matrix / mag_v.T
+    matrix = np.clip(matrix, -1, 1)
+    index = df.index
+    matrix = xr.DataArray(matrix, coords={"preyu": index, "preyv": index}, dims=["preyu", "preyv"])
+    return matrix, mag_v 
+
+
+def pairwise_matrix2edge_list(pairwise_matrix):
+    n = len(pairwise_matrix)
+    N = math.comb(n, 2)
+    prey1 = np.zeros(N, dtype=pairwise_matrix.preyu.dtype)
+    prey2 = np.zeros(N, dtype=pairwise_matrix.preyu.dtype)
+    score = np.zeros(N, dtype=pairwise_matrix.dtype)
+    prey_pairs = combinations(pairwise_matrix.preyu, 2)
+    k=0
+    for p1, p2 in prey_pairs:
+        prey1[k] = p1.item()
+        prey2[k] = p2.item()
+        score[k] = pairwise_matrix.sel(preyu=p1, preyv=p2).item()
+        k+=1
+    data = {"prey1": prey1, "prey2": prey2, "score": score}
+    return pd.DataFrame(data)
+
+def pp_from_pairwise_prediction_matrix(matrix, k=-1):
+    """
+    Compute the number of positive predictions (pp) from a pairwise symetric prediction matrix
+    """
+    L = np.tril(matrix, k=k)
+    pp = np.sum(L)
+    return pp
+
+def tp_from_pairwise_prediction_matrix_and_ref(ref_matrix, pred_matrix, k=-1):
+    LR = np.tril(ref_matrix, k=k)
+    LP = np.tril(pred_matrix, k=k)
+    result = LR * LP # Element-wise multiplication
+    return np.sum(result)
+
+def pp_tp_from_pairwise_prediction_matrix_and_ref(
+        ref_matrix, pred_matrix, thresholds,compare_func = op.ge, k=-1):
+    tps = []
+    pps = []
+    for thresh in thresholds:
+       m = compare_func(pred_matrix, thresh) 
+       pps.append(pp_from_pairwise_prediction_matrix(m, k=k))
+       tps.append(tp_from_pairwise_prediction_matrix_and_ref(ref_matrix, m, k=k))
+    return pps, tps 
+
+def get_tpr(tps, n):
+    return np.array(tps) / n
+
+def get_ppr(pps, M):
+    return np.array(pps) / M
+
+def auc(x, y, rule="simpson"):
+    return sp.
+
+
+
+
+
+
+
+
+
