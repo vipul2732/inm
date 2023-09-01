@@ -10,6 +10,10 @@ from numpyro.infer import (
 import click
 import pickle as pkl
 import time
+import sys
+
+def eprint(*args, **kwargs):
+    print(*args, file=sys.stderr, **kwargs) 
 
 def basic_bernoulli_adjacency1(
         spectral_count):
@@ -193,9 +197,12 @@ def load(fpath):
 @click.option("--num-warmup", type=int)
 @click.option("--num-samples", type=int)
 @click.option("--include-potential-energy", is_flag=True, default=False)
-def main(model_id, rseed, model_name,model_data, num_warmup, num_samples, include_potential_energy):
+@click.option("--progress-bar", is_flag=True, default=False)
+def main(model_id, rseed, model_name,model_data, num_warmup, num_samples, include_potential_energy, 
+    progress_bar):
     entered_main_time = time.time()
     rng_key = jax.random.PRNGKey(rseed)
+    eprint(f"Model Name: {model_name}")
     if model_name == "cov_model5":
         model_data = int(model_data)
         model = cov_model5
@@ -204,10 +211,12 @@ def main(model_id, rseed, model_name,model_data, num_warmup, num_samples, includ
     if include_potential_energy:
         extra_fields = extra_fields + ("potential_energy", )
     nuts = NUTS(model, init_strategy=init_strategy)
-    mcmc = MCMC(nuts, num_warmup=num_warmup, num_samples=num_samples)
+    mcmc = MCMC(nuts, num_warmup=num_warmup, num_samples=num_samples, progress_bar=progress_bar)
     mcmc.run(rng_key, model_data, extra_fields=extra_fields)
     finished_mcmc_time = time.time()
     elapsed_time = finished_mcmc_time - entered_main_time
+    eprint(f"{num_samples} sampling steps complete")
+    eprint(f"elapsed time: {elapsed_time}")
     savename = model_id + "_" + model_name + "_" + str(rseed) + ".pkl"
     fields = mcmc.get_extra_fields()
     samples = mcmc.get_samples()
