@@ -184,6 +184,107 @@ def cov_model5(dim):
     #This is wierdly misspecified
     numpyro.sample("mvn", dist.MultivariateNormal(loc=mu, scale_tril=sigma), obs=jnp.zeros(dim))
 
+def cov_model6(dim):
+    """
+    Use model4 init strategy
+    """
+    _mu_hyper = jnp.ones(dim)
+    mu = numpyro.sample("mu", dist.Poisson(_mu_hyper)) 
+    sigma = numpyro.sample("sigma", dist.LKJCholesky(dim, concentration=1.5))
+    #This is wierdly misspecified
+    numpyro.sample("mvn", dist.MultivariateNormal(loc=mu, scale_tril=sigma), obs=jnp.zeros(dim))
+
+def get_cov_model7_init_strategy(dim):
+    values = {"sigma1": jnp.eye(dim),
+        "sigma2": jnp.eye(dim),
+        "sigma3": jnp.eye(dim)}
+    return partial(init_to_value, values=values)
+
+def cov_model7(dim):
+    """
+    Use model4 init strategy
+    """
+    mu = jnp.zeros(dim)
+    sigma1 = numpyro.sample("sigma1", dist.LKJCholesky(dim, concentration=1.5))
+    sigma2 = numpyro.sample("sigma2", dist.LKJCholesky(dim, concentration=1.5))
+    sigma3 = numpyro.sample("sigma3", dist.LKJCholesky(dim, concentration=1.5))
+    #This is wierdly misspecified
+    numpyro.sample("mvn1", dist.MultivariateNormal(loc=mu, scale_tril=sigma1), obs=jnp.zeros(dim))
+    numpyro.sample("mvn2", dist.MultivariateNormal(loc=mu, scale_tril=sigma2), obs=jnp.zeros(dim))
+    numpyro.sample("mvn3", dist.MultivariateNormal(loc=mu, scale_tril=sigma3), obs=jnp.zeros(dim))
+
+def cov_model8(dim):
+    _mu_hyper = jnp.ones(dim)
+    # Vector of data means
+    mu = numpyro.sample("mu", dist.HalfNormal(_mu_hyper)) 
+    # Vector of variances for each of the d variables
+    theta = numpyro.sample("theta", dist.HalfCauchy(mu))
+    # Lower cholesky factor of a correlation matrix
+    # concentration = jnp.ones(1)  # Implies a uniform distribution over correlation matrices
+    L_omega = numpyro.sample("L_omega", dist.LKJCholesky(dim, concentration=1.5))
+    # Lower cholesky factor of the covariance matrix
+    sigma = jnp.sqrt(theta)
+    # we can also use a faster formula `L_Omega = sigma[..., None] * L_omega`
+    L_Omega = sigma[..., None] * L_omega
+    #L_Omega = jnp.matmul(jnp.diag(sigma), L_omega)
+    # Vector of expectations
+    numpyro.sample("obs", dist.MultivariateNormal(mu, scale_tril=L_Omega), obs=jnp.zeros(dim))
+
+def get_cov_model9_init_strategy(dim):
+    values = {"L_omega": jnp.eye(dim)}
+    return partial(init_to_value, values=values)
+
+def cov_model9(dim):
+    """
+    Use model4 init strategy
+    Does the model work with precision matrix parameterization?
+    """
+    _mu_hyper = jnp.ones(dim)
+    # Vector of data means
+    mu = numpyro.sample("mu", dist.HalfNormal(_mu_hyper)) 
+    # Vector of variances for each of the d variables
+    theta = numpyro.sample("theta", dist.HalfCauchy(mu))
+    # Lower cholesky factor of a correlation matrix
+    # concentration = jnp.ones(1)  # Implies a uniform distribution over correlation matrices
+    L_omega = numpyro.sample("L_omega", dist.LKJCholesky(dim, concentration=1.5))
+    # Lower cholesky factor of the covariance matrix
+    sigma = jnp.sqrt(theta)
+    # we can also use a faster formula `L_Omega = sigma[..., None] * L_omega`
+    L_Omega = sigma[..., None] * L_omega
+    #L_Omega = jnp.matmul(jnp.diag(sigma), L_omega)
+    # Vector of expectations
+    Omega = L_Omega @ L_Omega.T
+    numpyro.sample("obs", dist.MultivariateNormal(mu, precision_matrix=Omega), obs=jnp.zeros(dim))
+
+
+def model_10_wt(dim):
+    L_omega = numpyro.sample("L", dist.LKJ(dim, concentration=1.0)) 
+    mu = numpyro.sample("mu", dist.HalfNormal(_mu_hyper))
+    sigma = jnp.sqrt(mu)
+    L_Omega = sigma[..., None] * L_omega 
+    dist.sample("obs", dist.MultivariateNormal(mu, scale_tril=L_omega), obs=y) 
+
+
+def model_10_vif():
+    ...
+
+def model_10_mock():
+    ...
+
+def model_10_wt_vif():
+    ...
+
+def model_10_wt_mock():
+    ...
+
+def model_10_vif_mock():
+    ...
+
+def model_10_wt_vif_mock():
+    ...
+
+
+
 def load(fpath):
     with open(fpath, 'rb') as f:
         dat = pkl.load(f)
@@ -197,26 +298,51 @@ def load(fpath):
 @click.option("--num-warmup", type=int)
 @click.option("--num-samples", type=int)
 @click.option("--include-potential-energy", is_flag=True, default=False)
+@click.option("--include-mean-accept-prob", is_flag=True, default=False)
 @click.option("--progress-bar", is_flag=True, default=False)
 def main(model_id, rseed, model_name,model_data, num_warmup, num_samples, include_potential_energy, 
-    progress_bar):
+    progress_bar, include_mean_accept_prob):
     entered_main_time = time.time()
     rng_key = jax.random.PRNGKey(rseed)
+    eprint(f"Model ID: {model_id}")
     eprint(f"Model Name: {model_name}")
+    eprint(jax.devices())
     if model_name == "cov_model5":
         model_data = int(model_data)
         model = cov_model5
         init_strategy = get_cov_model4_init_strategy(model_data)
+    elif model_name == "cov_model6":
+        model_data = int(model_data)
+        model = cov_model6
+        init_strategy = get_cov_model4_init_strategy(model_data)
+    elif model_name == "cov_model7":
+        model_data = int(model_data)
+        model = cov_model7
+        init_strategy = get_cov_model7_init_strategy(model_data)
+    elif model_name == "cov_model8":
+        model_data = int(model_data)
+        model = cov_model8
+        init_strategy = get_cov_model4_init_strategy(model_data)
+    elif model_name == "cov_model9":
+        model_data = int(model_data)
+        model = cov_model9
+        init_strategy = get_cov_model9_init_strategy(model_data)
+    else:
+        raise ValueError(f"Invalid {model_name}")
     extra_fields = ()
     if include_potential_energy:
-        extra_fields = extra_fields + ("potential_energy", )
+        extra_fields = extra_fields + ("potential_energy",)
+    if include_mean_accept_prob:
+        extra_fields = extra_fields + ("mean_accept_prob",)
     nuts = NUTS(model, init_strategy=init_strategy)
     mcmc = MCMC(nuts, num_warmup=num_warmup, num_samples=num_samples, progress_bar=progress_bar)
     mcmc.run(rng_key, model_data, extra_fields=extra_fields)
     finished_mcmc_time = time.time()
     elapsed_time = finished_mcmc_time - entered_main_time
     eprint(f"{num_samples} sampling steps complete")
-    eprint(f"elapsed time: {elapsed_time}")
+    eprint(f"elapsed time (s): {elapsed_time}")
+    eprint(f"elapsed time (m): {elapsed_time / 60}")
+    eprint(f"elapsed time (h): {elapsed_time / (60 * 60)}")
     savename = model_id + "_" + model_name + "_" + str(rseed) + ".pkl"
     fields = mcmc.get_extra_fields()
     samples = mcmc.get_samples()
