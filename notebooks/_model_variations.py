@@ -258,11 +258,25 @@ def cov_model9(dim):
 
 
 def model_10_wt(dim):
+    #Data prep
+    bait_sel = ("CBFB", "ELOB", "CUL5") # Remove LRR1
+    spectral_count_xarray = load("spectral_count_xarray.pkl")
+    spectral_count_xarray = spectral_count_xarray.sel(
+            condition="wt", bait=bait_sel)
+    prey_isel = np.arange(dim)
+    spectral_count_xarray = spectral_count_xarray.isel(
+            preyu=prey_isel) 
+    y = spectral_count_xarray.sel(AP=True) - spectral_count_xarray.sel(AP=False)
+    y = y.tranpose('preyu', 'bait', 'rep')
+    y = y.values
+    #Model 
     L_omega = numpyro.sample("L", dist.LKJ(dim, concentration=1.0)) 
     mu = numpyro.sample("mu", dist.HalfNormal(_mu_hyper))
     sigma = jnp.sqrt(mu)
     L_Omega = sigma[..., None] * L_omega 
-    dist.sample("obs", dist.MultivariateNormal(mu, scale_tril=L_omega), obs=y) 
+    with numpyro.plate('rep', 4):
+        with numpyro.plate('bait', 3):
+            dist.sample("obs", dist.MultivariateNormal(mu, scale_tril=L_omega), obs=y) 
 
 
 def model_10_vif():
@@ -282,8 +296,6 @@ def model_10_vif_mock():
 
 def model_10_wt_vif_mock():
     ...
-
-
 
 def load(fpath):
     with open(fpath, 'rb') as f:
