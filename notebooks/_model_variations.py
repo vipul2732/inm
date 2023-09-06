@@ -270,7 +270,7 @@ def model_10_wt(dim):
     y = y.tranpose('preyu', 'bait', 'rep')
     y = y.values
     #Model 
-    L_omega = numpyro.sample("L", dist.LKJ(dim, concentration=1.0)) 
+    L_omega = numpyro.sample("L_omega", dist.LKJ(dim, concentration=1.0)) 
     mu = numpyro.sample("mu", dist.HalfNormal(_mu_hyper))
     sigma = jnp.sqrt(mu)
     L_Omega = sigma[..., None] * L_omega 
@@ -338,6 +338,10 @@ def main(model_id, rseed, model_name,model_data, num_warmup, num_samples, includ
     elif model_name == "cov_model9":
         model_data = int(model_data)
         model = cov_model9
+        init_strategy = get_cov_model9_init_strategy(model_data)
+    elif model_name == "model_10_wt":
+        model_data = int(model_data)
+        model = model_10_wt
         init_strategy = get_cov_model9_init_strategy(model_data)
     else:
         raise ValueError(f"Invalid {model_name}")
