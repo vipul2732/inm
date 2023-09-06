@@ -256,13 +256,12 @@ def cov_model9(dim):
     Omega = L_Omega @ L_Omega.T
     numpyro.sample("obs", dist.MultivariateNormal(mu, precision_matrix=Omega), obs=jnp.zeros(dim))
 
-
-def model_10_wt(dim):
+def model_10_wt(dim, condition_sel="wt"):
     #Data prep
     bait_sel = ["CBFB", "ELOB", "CUL5"] # Remove LRR1
     spectral_count_xarray = load("spectral_count_xarray.pkl")
     spectral_count_xarray = spectral_count_xarray.sel(
-            condition="wt", bait=bait_sel)
+            condition=condition_sel, bait=bait_sel)
     prey_isel = np.arange(dim)
     spectral_count_xarray = spectral_count_xarray.isel(
             preyu=prey_isel) 
@@ -278,24 +277,26 @@ def model_10_wt(dim):
         with numpyro.plate('bait', 3):
             dist.sample("obs", dist.MultivariateNormal(mu, scale_tril=L_omega), obs=y) 
 
+model_10_vif = partial(model_10_wt, condition_sel="vif")
+model_10_mock = partial(model_10_wt, condition_sel="mock")
+model_10_wt_vif = partial(model_10_wt, condtion_sel=["wt", "vif"])
+model_10_wt_mock = partial(model_10_wt, condition_sel=["wt", "mock"])
+model_10_vif_mock = partial(model_10_wt, condition_sel=["vif", "mock"])
+model_10_wt_vif_mock = partial(model_10_wt,
+    condition_sel=["wt", "vif", "mock"])
 
-def model_10_vif():
-    ...
+#Keys are model name, values are model_func, init_func pairs
+_model_dispatch = {
+    "model_10_wt": (model_10_wt, get_cov_model9_init_strategy),
+    "model_10_vif": (model_10_vif, get_cov_model9_init_strategy),
+    "model_10_mock": (model_10_mock, get_cov_model9_init_strategy),
+    "model_10_wt_vif": (model_10_wt_vif, get_cov_model9_init_strategy),
+    "model_10_wt_mock": (model_10_wt_mock, get_cov_model9_init_strategy),
+    "model_10_vif_mock": (model_10_vif_mock, get_cov_model9_init_strategy),
+    "model_10_wt_vif_mock": (model_10_wt_vif_mock, get_cov_model9_init_strategy),
+        }
 
-def model_10_mock():
-    ...
 
-def model_10_wt_vif():
-    ...
-
-def model_10_wt_mock():
-    ...
-
-def model_10_vif_mock():
-    ...
-
-def model_10_wt_vif_mock():
-    ...
 
 def load(fpath):
     with open(fpath, 'rb') as f:
@@ -319,7 +320,9 @@ def main(model_id, rseed, model_name,model_data, num_warmup, num_samples, includ
     eprint(f"Model ID: {model_id}")
     eprint(f"Model Name: {model_name}")
     eprint(jax.devices())
-    if model_name == "cov_model5":
+    if model_name in _model_dispatch:
+        model, init_strategy = _model_dispatch[model_name]
+    elif model_name == "cov_model5":
         model_data = int(model_data)
         model = cov_model5
         init_strategy = get_cov_model4_init_strategy(model_data)
