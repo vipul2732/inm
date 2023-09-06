@@ -288,16 +288,14 @@ model_10_wt_vif_mock = partial(model_10_wt,
 
 #Keys are model name, values are model_func, init_func pairs
 _model_dispatch = {
-    "model_10_wt": (model_10_wt, get_cov_model9_init_strategy),
-    "model_10_vif": (model_10_vif, get_cov_model9_init_strategy),
-    "model_10_mock": (model_10_mock, get_cov_model9_init_strategy),
-    "model_10_wt_vif": (model_10_wt_vif, get_cov_model9_init_strategy),
-    "model_10_wt_mock": (model_10_wt_mock, get_cov_model9_init_strategy),
-    "model_10_vif_mock": (model_10_vif_mock, get_cov_model9_init_strategy),
-    "model_10_wt_vif_mock": (model_10_wt_vif_mock, get_cov_model9_init_strategy),
+    "model_10_wt": (model_10_wt, get_cov_model9_init_strategy, lambda x: int(x)),
+    "model_10_vif": (model_10_vif, get_cov_model9_init_strategy, lambda x: int(x)),
+    "model_10_mock": (model_10_mock, get_cov_model9_init_strategy, lambda x: int(x)),
+    "model_10_wt_vif": (model_10_wt_vif, get_cov_model9_init_strategy, lambda x: int(x)),
+    "model_10_wt_mock": (model_10_wt_mock, get_cov_model9_init_strategy, lambda x: int(x)),
+    "model_10_vif_mock": (model_10_vif_mock, get_cov_model9_init_strategy, lambda x: int(x)),
+    "model_10_wt_vif_mock": (model_10_wt_vif_mock, get_cov_model9_init_strategy, lambda x: int(x)),
         }
-
-
 
 def load(fpath):
     with open(fpath, 'rb') as f:
@@ -322,7 +320,8 @@ def main(model_id, rseed, model_name,model_data, num_warmup, num_samples, includ
     eprint(f"Model Name: {model_name}")
     eprint(jax.devices())
     if model_name in _model_dispatch:
-        model, init_strategy = _model_dispatch[model_name]
+        model, init_strategy, data_func = _model_dispatch[model_name]
+        model_data = data_func(model_data)
     elif model_name == "cov_model5":
         model_data = int(model_data)
         model = cov_model5
