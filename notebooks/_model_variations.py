@@ -267,7 +267,7 @@ def model_10_wt(dim, condition_sel="wt"):
     spectral_count_xarray = spectral_count_xarray.isel(
             preyu=prey_isel) 
     y = spectral_count_xarray.sel(AP=True) - spectral_count_xarray.sel(AP=False)
-    y = y.tranpose('preyu', 'bait', 'rep')
+    y = y.transpose('preyu', 'bait', 'rep')
     y = y.values
     #Model 
     L_omega = numpyro.sample("L_omega", dist.LKJ(dim, concentration=1.0)) 
