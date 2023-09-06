@@ -259,7 +259,7 @@ def cov_model9(dim):
 
 def model_10_wt(dim):
     #Data prep
-    bait_sel = ("CBFB", "ELOB", "CUL5") # Remove LRR1
+    bait_sel = ["CBFB", "ELOB", "CUL5"] # Remove LRR1
     spectral_count_xarray = load("spectral_count_xarray.pkl")
     spectral_count_xarray = spectral_count_xarray.sel(
             condition="wt", bait=bait_sel)
