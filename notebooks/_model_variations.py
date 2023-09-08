@@ -7,8 +7,9 @@ from functools import partial
 from numpyro.infer import (
     MCMC,
     NUTS,
-    init_to_value,)
-    init_to_uniform
+    init_to_value,
+    init_to_uniform,
+    )
 import click
 import pickle as pkl
 import time
