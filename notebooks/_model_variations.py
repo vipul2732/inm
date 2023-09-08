@@ -8,6 +8,7 @@ from numpyro.infer import (
     MCMC,
     NUTS,
     init_to_value,)
+    init_to_uniform
 import click
 import pickle as pkl
 import time
@@ -329,7 +330,7 @@ _model_dispatch = {
     "model_10_wt_mock": (model_10_wt_mock, get_cov_model9_init_strategy, lambda x: int(x)),
     "model_10_vif_mock": (model_10_vif_mock, get_cov_model9_init_strategy, lambda x: int(x)),
     "model_10_wt_vif_mock": (model_10_wt_vif_mock, get_cov_model9_init_strategy, lambda x: int(x)),
-    "model_11_path_length": (model_11_path_length, get_cov_model4_init_strategy, lambda x: int(x)),
+    "model_11_path_length": (model_11_path_length, init_to_uniform, lambda x: int(x)),
         }
 
 def load(fpath):
