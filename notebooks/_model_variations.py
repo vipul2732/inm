@@ -11,6 +11,7 @@ from numpyro.infer import (
 import click
 import pickle as pkl
 import time
+import math
 import sys
 
 def eprint(*args, **kwargs):
