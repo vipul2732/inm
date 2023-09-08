@@ -278,6 +278,39 @@ def model_10_wt(dim, condition_sel="wt"):
         with numpyro.plate('bait', 3):
             dist.sample("obs", dist.MultivariateNormal(mu, scale_tril=L_omega), obs=y) 
 
+def model_11_path_length(dim):
+    N = dim
+    M = int(math.comb(N, 2))
+
+    alpha = jnp.ones(M) * 0.5
+    beta = jnp.ones(M) * 0.5
+
+    A = jnp.zeros((N, N))
+    tril_indices = jnp.tril_indices_from(A, k=-1)
+    
+    # Beta distributions ensures no negative cycles
+    edge_weight_list = numpyro.sample("w", dist.Beta(alpha, beta))
+
+    A = A.at[tril_indices].set(edge_weight_list)
+    A = jnp.where(A >= 0.5, 1., 0.)
+    A = A + A.T # Ok because diagonl is zero
+    
+    # AN tells you the number of paths of length N connecting two nodes
+    # Score with A2 
+    AN = A @ A
+
+    # Score with A3
+    AN = AN @ A
+
+    # Score with A4
+    AN = AN @ A 
+
+    # Score with A5
+    AN = AN @ A
+
+    # ...
+    
+
 model_10_vif = partial(model_10_wt, condition_sel="vif")
 model_10_mock = partial(model_10_wt, condition_sel="mock")
 model_10_wt_vif = partial(model_10_wt, condtion_sel=["wt", "vif"])
@@ -295,6 +328,7 @@ _model_dispatch = {
     "model_10_wt_mock": (model_10_wt_mock, get_cov_model9_init_strategy, lambda x: int(x)),
     "model_10_vif_mock": (model_10_vif_mock, get_cov_model9_init_strategy, lambda x: int(x)),
     "model_10_wt_vif_mock": (model_10_wt_vif_mock, get_cov_model9_init_strategy, lambda x: int(x)),
+    "model_11_path_length": (model_11_path_length, get_cov_model4_init_strategy, lambda x: int(x)),
         }
 
 def load(fpath):
