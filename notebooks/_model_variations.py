@@ -1,5 +1,6 @@
 import jax
 import jax.numpy as jnp
+from jax.tree_util import Partial
 import numpy as np
 import numpyro
 import numpyro.distributions as dist
@@ -281,27 +282,85 @@ def model_10_wt(dim, condition_sel="wt"):
         with numpyro.plate('bait', 3):
             dist.sample("obs", dist.MultivariateNormal(mu, scale_tril=L_omega), obs=y) 
 
+
+def _body_shortest_paths_up_to_N(i, v):
+    A, AN, D = v
+    # Update the distance matrix
+    D = jnp.where((AN !=0) & (D > i), i, D)
+    # 
+    AN = A @ AN
+    v = A, AN, D
+    return v
+
+
+def shortest_paths_up_to_N(A, N):
+    """
+    Given an adjacency matrix A, calculate the distance matrix D
+    of shortest paths, up to N.
+    """
+    D = jnp.where(A != 0, A, N)
+    A2 = A @ A
+    A, AN, D = jax.lax.fori_loop(2, N, _body_shortest_paths_up_to_N, (A, A2, D))
+    return D 
+
+shortest_paths_up_to_23 = Partial(shortest_paths_up_to_N, N=23)
+
 def model_11_path_length(dim):
-    N = dim
-    M = int(math.comb(N, 2))
+    # Read in spectral count data
+    with open("spectral_count_xarray.pkl", "rb") as f:
+        data = pkl.load(f)
 
-    alpha = jnp.ones(M) * 0.5
-    beta = jnp.ones(M) * 0.5
+    ELOB_index = 0
+    CUL5_index = 1
+    CBFB_index = 2
+    
+    # Represent the network
+    # Cosine Similarity
+    # Edge Sparsity
+    # Bait Prey Connectivity
+    # 
 
-    A = jnp.zeros((N, N))
+    # Composite Data arrays
+    key = jax.random.PRNGKey(13, shape=(9,))
+
+    ELOB_wt = jax.random.uniform(key[0], shape=(dim,))
+    ELOB_vif = jax.random.uniform(key[2], shape=(dim,))
+    ELOB_mock = jax.random.uniform(key[3], shape=(dim,))
+
+    CUL5_wt = jax.random.uniform(key[4], shape=(dim,))
+    CUL5_vif = jax.random.uniform(key[5], shape=(dim,))
+    CUL5_mock = jax.random.uniform(key[6], shape=(dim,))
+ 
+    CBFB_wt = jax.random.uniform(key[7], shape=(dim,))
+    CBFB_vif = jax.random.uniform(key[8], shape=(dim,))
+    CBFB_mock = jax.random.uniform(key[1], shape=(dim,))
+
+    # Model representation
+
+    m_possible_edges = int(math.comb(dim, 2))
     tril_indices = jnp.tril_indices_from(A, k=-1)
     
+    alpha = jnp.ones(m_possible_edges) * 0.5
+    beta = jnp.ones(m_possible_edges) * 0.5
+
     # Beta distributions ensures no negative cycles
     edge_weight_list = numpyro.sample("w", dist.Beta(alpha, beta))
-
+    A = jnp.zeros((N, N))
     A = A.at[tril_indices].set(edge_weight_list)
     A = jnp.where(A >= 0.5, 1., 0.)
+
+    # Shortest Path Matrix
+    D = jnp.where(A != 0, A, Dmax) 
+    Dmax = 30 # Longest possible path
+    
+
     A = A + A.T # Ok because diagonl is zero
     
     # AN tells you the number of paths of length N connecting two nodes
     # Score with A2 
     AN = A @ A
-
+   
+    
     # Score with A3
     AN = AN @ A
 
@@ -312,6 +371,8 @@ def model_11_path_length(dim):
     AN = AN @ A
 
     # ...
+
+    
     
 
 model_10_vif = partial(model_10_wt, condition_sel="vif")
