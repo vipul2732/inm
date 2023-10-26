@@ -6,6 +6,8 @@ from _BSASA_functions import *
 from _BSASA_imports import *
 from types import SimpleNamespace
 
+import numpy as np
+import json
 import pandas as pd
 import pickle as pkl
 
@@ -33,16 +35,24 @@ cullin_data.df_all = parse_spec(cullin_data.df_all)
 with open("../../notebooks/df_new.pkl", "rb") as f:
     df_new = pkl.load(f)
 
+# Replace 0s with 1s
+
 # Bait, Prey, Condition, Controls
 
 baits = set(df_new['bait'])
 rsel = [f"r{i}" for i in range(1, 5)]
 
+# Replace zeros with ones 
+##df_new[rsel] = np.where(df_new[rsel] == 0, 1, df_new[rsel])
+
 idRun = []
 idPrey = []
+idBait = []
 countPrey = []
 lenPrey = []
 
+run_name2idRun = {}
+k = 1
 # Prepare input data for HGSCore
 for i, row in df_new.iterrows():
    bait = row['bait']
@@ -51,13 +61,23 @@ for i, row in df_new.iterrows():
    aa_len = row['aa_seq_len']
    for j, replicate in enumerate(rsel):
        count = row[replicate]
-       run_id = bait + "_" + condition + "_" + str(j) 
-       idRun.append(run_id)
-       idPrey.append(prey)
-       countPrey.append(count)
-       lenPrey.append(aa_len)
+       run_name = bait + "_" + condition + "_" + str(j) 
+       if run_name not in run_name2idRun:
+           run_name2idRun[run_name] = k
+           k += 1
+       run_id = run_name2idRun[run_name]
+       # Skip zeros
+       if count != 0:
+           idRun.append(run_id)
+           idBait.append(bait)
+           idPrey.append(prey)
+           countPrey.append(count)
+           lenPrey.append(aa_len)
 
-df = pd.DataFrame({"idRun": idRun,
+with open("cullin_hgscore_idmap.json", "w") as f:
+    json.dump(run_name2idRun, f)
+
+df = pd.DataFrame({"idRun": idRun, "idBait": idBait,
     "idPrey": idPrey, "countPrey": countPrey, "lenPrey": lenPrey})
 
 df.to_csv("cullin_hgscore_input.csv", index=False)
