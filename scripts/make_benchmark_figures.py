@@ -21,6 +21,19 @@ Identifiers
 - SAINT score list
 - INM Xarray trajectory
 
+Data Structure Comparisons
+
+Trajectory to direct-matrix
+Trajectory to cocoplex-matrix
+Trajectory to biogrid dataframe
+
+Trajectory to matrix comparison
+matrix to matrix
+
+matrix vs matrix comparison
+matrix vs edge_list comparison -> matrix vs matrix
+
+
 """
 
 import sys
@@ -129,6 +142,24 @@ def reduce_biogrid(biogrid, ommitted_organisms = None):
     biogrid = biogrid[sel]
     return biogrid
 
+def biogrid2matrix(biogrid, binary=True):
+    ref_matrix = read_direct_benchmark().reference.matrix
+    ref_matrix.values = np.zeros(ref_matrix.shape, dtype=int)
+    assert ref_matrix.ndim == 2, ref_matrix.ndim
+    for i, r in biogrid.iterrows():
+        preyu = r['preyu']
+        preyv = r['preyv']
+        val = ref_matrix.sel(preyu=preyu, preyv=preyv).item()
+        val = val + 1
+        ref_matrix.loc[preyu, preyv] = val
+    ref_matrix.values = ref_matrix.values + ref_matrix.values.T
+    ref_matrix.values[np.diag_indices(len(ref_matrix))] = np.zeros(len(ref_matrix))
+    if binary:
+        ref_matrix.values = np.where(ref_matrix > 0, 1, 0)
+    return ref_matrix
+
+
+
 def read_biogrid_benchmark():
     # Drop columns by organism
     biogrid = _load_biogrid()
@@ -194,7 +225,7 @@ def save_direct_id_maps():
     pd.DataFrame({"preyu": l}).to_csv("direct_ids.csv",
         index=False, header=False)
     
-read_cococomplex_benchmark = partial(_pkl_load, path="../notebooks/cocomplex_benchmark.pkl")
+read_cocomplex_benchmark = partial(_pkl_load, path="../notebooks/cocomplex_benchmark.pkl")
 
 read_direct_benchmark = partial(_pkl_load, path="../notebooks/direct_benchmark.pkl")
 
@@ -211,19 +242,35 @@ def set_wd(path):
 
 wd = Path(".")
 
-def read_references():
+# Comparison functions
+def traj_vs_matrix(query_traj, ref_xr, compare_func, axis_name="draw"):
+    results = []
+    for label, matrix in query_traj.groupby(axis_name):
+        results.append(matrix_vs_matrix(matrix, ref_xr, compar_func))
+    return results 
+
+def matrix_vs_matrix(query_xr, ref_xr, compare_func):
+    assert np.all(query_xr.preyu == ref_xr.preyu)
+    assert np.all(query_xr.preyv == ref_xr.preyv)
+    return compare_func(query_xr, ref_xr)
+
+def matrix_vs_df(query_xr, df, colA, colB, compare_func):
+    ...
+
+def read_references(convert_biogrid_df2matrix=True, biogrid_binary=True):
     """
     Read in references with a common idmapping
     """
     biogrid = read_biogrid_benchmark()
-    direct_reference = read_direct_benchmark()
-    cocomplex_reference = read_cocomplex_benchmark()
+    direct = read_direct_benchmark()
+    cocomplex = read_cocomplex_benchmark()
     reference = SimpleNamespace()
     reference.direct_matrix = direct.reference.matrix
     reference.cocomplex_matrix = cocomplex.reference.matrix
+    if convert_biogrid_df2matrix:
+        biogrid = biogrid2matrix(biogrid, binary=biogrid_binary)
     reference.biogrid = biogrid
     return reference
-
 
 @click.command()
 def main():
