@@ -1,3 +1,30 @@
+"""
+An organized approach to scoring and sampling
+
+Scoring Functions to test
+Availible:
+- calculate path length (path term)
+- pairwise term 
+
+Terms:
+- cosine similarity term (CS)
+- path-length term (PL)
+- CS & PL 
+- GI pairwise term
+- all three
+
+
+Sampling:
+
+- 4 chains
+- 5000 draws per chain
+- Save the warmup perdiod
+
+- 1 job per chain
+SampleBatch: 
+- A collection of several jobs and chains grouped together
+"""
+
 import jax
 import jax.numpy as jnp
 from jax.tree_util import Partial
@@ -16,6 +43,7 @@ import pickle as pkl
 import time
 import math
 import sys
+import xarray as xr
 
 def eprint(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs) 
@@ -306,74 +334,68 @@ def shortest_paths_up_to_N(A, N):
 shortest_paths_up_to_23 = Partial(shortest_paths_up_to_N, N=23)
 
 def model_11_path_length(dim):
+    # Input Information
+    max_path_length = 23
     # Read in spectral count data
     with open("spectral_count_xarray.pkl", "rb") as f:
         data = pkl.load(f)
+    with open("tensor_saint_scores.pkl", "rb") as f:
+        tensor_saint_scores = pkl.load(f)
+    #Exclude prey where the Saint score is zero
+    prey_sel = ((tensor_saint_scores > 0).sum(dim = ["bait", "condition"]) > 0)
+    prey_sel = prey_sel.sortby("preyu")
+    data = data.sortby("preyu")
+    assert np.all(data.preyu.values == prey_sel.preyu.values)
+    # Select data where saint > 0
+    spectral_count_xarray_sel = data.sel(preyu=prey_sel)
+    tensor_saint_scores = tensor_saint_scores.sel(preyu=prey_sel)
+    # Change input information to jax arrays
+    saint_elob_wt = jnp.array(tensor_saint_scores.sel(bait="ELOB", condition="wt"))
+    saint_elob_vif = jnp.array(tensor_saint_scores.sel(bait="ELOB", condition="vif"))
+    saint_elob_mock = jnp.array(tensor_saint_scores.sel(bait="ELOB", condition="mock"))
 
-    ELOB_index = 0
-    CUL5_index = 1
-    CBFB_index = 2
-    
-    # Represent the network
-    # Cosine Similarity
-    # Edge Sparsity
-    # Bait Prey Connectivity
-    # 
-
-    # Composite Data arrays
-    key = jax.random.PRNGKey(13, shape=(9,))
-
-    ELOB_wt = jax.random.uniform(key[0], shape=(dim,))
-    ELOB_vif = jax.random.uniform(key[2], shape=(dim,))
-    ELOB_mock = jax.random.uniform(key[3], shape=(dim,))
-
-    CUL5_wt = jax.random.uniform(key[4], shape=(dim,))
-    CUL5_vif = jax.random.uniform(key[5], shape=(dim,))
-    CUL5_mock = jax.random.uniform(key[6], shape=(dim,))
- 
-    CBFB_wt = jax.random.uniform(key[7], shape=(dim,))
-    CBFB_vif = jax.random.uniform(key[8], shape=(dim,))
-    CBFB_mock = jax.random.uniform(key[1], shape=(dim,))
+    saint_cbfb_wt = jnp.array(tensor_saint_scores.sel(bait="ELOB", condition="wt"))
+    saint_cbfb_vif = jnp.array(tensor_saint_scores.sel(bait="ELOB", condition="vif"))
+    saint_cbfb_mock = jnp.array(tensor_saint_scores.sel(bait="ELOB", condition="mock"))
 
     # Model representation
-
+    # The dimension is determined by kj
+    #The prior edge weight is goverened by Cosine Similarity
     m_possible_edges = int(math.comb(dim, 2))
     tril_indices = jnp.tril_indices_from(A, k=-1)
-    
-    alpha = jnp.ones(m_possible_edges) * 0.5
-    beta = jnp.ones(m_possible_edges) * 0.5
-
-    # Beta distributions ensures no negative cycles
+    # Beta distribution over edge weights 
+    alpha = jnp.ones(m_possible_edges) * 0.408
+    beta = jnp.ones(m_possible_edges) * 0.116
+    #Beta distributions ensures no negative cycles
     edge_weight_list = numpyro.sample("w", dist.Beta(alpha, beta))
+
     A = jnp.zeros((N, N))
     A = A.at[tril_indices].set(edge_weight_list)
     A = jnp.where(A >= 0.5, 1., 0.)
+    #Shortest Path Matrix
 
-    # Shortest Path Matrix
-    D = jnp.where(A != 0, A, Dmax) 
-    Dmax = 30 # Longest possible path
+    D = shortest_paths_up_to_23(A)
+
+    P = D < max_path_length 
+    P = P.at[DIAG_INDICES].set(1) # Set self paths to 1 because bait are in their own
+    # Scoring - path presence
     
 
-    A = A + A.T # Ok because diagonl is zero
-    
-    # AN tells you the number of paths of length N connecting two nodes
-    # Score with A2 
-    AN = A @ A
-   
-    
-    # Score with A3
-    AN = AN @ A
+    # p(SaintScore | D)
 
-    # Score with A4
-    AN = AN @ A 
+    ##Path presence
+    ## pulldown with probability 1.
+    ##Score based on saint scores
+    #ELOB_paths = P[ELOB_index, :]
+    #CUL5_paths = P[CUL5_index, :]
+    #CBFB_paths = P[CBFB_index, :]
+    #numpyro.sample("ELOB_wt", dist.Normal(ELOB_paths, sigma),   obs=ELOB_wt)
+    #numpyro.sample("ELOB_vif", dist.Normal(ELOB_paths, sigma),  obs=ELOB_vif)
+    #numpyro.sample("ELOB_mock", dist.Normal(ELOB_paths, sigma), obs=ELOB_mock)
+    #numpyro.sample("CUL5_wt", dist.Normal(CUL5_paths, sigma),   obs=CUL5_wt)
+    #numpyro.sample("CUL5_vif", dist.Normal(CUL5_paths, sigma),  obs=CUL5_vif)
+    #numpyro.sample("CUL5_mock", dist.Normal(CUL5_paths, sigma), obs=CUL5_mock)
 
-    # Score with A5
-    AN = AN @ A
-
-    # ...
-
-    
-    
 
 model_10_vif = partial(model_10_wt, condition_sel="vif")
 model_10_mock = partial(model_10_wt, condition_sel="mock")
@@ -394,6 +416,110 @@ _model_dispatch = {
     "model_10_wt_vif_mock": (model_10_wt_vif_mock, get_cov_model9_init_strategy, lambda x: int(x)),
     "model_11_path_length": (model_11_path_length, init_to_uniform, lambda x: int(x)),
         }
+
+def model12(model_data):
+    """
+    Params: model_data
+      model_data is a place holder and passes no information
+    """
+    ## Input information
+    max_path_length = 23
+    # Read in spectral count data
+    #with open("spectral_count_xarray.pkl", "rb") as f:
+    #    data = pkl.load(f)
+    with open("direct_benchmark.pkl", "rb") as f:
+        cos_sim_matrix = pkl.load(f).prediction.cosine_similarity.matrix
+    with open("tensor_saint_scores.pkl", "rb") as f:
+        tensor_saint_scores = pkl.load(f)
+    #with open("df_new.pkl", "rb") as f:
+    #    df_new = pkl.load(f)
+    #name2uid = {r.name: r['Prey'] for i,r in df_new.iterrows()}
+    #del df_new
+    ## Indices and Uniprot IDS
+    #elob_uid = name2uid['ELOB']
+    #cbfb_uid = name2uid['PEBB']
+    #cul5_uid = name2uid['CUL5']
+    #Exclude prey where the Saint score is zero
+    #This filter results in 1879 unique prey types
+    prey_sel = ((tensor_saint_scores > 0).sum(dim = ["bait", "condition"]) > 0)
+    prey_sel = prey_sel.sortby("preyu")
+    #Change to 500 nodes
+    tensor_saint_scores = tensor_saint_scores.sortby("preyu")
+    cos_sim_matrix = cos_sim_matrix.sortby("preyu") 
+    cos_sim_matrix = cos_sim_matrix.sortby("preyv")
+    # Filter by prey_sel
+    tensor_saint_scores = tensor_saint_scores.sel(preyu=prey_sel)
+    # Reduce prey_sel to cos sim matrix index
+    prey_sel = prey_sel.sel(preyu=cos_sim_matrix.preyu)
+    prey_selv = xr.DataArray(prey_sel.values, coords={"preyv": prey_sel.preyu.values})
+    cos_sim_matrix = cos_sim_matrix.sel(preyu=prey_sel, preyv=prey_selv)
+    # Reduce to 500 nodes
+    #cos_sim_matrix = cos_sim_matrix.isel(preyu=i_sel, preyv=i_sel)
+    #tensor_saint_scores = tensor_saint_scores.isel(preyu=i_sel)
+    # Change input information to jax arrays
+    saint_elob_wt = jnp.array(tensor_saint_scores.sel(bait="ELOB", condition="wt"))
+    saint_elob_vif = jnp.array(tensor_saint_scores.sel(bait="ELOB", condition="vif"))
+    saint_elob_mock = jnp.array(tensor_saint_scores.sel(bait="ELOB", condition="mock"))
+    #  
+    saint_cbfb_wt = jnp.array(tensor_saint_scores.sel(bait="CBFB", condition="wt"))
+    saint_cbfb_vif = jnp.array(tensor_saint_scores.sel(bait="CBFB", condition="vif"))
+    saint_cbfb_mock = jnp.array(tensor_saint_scores.sel(bait="CBFB", condition="mock"))
+    #
+    saint_CUL5_wt = jnp.array(tensor_saint_scores.sel(bait="CUL5", condition="wt"))
+    saint_CUL5_vif = jnp.array(tensor_saint_scores.sel(bait="CUL5", condition="vif"))
+    saint_CUL5_mock = jnp.array(tensor_saint_scores.sel(bait="CUL5", condition="mock"))
+    assert np.all(tensor_saint_scores.preyu.values == cos_sim_matrix.preyu.values)
+    #
+    jax_cos_sim_matrix = jnp.array(cos_sim_matrix.values)
+    # Model representation
+    nnodes = len(saint_CUL5_wt) 
+    tril_indices = jnp.tril_indices(nnodes, k=-1)
+    diag_indices = np.diag_indices(nnodes)
+    elob_idx = np.where(cos_sim_matrix.preyu == 'ELOB')[0].item()  
+    cbfb_idx = np.where(cos_sim_matrix.preyu == 'PEBB')[0].item()
+    cul5_idx = np.where(cos_sim_matrix.preyu == 'CUL5')[0].item()
+    # truncate based on total number of nodes
+
+    #The prior edge weight is goverened by Cosine Similarity
+    m_possible_edges = int(math.comb(nnodes, 2))
+
+
+    # Beta distribution over edge weights 
+    alpha = jnp.ones(m_possible_edges) * 0.685 #0.408
+    beta = jnp.ones(m_possible_edges) * 1.099   #0.116
+    #Beta distributions ensures no negative cycles
+    edge_weight_list = numpyro.sample("w", dist.Beta(alpha, beta))
+    A = jnp.zeros((nnodes, nnodes))
+    A = A.at[tril_indices].set(edge_weight_list)
+    A = A + A.T  # non-negative weighted adjacency matrix with 0 diagonal.
+    # p(cos_sim | A)
+    STD2 = 0.2
+    numpyro.sample("COS_SYM1", dist.Normal(A, STD2), obs=jax_cos_sim_matrix)
+    # p(SAINT | D(A))
+    # Discritize the matrix
+    A = jnp.where(A >= 0.5, 1., 0.)
+    #Shortest Path Matrix
+    D = shortest_paths_up_to_23(A)
+    P = D < max_path_length 
+    P = P.at[diag_indices].set(1) # Set self paths to 1 because bait are in their own
+    # p(ELOB | P(A))
+    STD = 0.2
+    P = jnp.array(P, dtype=jnp.int32)
+    numpyro.sample("ELOB_WT", dist.Normal(P[elob_idx, :], STD), obs=saint_elob_wt)
+    numpyro.sample("ELOB_VF", dist.Normal(P[elob_idx, :], STD), obs=saint_elob_vif)
+    numpyro.sample("ELOB_MK", dist.Normal(P[elob_idx, :], STD), obs=saint_elob_mock)
+
+    numpyro.sample("CBFB_WT", dist.Normal(P[cbfb_idx, :], STD), obs=saint_cbfb_wt)
+    numpyro.sample("CBFB_VF", dist.Normal(P[cbfb_idx, :], STD), obs=saint_cbfb_vif)
+    numpyro.sample("CBFB_MK", dist.Normal(P[cbfb_idx, :], STD), obs=saint_cbfb_mock)
+
+    numpyro.sample("CUL5_WT", dist.Normal(P[cul5_idx, :], STD), obs=saint_CUL5_wt)
+    numpyro.sample("CUL5_VF", dist.Normal(P[cul5_idx, :], STD), obs=saint_CUL5_vif)
+    numpyro.sample("CUL5_MK", dist.Normal(P[cul5_idx, :], STD), obs=saint_CUL5_mock)
+    
+    # What to do about double counting the direct interactions?
+    numpyro.sample("COS_SYM", dist.Normal(P < 3, STD), obs=jax_cos_sim_matrix)
+
 
 def load(fpath):
     with open(fpath, 'rb') as f:
@@ -444,6 +570,10 @@ def main(model_id, rseed, model_name,model_data, num_warmup, num_samples, includ
         model_data = int(model_data)
         model = model_10_wt
         init_strategy = get_cov_model9_init_strategy(model_data)
+    elif model_name == "model12":
+        model_data = None
+        model = model12
+        init_strategy = init_to_uniform
     else:
         raise ValueError(f"Invalid {model_name}")
     extra_fields = ()
