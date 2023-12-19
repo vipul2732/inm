@@ -27,6 +27,7 @@ import scipy as sp
 # try and fit the data to a model 
 import numpyro
 import numpyro.distributions as dist
+from numpyro.infer import Predictive
 import jax
 from numpyro.contrib.funsor import config_enumerate, infer_discrete
 from numpyro.infer import NUTS, MCMC
@@ -37,8 +38,15 @@ from jax.tree_util import Partial
 import sympy as sympy
 import jax.scipy as jsp
 
+import inspect
+from collections import namedtuple
+
 import blackjax
 import blackjax.smc.resampling as resampling
+
+from numpyro.distributions.transforms import Transform
+from numpyro.distributions import constraints
+from jax.tree_util import tree_flatten, tree_unflatten
 
 # +
 # Notebook Globals
@@ -46,6 +54,7 @@ import blackjax.smc.resampling as resampling
 LOAD_APMS_CORRELATION = True
 LOAD_SHUFFLED_APMS_CORRELATION = True
 LOAD_HIV_CORRELATION = True
+SKIP_NON_CRITICAL_CELLS = True
 
 APMS_COLOR = 'blue'
 GI_COLOR = 'orange'
@@ -103,6 +112,9 @@ hiv_reference = reference_matrix.sel(preyu=shared_reference, preyv=shared_refere
 # Temporarily drop the following
 temp_drop = ["P42167", "Q14152", "Q9NY93", "Q9Y2Q9"]
 temp_reference = reference_matrix.drop_sel(preyu=temp_drop, preyv=temp_drop)
+# -
+
+hiv_reference
 
 # +
 #Get hiv df in uniprot coords
@@ -112,7 +124,7 @@ columns = [k.removesuffix(' - ESIRNA') for k in hivdf.columns]
 rows = [k.removesuffix(' - ESIRNA') for k in hivdf.index]
 
 hivdf = pd.DataFrame(hivdf.values, columns = columns, index=rows)
-
+print(hivdf)
 # -
 
 gene2uid = {}
@@ -124,12 +136,16 @@ for uid in uid2gene:
         #assert gene not in gene2uid, (gene, uid)
         gene2uid[gene] = uid
 
+print(len(gene2uid))
+
 hiv_mat = xr.DataArray(hivdf.values, coords={'preyu': hivdf.columns.values, 'preyv': hivdf.columns.values})
 gene2uid_keys = list(gene2uid.keys())
 shared_keys = set(gene2uid_keys).intersection(hiv_mat.preyu.values)
 shared_keys = list(shared_keys)
 hiv_mat = hiv_mat.sel(preyu=shared_keys, preyv=shared_keys)
 #temp_reference = temp_reference.sel(preyu=shared_keys, preyv=shared_keys)
+
+print(len(hiv_mat))
 
 hiv_uids = [gene2uid[key] for key in hiv_mat.preyu.values]
 hiv_mat = xr.DataArray(hiv_mat.values, {'preyu': hiv_uids, 'preyv': hiv_uids})
@@ -206,6 +222,8 @@ else:
     with open("xr_hiv_correlation_matrix.pkl", "rb") as f:
         hiv_corr_matrix = pkl.load(f)
 
+print(len(hiv_corr_matrix))
+
 # Ideal distribution of correlation coefficients
 nsamples = math.comb(237, 2)
 rng_key = jax.random.PRNGKey(13)
@@ -226,10 +244,11 @@ ax[0].legend()
 #plt.hist(hiv_pval_matrix.T[tril_indices], bins=100, density=density, alpha=pval_alpha)
 ax[0].set_xlabel("GI Profile Correlation Coefficient")
 ax[0].set_ylabel(ylabel)
-ax[1].scatter(hiv_corr_matrix.T[tril_indices], hiv_pval_matrix.T[tril_indices], color='k')
+#ax[1].scatter(hiv_corr_matrix.T[tril_indices], hiv_pval_matrix.T[tril_indices], color='k')
 ax[1].set_xlabel('GI Profile Correlation Coefficient')
 ax[1].set_ylabel('P-value')
 print(np.mean(x), np.min(x), np.max(x))
+plt.show()
 
 # GI Correlation Coefficient Volcano plot
 if False: # Don't run because we didn't save p-values and don't want to recompute.
@@ -321,10 +340,8 @@ plt.legend()
 plt.show()
 del y
 
-# +
 # Try mixing a Gaussian distribution and a beta distribution - beta defined from [0, 1]
-# 
-# -
+
 
 mixing_dist = dist.Categorical(probs=jnp.ones(3) / 3.)
 component_dist = dist.Normal(loc=jnp.array([-1, 1, 9]), scale=jnp.ones(3))
@@ -340,7 +357,7 @@ def two_component_gaussian_mixture_model(observed_values, n_components=2):
     mus = numpyro.sample('mu', dist.Normal(jnp.ones(2), jnp.ones(0.5)))
     #hyper_alpha = 
     #hyper_beta = 
-    sigma = numpyro.sample('sigma', dist.)
+    #sigma = numpyro.sample('sigma', dist.)
     
 
 
@@ -419,7 +436,9 @@ plt.show()
 plt.hist(hiv_mat.values[tril_indices], bins=100)
 plt.show()
 
-len(tril_indices[0])
+"""
+
+"""
 
 
 # +
@@ -442,18 +461,13 @@ mcmc.run(rng_key, x, extra_fields=('potential_energy',))
 samples = mcmc.get_samples()
 extra_fields = mcmc.get_extra_fields()
 
-# +
-
-
-numpyro_data = az.from_numpyro(
-    mcmc)
-# -
+len(samples)
 
 xtemp = np.arange(-0.5, 1.0, 0.01)
 xtemp = np.arange(0.1, 10, 0.1)
 #ytemp = sp.stats.beta(2, 5).pdf(xtemp)
 ytemp = sp.stats.gamma(1).pdf(xtemp)
-ytemp = sp.stats.norm(0, 0.001)
+#ytemp = sp.stats.norm(0, 0.001)
 #plt.plot(xtemp, sp.stats.halfnorm(0.1, 0.3).pdf(xtemp))
 plt.plot(xtemp, ytemp)
 
@@ -463,20 +477,18 @@ for i in range(1, 100, 10):
     plt.plot(x_points, y_points, label=f"DF={i}")
 plt.legend()
 plt.show()
+print("Conclusion - T distribution does not model spectral counts")
 
 plt.hist(np.ravel(stacked_spectral_counts_array), bins=100)
 plt.xlabel("Spectral Count")
 plt.ylabel("Spectral Count")
 plt.show()
-
+print("Conclusion - distribution of counts is not Gaussian")
 
 """
-Do the Null Mixture modeling exercise
+- Ignacia: Maybe try MIC
 
-1. Define the custom histogram distribution
-2. Implement the mixture model
-3. Sample
-4. Compare 
+-
 """
 
 # +
@@ -499,6 +511,9 @@ else:
 
     #with open("shuffled_apms_correlation_matrix.pkl", "wb") as f:
         #pkl.dump(shuffled_apms_correlation_matrix, f)
+# -
+
+print(len(shuffled_apms_correlation_matrix))
 
 
 # +
@@ -546,12 +561,12 @@ def cauchy_sampler(key, loc=0, scale=cauchy_scale):
 def cauchy_pdf(x, loc=0, scale=cauchy_scale):
     return jax.scipy.stats.cauchy.pdf(x, loc=loc, scale=scale)
 
-x = apms_correlation_matrix.T.values[apms_tril_indices]
+flattened_apms = apms_correlation_matrix.T.values[apms_tril_indices]
 nbins = 500
 alpha = 0.5
 use_dens = True
 
-bin_heights, bin_edges, patches = plt.hist(x, label='Not shuffled', 
+bin_heights, bin_edges, patches = plt.hist(flattened_apms, label='Not shuffled', 
                         alpha=alpha, bins=nbins, density=use_dens)
 bin_heights, bin_edges, patches = plt.hist(shuffled_apms_correlation_matrix.T[apms_tril_indices][0:2000000], 
          bins=nbins, label="Shuffled", alpha=alpha, density=use_dens)
@@ -583,15 +598,6 @@ linspace = np.arange(-0.4, 1.0, 0.01)
 
 #shuffled_pdf = Partial(piecewise_constant_pdf, n_bins=len(bin_heights), bin_edges=bin_edges,
 #                      bin_heights=bin_heights)
-
-# +
-x = shuffled_apms_correlation_matrix.T[tril_indices]
-thresh = 0.5
-
-x_real = np.ravel(apms_correlation_matrix.T[tril_indices])
-index = x_real > thresh
-y = x_real[index]
-y = np.array(y)
 # -
 
 mus = np.arange(0.25, 0.75, 0.05)
@@ -607,8 +613,6 @@ plt.xlim(-1, 1)
 plt.show()
 
 
-# ?plt.hist
-
 # +
 # Direct sampling
 def direct_sampler_from_histogram(counts, bin_edges, key, num_samples):
@@ -622,23 +626,39 @@ def direct_sampler_from_histogram(counts, bin_edges, key, num_samples):
 epsilon = 0
 counts = bin_heights + epsilon
 num_samples = 100000
+alpha_plot = 0.5
 direct_samples = direct_sampler_from_histogram(counts, bin_edges,
             jax.random.PRNGKey(0), num_samples = num_samples)
 
 nbins=50
 plt.hist(
-direct_samples, bins=nbins, label='Sampled values', alpha=alpha,
+direct_samples, bins=nbins, label='Sampled values', alpha=alpha_plot,
     density=use_dens)
-plt.hist(
-    np.ravel(shuffled_apms_correlation_matrix.T[tril_indices])[0:num_samples],
-    bins=nbins, alpha=alpha, label='Observed values', density=use_dens)
+plt.hist(flattened_shuffled_apms[0:num_samples],
+    bins=nbins, alpha=alpha_plot, label='Observed values', density=use_dens)
+    
 x = np.arange(-0.2, 1.0, 0.001)
+    
 plt.plot(x, shuffled_pdf(x), label="Empirical PDF")
 plt.xlabel('AP-MS Correlation')
 plt.ylabel("Probability Density")
 plt.title("Distribution of Non interacting correlations\nMethod of direct sampling")
 plt.legend()
 plt.show()
+# -
+
+mini = apms_correlation_matrix.values[0:5, 0:2]
+
+np.random.shuffle(mini)
+
+# +
+
+mini = jax.random.permutation(jax.random.PRNGKey(13), mini, independent=True)
+# -
+
+plt.plot(np.mean(apms_correlation_matrix.values, axis=0),
+        np.mean(np.array(jax.random.permutation(jax.random.PRNGKey(13),
+                apms_correlation_matrix.values, axis=0)), axis=0), 'k.', alpha=0.1)
 
 
 # +
@@ -648,12 +668,11 @@ plt.show()
 # 4. Implement a Custom PDF
 
 class Histogram(dist.Distribution):
-    def __init__(self, bin_heights, bin_edges, normalized=False, validate_args=None):
+    def __init__(self, a, bins, density=True, validate_args=None):
+        bin_heights, bin_edges = np.histogram(a, bins=bins, density=density)
         bin_heights = jnp.array(bin_heights)
         bin_edges = jnp.array(bin_edges)
-        assert len(bin_heights) == len(bin_edges) - 1
-        if not normalized:
-            bin_heights = bin_heights / jnp.sum(bin_heights)
+
         self.probs = bin_heights
         self.n_bins = len(bin_heights)
         self.bin_edges = bin_edges
@@ -682,9 +701,6 @@ class Histogram(dist.Distribution):
     def log_prob(self, value):
         return jnp.log(self.pdf(value))
     
-
-
-
 def null_model(null_bin_heights, bin_edges):
     #probs = null_bin_heights / jnp.sum(null_bin_heights)
     #apms_corr_coef = numpyro.sample('r', dist.Normal(0, 1))
@@ -699,7 +715,7 @@ hyper_mu_mu = 0.5
 hyper_mu_sigma = 0.03
 hyper_sigma_lambda = 10
 @config_enumerate
-def mixture_model(null_bin_heights, bin_edges, observed_data,
+def mixture_model(null_obs, n_null_bins, observed_data,
                  hyper_mu_mu, hyper_mu_sigma, hyper_sigma_lambda, alpha, beta):
     #probs = numpyro.sample('p', dist.Dirichlet(jnp.array([1., 1.])))
 
@@ -723,7 +739,7 @@ def mixture_model(null_bin_heights, bin_edges, observed_data,
                 categorical,
                 component_distributions=[
                     #dist.Normal(-0.1, 0.1),
-                    Histogram(null_bin_heights, bin_edges),
+                    Histogram(null_obs, bins=n_null_bins), # density is True
                     #dist.Normal(0.17, 0.22)
                     #dist.Normal(0.18, 0.22)
                     dist.Normal(mu, sigma)
@@ -734,7 +750,7 @@ def mixture_model(null_bin_heights, bin_edges, observed_data,
                 categorical,
                 component_distributions=[
                     #dist.Normal(-0.1, 0.1),
-                    Histogram(null_bin_heights, bin_edges),
+                    Histogram(null_obs, bins=n_null_bins),
                     #dist.Normal(0.17, 0.22)
                     #dist.Normal(0.18, 0.22)
                     dist.Normal(mu, sigma)
@@ -746,10 +762,6 @@ def mixture_model(null_bin_heights, bin_edges, observed_data,
 #nuts_kernel = NUTS(null_model)
 # -
 
-dist.Exponential(rate=2).mean
-
-dist.Exponential(hyper_sigma_lambda).mean
-
 linspace = np.arange(-1, 1, 0.01)
 plt.plot(linspace, sp.stats.norm.pdf(linspace, hyper_mu_mu, hyper_mu_sigma), label=f"Prior Mu: {hyper_mu_mu}, {hyper_mu_sigma}")
 plt.plot(linspace, sp.stats.expon(scale=1/hyper_sigma_lambda).pdf(linspace), label=f"Prio sigma: prior mean {np.round(1/hyper_sigma_lambda, 3)}")
@@ -757,25 +769,34 @@ plt.legend()
 plt.ylabel("PDF")
 
 # +
-nsamples=10000
+nsamples=10_000
+n_obs = 100_000
+alpha = 2
+beta = 6
+n_null_obs = 50_000
+n_null_bins = 1_000
 
+# Important to not use density, Histogram class will take care of normalization
+#bin_heights, bin_edges, patches = plt.hist(shuffled_apms_correlation_matrix.T[apms_tril_indices][0:n_hist_obs],
+#        bins=n_hist_bins, density=False)
 nuts_kernel = NUTS(mixture_model)
 mcmc = MCMC(nuts_kernel, num_warmup=10000, num_samples=nsamples)
 mcmc.run(jax.random.PRNGKey(0), 
-         null_bin_heights=bin_heights,
-         bin_edges=bin_edges, observed_data=x[0:n_obs], hyper_mu_mu=hyper_mu_mu, hyper_mu_sigma=hyper_mu_sigma,
-         hyper_sigma_lambda=hyper_sigma_lambda)
+         null_obs=shuffled_apms_correlation_matrix.T[apms_tril_indices][0:n_null_obs],
+         n_null_bins=n_null_bins, observed_data=flattened_apms[0:n_obs], hyper_mu_mu=hyper_mu_mu, hyper_mu_sigma=hyper_mu_sigma,
+         hyper_sigma_lambda=hyper_sigma_lambda, alpha=alpha, beta=beta)
 samples = mcmc.get_samples()
 
 predictive = Predictive(mixture_model, num_samples=5000)
-y_prior_pred = predictive(rng_key, bin_heights, bin_edges, observed_data=None,
+y_prior_pred = predictive(rng_key, shuffled_apms_correlation_matrix.T[apms_tril_indices][0:n_null_obs],
+                         n_null_bins, observed_data=None,
                          hyper_mu_mu=hyper_mu_mu, hyper_mu_sigma=hyper_mu_sigma, 
-                         hyper_sigma_lambda=hyper_sigma_lambda)
+                         hyper_sigma_lambda=hyper_sigma_lambda, alpha=alpha, beta=beta)
 
 predictive = Predictive(mixture_model, num_samples=5000, posterior_samples=samples)
-y_post_pred = predictive(rng_key, bin_heights, bin_edges, observed_data=None,
+y_post_pred = predictive(rng_key, shuffled_apms_correlation_matrix.T[apms_tril_indices][0:n_null_obs], n_null_bins, observed_data=None,
                          hyper_mu_mu=hyper_mu_mu, hyper_mu_sigma=hyper_mu_sigma, 
-                         hyper_sigma_lambda=hyper_sigma_lambda)
+                         hyper_sigma_lambda=hyper_sigma_lambda, alpha=alpha, beta=beta)
 
 
 # -
@@ -786,49 +807,424 @@ def distplot(y_prior_pred, y_post_pred, x, plot_prior=True, n_obs=5000):
     if plot_prior:
         plt.hist(y_prior_pred['obs'], bins=bins, alpha=alpha, label="Prior predictive", density=True)
     plt.hist(y_post_pred['obs'], bins=bins, alpha=alpha, label="Posterior predictive", density=True)
-    plt.hist(x[0:n_obs], bins=bins, alpha=alpha, label="Observed values", density=True)
+    plt.hist(flattened_apms[0:n_obs], bins=bins, alpha=alpha, label=f"Observed values", density=True)
     plt.ylabel("Probability density")
     plt.xlabel("AP-MS pearson R")
     plt.legend()
     plt.show()
 distplot(y_prior_pred, y_post_pred, x)
 
+HyperPriors = namedtuple("HyperPriors", "mu_mu sigma_lambda mu_sigma alpha beta")
+default_hyper_priors = HyperPriors(0.195, 200, 0.01, 1.5, 8)
 
-def sample_model2():
-    hyper_mu_mu = 0.195
-    hyper_sigma_lambda = 200#100
-    hyper_mu_sigma = 0.01
-    nsamples=10000
-    #alpha = 1
-    alpha = 2#2#2#1
-    beta = 6#8#7#9#5#10
-    nuts_kernel = NUTS(mixture_model)
-    mcmc = MCMC(nuts_kernel, num_warmup=10000, num_samples=nsamples)
-    mcmc.run(jax.random.PRNGKey(0), 
-             null_bin_heights=bin_heights,
-             bin_edges=bin_edges, observed_data=x[0:n_obs], hyper_mu_mu=hyper_mu_mu, hyper_mu_sigma=hyper_mu_sigma,
-             hyper_sigma_lambda=hyper_sigma_lambda, alpha=alpha, beta=beta)
+
+def sample_model2(
+    shuffled_apms_matrix,
+    flattened_apms,
+    n_obs,
+    n_null_bins,
+    n_null_obs,
+    hyper_priors : HyperPriors,
+    num_samples : int =10_000,
+    num_warmup : int = 5_000,
+    n_predictive_samples = 5_000,
+    rng_key = jax.random.PRNGKey(0),
+    numpyro_model=mixture_model):
+    """
+    Perform sampling and prior predictive checks to construct Bayesian data likelihood using
+    mixture model 2
+    """
+    
+    # Unpack hyper priors
+    hyper_mu_mu, hyper_sigma_lambda, hyper_mu_sigma, alpha, beta = hyper_priors
+    
+    # Define the histogram
+    apms_tril_indices = jnp.tril_indices_from(shuffled_apms_matrix, k=-1)
+    #bin_heights, bin_edges, patches = plt.hist(shuffled_apms_matrix.T[apms_tril_indices][0:n_shuffled_hist_obs],
+    #                        bins=n_hist_bins)
+    anull = shuffled_apms_correlation_matrix.T[apms_tril_indices][0:n_null_obs]
+    
+    nuts_kernel = NUTS(numpyro_model)
+    mcmc = MCMC(nuts_kernel, num_warmup=num_warmup, num_samples=num_samples)
+    mcmc.run(rng_key, 
+             null_obs=anull,
+             n_null_bins=n_null_bins,
+             observed_data=flattened_apms[0:n_obs],
+             hyper_mu_mu=hyper_mu_mu,
+             hyper_mu_sigma=hyper_mu_sigma,
+             hyper_sigma_lambda=hyper_sigma_lambda,
+             alpha=alpha, 
+             beta=beta)
     samples = mcmc.get_samples()
 
-    predictive = Predictive(mixture_model, num_samples=5000)
-    y_prior_pred = predictive(rng_key, bin_heights, bin_edges, observed_data=None,
+    predictive = Predictive(mixture_model, num_samples=n_predictive_samples)
+    y_prior_pred = predictive(rng_key, anull, n_null_bins, observed_data=None,
                              hyper_mu_mu=hyper_mu_mu, hyper_mu_sigma=hyper_mu_sigma, 
                              hyper_sigma_lambda=hyper_sigma_lambda, alpha=alpha, beta=beta)
 
-    predictive = Predictive(mixture_model, num_samples=5000, posterior_samples=samples)
-    y_post_pred = predictive(rng_key, bin_heights, bin_edges, observed_data=None,
+    predictive = Predictive(mixture_model, num_samples=n_predictive_samples, posterior_samples=samples)
+    y_post_pred = predictive(rng_key, anull, n_null_bins, observed_data=None,
                              hyper_mu_mu=hyper_mu_mu, hyper_mu_sigma=hyper_mu_sigma, 
                              hyper_sigma_lambda=hyper_sigma_lambda, alpha=alpha, beta=beta)
+    
     return mcmc, samples, y_prior_pred, y_post_pred
-mcmc2, samples2, ypp2, ypP2 = sample_model2()
-
-scale = 1/250
-plt.plot(np.arange(-1, 1, 0.01), sp.stats.expon(scale=scale).pdf(np.arange(-1, 1, 0.01)),
-        label=f'Exponential PDF: Rate={1/scale}: mean {scale}')
-plt.legend()
 
 
-plt.plot(np.arange(0, 1, 0.01), sp.stats.beta(2, 3).pdf(np.arange(0, 1, 0.01)))
+def general_sampling_helper():
+    """
+    model : numpyro model
+    rng_key : random number generator for sampling
+    do_prior_pred : bool do prior predictive check
+    do_post_pred : bool do posterior predictive check
+    
+    num_samples : int number of mcmc samples
+    num_warmup : int number of warmup chains
+    
+    
+    """
+
+
+# +
+f = sample_model2
+
+mcmc2, samples2, prior_pred, post_pred = f(
+    shuffled_apms_correlation_matrix,
+    flattened_apms,
+    n_obs=100_000,
+    n_null_bins=200,
+    n_null_obs=50_000,
+    hyper_priors=default_hyper_priors, num_warmup=500, num_samples=2000)
+# -
+
+#debug_log_prob_scale(bin_edges, bin_heights)
+fig, ax = plt.subplots(1, 2)
+example_null_hist = Histogram(shuffled_apms_correlation_matrix.T[apms_tril_indices][0:n_null_obs],
+                             bins=200)
+xtemp = np.arange(0, 0.4, 0.001)
+ax[0].plot(xtemp, example_null_hist.pdf(xtemp), label="Histogram PDF")
+a, b, c = ax[0].hist(shuffled_apms_correlation_matrix.T[apms_tril_indices][0:500_000], density=True, bins=1000)
+ax[0].legend()
+xtemp = np.arange(0.15, 0.25, 0.005)
+ax[1].plot(xtemp, example_null_hist.log_prob(xtemp))
+ax[1].plot(xtemp, dist.Normal(0.2, 0.005).log_prob(xtemp))
+
+
+xtemp
+
+
+# +
+def debug_log_prob_scale(anull, bins):
+    xtemp = np.arange(-1, 1, 0.01)
+    y1 = Histogram(anull, bins).log_prob(xtemp)
+    y2 = dist.Normal(0.21, 0.005).log_prob(xtemp)
+    plt.plot(xtemp, y1, label="Hist log prob")
+    plt.plot(xtemp, y2, label="Normal Log Prob")
+    y3 = sp.stats.norm(0.21, 0.005).logpdf(xtemp)
+    plt.plot(xtemp, y3, label="Scipy Normal log prob")
+    plt.legend()
+    
+debug_log_prob_scale(shuffled_apms_correlation_matrix.T[apms_tril_indices][0:n_null_obs], n_null_bins)
+# -
+
+mcmc2.print_summary()
+
+sig = inspect.signature(f)
+Params = namedtuple("Params", tuple(sig.parameters))
+params = Params(**sig.parameters)
+
+# +
+fig, axs = plt.subplots(2, 2)
+def _1(ax, hp: HyperPriors, prior_pred_obs = None, post_pred_obs = None, nbins=100):
+    scale = 1/hp.sigma_lambda
+    ax.set_title("Exponential PDF")
+    ax.set_xlabel("Sigma")
+    xtemp = np.arange(0, 1, 0.01)
+    ax.plot(np.arange(0, 1, 0.01), sp.stats.expon(scale=scale).pdf(xtemp),
+            label=f'Rate={1/scale}: mean {scale}')
+    if prior_pred_obs is not None:
+        ax.hist(prior_pred_obs, bins=nbins, label="Prior pred", density=True)
+    ax.legend()
+    
+
+ax = axs[0, 0]
+_1(ax,default_hyper_priors, prior_pred['sg'])
+
+def _2(ax, hp, prior_pred_obs = None, nbins=100):
+    xtemp = np.arange(-0.2, 1.2, 0.01)
+    y = sp.stats.norm(loc=hp.mu_mu, scale=hp.mu_sigma).pdf(xtemp)
+    ax.plot(xtemp, y, label=f"mu: {(hp.mu_mu)}, sg: {(hp.mu_sigma)}")
+    ax.set_title("Normal PDF")
+    ax.set_xlabel("mu")
+    ax.legend()
+    if prior_pred_obs is not None:
+        ax.hist(prior_pred_obs, bins=nbins, density=True)
+    
+    
+    
+ax = axs[0, 1]
+_2(ax, default_hyper_priors, prior_pred["mu"])
+ax = axs[1, 0]
+def _3(ax, hp, prior_pred_obs = None):
+    xtemp = np.arange(0, 1, 0.01)
+    y = sp.stats.beta(hp.alpha, hp.beta).pdf(xtemp)
+    ax.plot(xtemp, y)
+    ax.set_xlabel("pi_T")
+    ax.set_title("Beta distribution")
+    if prior_pred_obs is not None:
+        ax.hist(prior_pred_obs, bins=nbins, density=True)
+_3(ax, default_hyper_priors, prior_pred['pT'])
+
+
+plt.tight_layout()
+# -
+
+default_hyper_priors
+
+
+# Plot the prior predictive distribution
+# Pathological model
+def plot_pred(ax, n_obs, apms_obs, prior_pred, nbins=100, alpha_plot=0.5, label1="Prior"):
+    ax.hist(prior_pred['obs'], bins=nbins, density=True, label=label1 + " predictive", alpha=alpha_plot)
+    ax.hist(apms_obs[0:n_obs], bins=nbins, density=True, label="Observed", alpha=alpha_plot)
+    ax.legend()
+fig, ax = plt.subplots(1, 2)
+plot_pred(ax[0], n_obs, flattened_apms, prior_pred)
+plot_pred(ax[1], n_obs, flattened_apms, post_pred, label1="Posterior")
+
+# +
+improved_hyper_priors = HyperPriors(0.30, 10, 0.1, 4, 6)
+
+mcmc2, samples2, prior_pred, post_pred = sample_model2(
+    shuffled_apms_correlation_matrix,
+    flattened_apms,
+    n_obs=1_000_000,
+    n_null_bins=1000,
+    n_null_obs=50_000,
+    hyper_priors=improved_hyper_priors, num_warmup=1000, num_samples=10_000)
+# -
+
+mcmc2.print_summary()
+
+fig, ax = plt.subplots(1, 3)
+_1(ax[0], improved_hyper_priors, prior_pred['sg'])
+#_1(ax[0, 1], improved_hyper_priors, samples2['sg'])
+_2(ax[1], improved_hyper_priors, prior_pred['mu'])
+_3(ax[2], improved_hyper_priors, prior_pred['pT'])
+#ax[0].hist(samples2['sg'], label='post', density=True)
+ax[0].vlines(np.mean(samples2['sg']), 0, 1, color='k')
+ax[1].vlines(np.mean(samples2['mu']), 0, 4, color='k')
+ax[2].vlines(np.mean(samples2['pT']), 0, 4, color='k')
+#ax[1].hist(samples2['mu'], label='post', density=True)
+#ax[2].hist(samples2['pT'], label='post', density=True)
+plt.tight_layout()
+
+plt.hist(samples2['mu'], bins=100)
+plt.show()
+
+fig, ax = plt.subplots(1, 2)
+plot_pred(ax[0], n_obs, flattened_apms, prior_pred)
+plot_pred(ax[1], n_obs, flattened_apms, post_pred, label1="Posterior")
+
+"""
+Mutual information criteria
+
+
+
+
+"""
+
+# +
+MatrixModelHP = namedtuple("MatrixModelHP", "")
+
+def matrix_model(D, hp):
+    """
+    D: observed data for the likelihood
+    hp: model hyperparameters
+    nnodes: int - number of nodes in the matrix
+    """
+    
+    nnodes, _ = apms_similarity_matrix.shape
+    n_edges = math.comb(nnodes, 2)
+    apms_tril_indices = jnp.tril_indices(nnodes, k=-1)
+    
+    # Prior model density
+    Aij = numpyro.sample("Aij", dist.Beta(hp.Aij.alpha, hp.Aij.beta, event_shape=(n_edges)))
+    
+    a = numpyro.sample('a', dist.Normal(0.23, 0.21), event_shape=(n_edges))
+    b = numpyro.sample('b', null_dist)
+    #d = Aij * a + (1-Aij) * b
+    
+    numpyro.sample("d", dist.Normal(Aij * a + (1-Aij) * b, 0.01), obs=obs)
+    
+    
+    
+null_dist = Histogram(shuffled_apms_correlation_matrix.T[apms_tril_indices][0:100_000], 500)
+kernal = NUTS(matrix_model)
+    
+# -
+
+plt.hist(null_dist.sample(rng_key, sample_shape=(1000,)), bins=100)
+plt.show()
+
+# ?Histogram
+
+jnp.tril_indices(4, k=-1)
+
+# +
+# Sampling 3 replaces the Normal Distribution with a Beta distribution
+
+alpha = 1
+beta = 10
+hyper_mu_mu = 0.5
+hyper_mu_sigma = 0.03
+hyper_sigma_lambda = 10
+@config_enumerate
+def mixture_model_beta(null_obs, n_null_bins, observed_data,
+                 hyper_mu_mu, hyper_mu_sigma, hyper_sigma_lambda, alpha, beta):
+    """
+    Similiar to the above mixture model except a Beta mixture is used
+    - Justification: Assymetry
+    - Bounded between 0 and 1
+    - 
+    """
+    #probs = numpyro.sample('p', dist.Dirichlet(jnp.array([1., 1.])))
+
+    pT = numpyro.sample('pT', dist.Beta(alpha, beta))
+    pF = 1 - pT
+    #apms_corr_coef = numpyro.sample('r', dist.Uniform(low=-1, high=1))
+    #mu = numpyro.sample('mu', dist.Normal(hyper_mu_mu, hyper_mu_sigma))
+    #sigma = numpyro.sample('sg', dist.Exponential(hyper_sigma_lambda))
+    a = numpyro.sample('a', dist.Uniform(1, 4))
+    b = numpyro.sample('b', dist.Uniform(1, 4))
+    
+    #weight = numpyro.sample('w', dist.Uniform(0, 1))
+    # Mixture model
+    #r_spurious = numpyro.sample()
+    
+    # r ~ (1-w)
+    categorical = dist.Categorical(jnp.array([pF, pT]))
+    # Mixing distribution
+    assignment = numpyro.sample('assignment', categorical)
+    
+    # Do an affine transformation to provide a real valued support
+    causal_dist = dist.TransformedDistribution(dist.Beta(a, b), dist.transforms.AffineTransform(0, 1))
+    #null_dist = Histogram(null_obs, n_null_bins)
+    causal_dist = dist.Beta(1, 1)
+    null_dist = dist.Beta(1, 2)
+    
+    if observed_data is not None:
+        with numpyro.plate('data', len(observed_data)):
+            numpyro.sample('obs', dist.MixtureGeneral(
+                categorical,
+                component_distributions=[
+                    null_dist, # density is True
+                    causal_dist
+                ]
+            ), obs=observed_data)
+    else:
+        numpyro.sample('obs', dist.MixtureGeneral(
+                categorical,
+                component_distributions=[
+                    null_dist,
+                    causal_dist
+                ]
+            ), obs=observed_data)
+
+
+# +
+# Sampling 3 replaces the Normal Distribution with a Beta distribution
+
+alpha = 1
+beta = 10
+hyper_mu_mu = 0.5
+hyper_mu_sigma = 0.03
+hyper_sigma_lambda = 10
+@config_enumerate
+def mixture_model_beta(null_obs, n_null_bins, observed_data,
+                 hyper_mu_mu, hyper_mu_sigma, hyper_sigma_lambda, alpha, beta):
+    """
+    Similiar to the above mixture model except a Beta mixture is used
+    - Justification: Assymetry
+    - Bounded between 0 and 1
+    - 
+    """
+    #probs = numpyro.sample('p', dist.Dirichlet(jnp.array([1., 1.])))
+
+    pT = numpyro.sample('pT', dist.Beta(alpha, beta))
+    pF = 1 - pT
+    #apms_corr_coef = numpyro.sample('r', dist.Uniform(low=-1, high=1))
+    #mu = numpyro.sample('mu', dist.Normal(hyper_mu_mu, hyper_mu_sigma))
+    #sigma = numpyro.sample('sg', dist.Exponential(hyper_sigma_lambda))
+    a = numpyro.sample('a', dist.Uniform(1, 4))
+    b = numpyro.sample('b', dist.Uniform(1, 4))
+    
+    #weight = numpyro.sample('w', dist.Uniform(0, 1))
+    # Mixture model
+    #r_spurious = numpyro.sample()
+    
+    # r ~ (1-w)
+    categorical = dist.Categorical(jnp.array([pF, pT]))
+    # Mixing distribution
+    assignment = numpyro.sample('assignment', categorical)
+    
+    # Do an affine transformation to provide a real valued support
+    causal_dist = dist.TransformedDistribution(dist.Beta(a, b), dist.transforms.AffineTransform(0, 1))
+    #null_dist = Histogram(null_obs, n_null_bins)
+    causal_dist = dist.Beta(1, 1)
+    null_dist = dist.Beta(1, 2)
+    
+    
+    
+# -
+
+
+
+# +
+"""
+a ~ Null
+b ~ Beta(alpha, beta)
+c = (1-pi) * a + pi * b
+
+numpyro.sample(dist.No)
+
+"""
+
+
+# -
+
+samples2
+
+
+class A(Transform):
+    ...
+
+
+"""
+Goal is to have a mixture model with some assymetry
+
+
+
+
+"""
+
+xtemp = np.arange(0, 10, 0.01)
+plt.plot(xtemp, np.exp(dist.Exponential(1).log_prob(xtemp)))
+
+# +
+improved_hyper_priors = HyperPriors(0.30, 10, 0.1, 4, 6)
+
+mcmc2, samples2, prior_pred, post_pred = sample_model2(
+    shuffled_apms_correlation_matrix,
+    flattened_apms,
+    n_obs=1_000_000,
+    n_null_bins=1000,
+    n_null_obs=50_000,
+    hyper_priors=improved_hyper_priors, num_warmup=500, num_samples=1000,
+    numpyro_model=mixture_model_beta)
+# -
+
+fig, ax = plt.subplots()
+plot_pred(ax, n_obs, flattened_apms, prior_pred)
 
 mcmc2.print_summary()
 
@@ -838,8 +1234,6 @@ plt.hist(np.array(ypP2['obs']), bins=100, alpha=0.5, density=True, label='Predic
 plt.hist(np.array(x[0:100000]), bins=100, alpha=0.5, density=True, label='True')
 plt.legend()
 plt.show()
-
-
 
 xtemp = np.arange(-0.6, 1.0, 0.01)
 plt.plot(xtemp, Histogram(bin_heights, bin_edges).log_prob(xtemp))
@@ -860,8 +1254,6 @@ distplot(ypp2, ypP2, x, plot_prior=False, n_obs=50000)
 plt.vlines
 # -
 
-
-
 fig, ax = plt.subplots(1, 5)
 for i, key in enumerate(y_prior_pred.keys()):
     ax[i].hist(np.array(y_prior_pred[key]))
@@ -869,15 +1261,9 @@ for i, key in enumerate(y_prior_pred.keys()):
 plt.tight_layout()
 plt.show()
 
-x[0:2]
-
-y_prior_pred['obs']
-
 predictive = Predictive(mixture_model, num_samples=n_predictive_samples, posterior_samples=samples)
 y_pred_post = predictive(rng_key, bin_heights, bin_edges, x[0:n_obs],
                           hyper_mu_mu, hyper_mu_sigma, hyper_sigma_lambda)["obs"]
-
-help(predictive)
 
 plt.hist(np.ravel(y_pred_post), bins=100)
 plt.show()
@@ -895,8 +1281,6 @@ plt.plot(linspace, joint_pdf(linspace, 0.57, 0.51, 0.23, bin_heights, bin_edges)
 plt.plot(linspace, np.exp(Histogram(bin_heights, bin_edges).log_prob(linspace)))
 
 mcmc.print_summary()
-
-
 
 values = dist.MixtureGeneral(
             dist.Categorical(jnp.array([0.0, 1.0])),
