@@ -405,17 +405,6 @@ model_10_vif_mock = partial(model_10_wt, condition_sel=["vif", "mock"])
 model_10_wt_vif_mock = partial(model_10_wt,
     condition_sel=["wt", "vif", "mock"])
 
-#Keys are model name, values are model_func, init_func pairs
-_model_dispatch = {
-    "model_10_wt": (model_10_wt, get_cov_model9_init_strategy, lambda x: int(x)),
-    "model_10_vif": (model_10_vif, get_cov_model9_init_strategy, lambda x: int(x)),
-    "model_10_mock": (model_10_mock, get_cov_model9_init_strategy, lambda x: int(x)),
-    "model_10_wt_vif": (model_10_wt_vif, get_cov_model9_init_strategy, lambda x: int(x)),
-    "model_10_wt_mock": (model_10_wt_mock, get_cov_model9_init_strategy, lambda x: int(x)),
-    "model_10_vif_mock": (model_10_vif_mock, get_cov_model9_init_strategy, lambda x: int(x)),
-    "model_10_wt_vif_mock": (model_10_wt_vif_mock, get_cov_model9_init_strategy, lambda x: int(x)),
-    "model_11_path_length": (model_11_path_length, init_to_uniform, lambda x: int(x)),
-        }
 
 def model12(model_data):
     """
@@ -479,11 +468,8 @@ def model12(model_data):
     cbfb_idx = np.where(cos_sim_matrix.preyu == 'PEBB')[0].item()
     cul5_idx = np.where(cos_sim_matrix.preyu == 'CUL5')[0].item()
     # truncate based on total number of nodes
-
     #The prior edge weight is goverened by Cosine Similarity
     m_possible_edges = int(math.comb(nnodes, 2))
-
-
     # Beta distribution over edge weights 
     alpha = jnp.ones(m_possible_edges) * 0.685 #0.408
     beta = jnp.ones(m_possible_edges) * 1.099   #0.116
@@ -516,16 +502,238 @@ def model12(model_data):
     numpyro.sample("CUL5_WT", dist.Normal(P[cul5_idx, :], STD), obs=saint_CUL5_wt)
     numpyro.sample("CUL5_VF", dist.Normal(P[cul5_idx, :], STD), obs=saint_CUL5_vif)
     numpyro.sample("CUL5_MK", dist.Normal(P[cul5_idx, :], STD), obs=saint_CUL5_mock)
-    
     # What to do about double counting the direct interactions?
     numpyro.sample("COS_SYM", dist.Normal(P < 3, STD), obs=jax_cos_sim_matrix)
 
+def model13(model_data):
+    """
+    Params: model_data
+      model_data is a place holder and passes no information
+
+
+    Model:
+
+      w ~ Beta(alpha, beta)  prior density of edges
+
+    """
+    ## Input information
+    max_path_length = 23
+    # Read in spectral count data
+    #with open("spectral_count_xarray.pkl", "rb") as f:
+    #    data = pkl.load(f)
+    with open("direct_benchmark.pkl", "rb") as f:
+        cos_sim_matrix = pkl.load(f).prediction.cosine_similarity.matrix
+    with open("tensor_saint_scores.pkl", "rb") as f:
+        tensor_saint_scores = pkl.load(f)
+    #with open("df_new.pkl", "rb") as f:
+    #    df_new = pkl.load(f)
+    #name2uid = {r.name: r['Prey'] for i,r in df_new.iterrows()}
+    #del df_new
+    ## Indices and Uniprot IDS
+    #elob_uid = name2uid['ELOB']
+    #cbfb_uid = name2uid['PEBB']
+    #cul5_uid = name2uid['CUL5']
+    #Exclude prey where the Saint score is zero
+    #This filter results in 1879 unique prey types
+    prey_sel = ((tensor_saint_scores > 0).sum(dim = ["bait", "condition"]) > 0)
+    prey_sel = prey_sel.sortby("preyu")
+    #Change to 500 nodes
+    tensor_saint_scores = tensor_saint_scores.sortby("preyu")
+    cos_sim_matrix = cos_sim_matrix.sortby("preyu") 
+    cos_sim_matrix = cos_sim_matrix.sortby("preyv")
+    # Filter by prey_sel
+    tensor_saint_scores = tensor_saint_scores.sel(preyu=prey_sel)
+    # Reduce prey_sel to cos sim matrix index
+    prey_sel = prey_sel.sel(preyu=cos_sim_matrix.preyu)
+    prey_selv = xr.DataArray(prey_sel.values, coords={"preyv": prey_sel.preyu.values})
+    cos_sim_matrix = cos_sim_matrix.sel(preyu=prey_sel, preyv=prey_selv)
+    # Reduce to 500 nodes
+    #cos_sim_matrix = cos_sim_matrix.isel(preyu=i_sel, preyv=i_sel)
+    #tensor_saint_scores = tensor_saint_scores.isel(preyu=i_sel)
+    # Change input information to jax arrays
+    saint_elob_wt = jnp.array(tensor_saint_scores.sel(bait="ELOB", condition="wt"))
+    saint_elob_vif = jnp.array(tensor_saint_scores.sel(bait="ELOB", condition="vif"))
+    saint_elob_mock = jnp.array(tensor_saint_scores.sel(bait="ELOB", condition="mock"))
+    #  
+    saint_cbfb_wt = jnp.array(tensor_saint_scores.sel(bait="CBFB", condition="wt"))
+    saint_cbfb_vif = jnp.array(tensor_saint_scores.sel(bait="CBFB", condition="vif"))
+    saint_cbfb_mock = jnp.array(tensor_saint_scores.sel(bait="CBFB", condition="mock"))
+    #
+    saint_CUL5_wt = jnp.array(tensor_saint_scores.sel(bait="CUL5", condition="wt"))
+    saint_CUL5_vif = jnp.array(tensor_saint_scores.sel(bait="CUL5", condition="vif"))
+    saint_CUL5_mock = jnp.array(tensor_saint_scores.sel(bait="CUL5", condition="mock"))
+    assert np.all(tensor_saint_scores.preyu.values == cos_sim_matrix.preyu.values)
+    #
+    jax_cos_sim_matrix = jnp.array(cos_sim_matrix.values)
+    # Model representation
+    nnodes = len(saint_CUL5_wt) 
+    tril_indices = jnp.tril_indices(nnodes, k=-1)
+    diag_indices = np.diag_indices(nnodes)
+    elob_idx = np.where(cos_sim_matrix.preyu == 'ELOB')[0].item()  
+    cbfb_idx = np.where(cos_sim_matrix.preyu == 'PEBB')[0].item()
+    cul5_idx = np.where(cos_sim_matrix.preyu == 'CUL5')[0].item()
+    # truncate based on total number of nodes
+    #The prior edge weight is goverened by Cosine Similarity
+    m_possible_edges = int(math.comb(nnodes, 2))
+    # Beta distribution over edge weights 
+    alpha = jnp.ones(m_possible_edges) * 0.685 #0.408
+    beta = jnp.ones(m_possible_edges) * 1.099   #0.116
+    #Beta distributions ensures no negative cycles
+    edge_weight_list = numpyro.sample("w", dist.Beta(alpha, beta))
+    A = jnp.zeros((nnodes, nnodes))
+    A = A.at[tril_indices].set(edge_weight_list)
+    A = A + A.T  # non-negative weighted adjacency matrix with 0 diagonal.
+    # p(cos_sim | A)
+    STD2 = 0.2
+    numpyro.sample("COS_SYM1", dist.Normal(A, STD2), obs=jax_cos_sim_matrix)
+    # p(SAINT | D(A))
+    # Discritize the matrix
+    A = jnp.where(A >= 0.5, 1., 0.)
+    #Shortest Path Matrix
+    #D = shortest_paths_up_to_23(A)
+    #P = D < max_path_length 
+    #P = P.at[diag_indices].set(1) # Set self paths to 1 because bait are in their own
+    # p(ELOB | P(A))
+    P = A @ A
+    STD = 0.2
+    #P = jnp.array(P, dtype=jnp.int32)
+    numpyro.sample("ELOB_WT", dist.Normal(P[elob_idx, :], STD), obs=saint_elob_wt)
+    numpyro.sample("ELOB_VF", dist.Normal(P[elob_idx, :], STD), obs=saint_elob_vif)
+    numpyro.sample("ELOB_MK", dist.Normal(P[elob_idx, :], STD), obs=saint_elob_mock)
+
+    numpyro.sample("CBFB_WT", dist.Normal(P[cbfb_idx, :], STD), obs=saint_cbfb_wt)
+    numpyro.sample("CBFB_VF", dist.Normal(P[cbfb_idx, :], STD), obs=saint_cbfb_vif)
+    numpyro.sample("CBFB_MK", dist.Normal(P[cbfb_idx, :], STD), obs=saint_cbfb_mock)
+
+    numpyro.sample("CUL5_WT", dist.Normal(P[cul5_idx, :], STD), obs=saint_CUL5_wt)
+    numpyro.sample("CUL5_VF", dist.Normal(P[cul5_idx, :], STD), obs=saint_CUL5_vif)
+    numpyro.sample("CUL5_MK", dist.Normal(P[cul5_idx, :], STD), obs=saint_CUL5_mock)
+    # What to do about double counting the direct interactions?
+    numpyro.sample("COS_SYM", dist.Normal(P < 3, STD), obs=jax_cos_sim_matrix)
+
+
+class Histogram(dist.Distribution):
+    def __init__(self, a, bins, density=True, validate_args=None):
+        def histogram_piecewise_constant_pdf(x, bin_edges, bin_heights, n_bins):
+            #bin_edges = jnp.array(bin_edges)
+            #bin_heights = jnp.array(bin_heights)
+            bin_indices = jnp.digitize(x, bin_edges) - 1
+            bin_indices = jnp.clip(bin_indices, 0, n_bins - 1)
+            return bin_heights[bin_indices]
+        bin_heights, bin_edges = jnp.histogram(a, bins=bins, density=density)
+        bin_heights = jnp.array(bin_heights)
+        bin_edges = jnp.array(bin_edges)
+        self.probs = bin_heights
+        self.n_bins = len(bin_heights)
+        self.bin_edges = bin_edges
+        self.support = dist.constraints.real # Is this right?
+        super(Histogram, self).__init__(batch_shape=(), 
+              event_shape=(), validate_args=validate_args)
+        # Initialize the PDF
+        pdf = jax.tree_util.Partial(histogram_piecewise_constant_pdf,
+              bin_edges=self.bin_edges, bin_heights=self.probs,
+              n_bins=self.n_bins)
+        self.pdf = pdf
+    def sample(self, key, sample_shape=()):
+        bin_indices = jax.random.categorical(key, jnp.log(self.probs), shape=sample_shape)
+        return self.bin_edges[bin_indices]
+    def log_prob(self, value):
+        return jnp.log(self.pdf(value))
+
+def matrix2flat(M, row_major=True):
+    """
+    An iterative method to flatten a matrix
+    """
+    n, m = M.shape
+    N = math.comb(n, 2)
+    a = jnp.zeros(N, dtype=M.dtype)
+    k=0
+    if row_major:
+        for row in range(n):
+            l = m - row - 1
+            a = a.at[k:k + l].set(M[row, row + 1:m])
+            k += l
+    else:
+        for col in range(m):
+            l = n - col - 1 
+            a = a.at[k:k + l].set(M[col+1:n, col])
+            k += l 
+    return a
+
+def model14_data_getter(ntest=3005, from_pickle=True):
+    if from_pickle:
+        with open("model14_data.pkl", "rb") as f:
+            d = pkl.load(f)
+            return d
+    # Load in AP-MS data and flatten
+    with open("xr_apms_correlation_matrix.pkl", "rb") as f:
+        apms_correlation_matrix = pkl.load(f)
+    assert np.alltrue(apms_correlation_matrix == apms_correlation_matrix).T
+    apms_correlation_matrix = apms_correlation_matrix[0:ntest, 0:ntest]
+    n, m = apms_correlation_matrix.shape
+    apms_tril_indices = jnp.tril_indices(n, k=-1)
+    flattened_apms_similarity_scores = matrix2flat(
+            jnp.array(apms_correlation_matrix.values, dtype=jnp.float32)) 
+    assert len(flattened_apms_similarity_scores) == math.comb(n, 2)
+    # Load in shuffled data and create null_hist_prob_dens
+    with open("shuffled_apms_correlation_matrix.pkl", "rb") as f:
+        shuffled_apms_correlation_matrix = pkl.load(f)
+    shuffled_apms_correlation_matrix = shuffled_apms_correlation_matrix[0:ntest, 0:ntest]
+    flattened_shuffled_apms = matrix2flat(
+            jnp.array(shuffled_apms_correlation_matrix, dtype=jnp.float32))
+    null_dist = Histrogram(flattened_shuffled_apms, bins=1000)
+    return {"flattened_apms_similarity_scores" : flattened_apms_similarity_scores,
+            "null_dist" : null_dist} 
+    
+def model14(model_data):
+    """
+    M : pT_{i, j} edge weights
+    """
+    #assert data.shape[0] == N, "The number of data points must be equal to N"
+    # Load in variables from model data to allow proper tracing
+    flattened_apms_similarity_scores = model_data["flattened_apms_similarity_scores"]
+    flattened_apms_similarity_scores = jnp.array(
+            flattened_apms_similarity_scores, dtype=jnp.float32)
+    # Test line
+    ntest = model_data['ntest']
+    flattened_apms_similarity_scores = flattened_apms_similarity_scores[0:ntest]
+    shuffled = model_data["flattened_apms_shuffled_similarity_scores"][0:ntest]
+    N = flattened_apms_similarity_scores.shape[0]
+    #null_dist = model_data['null_dist']
+    #null_dist = null_dist.expand([N,])
+    #mixture_probs = numpyro.sample("mixture_probs", dist.Dirichlet(jnp.ones(K)).expand([N,]))
+    # Prior edge probability is 0.67
+    pT = numpyro.sample("pT", dist.Uniform(0, 1).expand([N,]))
+    #pT = numpyro.sample("pT", dist.Beta(4, 2).expand([N,])) # Mean is 0.66
+    mixture_probs = jnp.array([pT, 1-pT]).T
+    # 1. Null distribution
+    null_dist = Histogram(shuffled, bins=1000).expand([N,])
+    # Hyper priors 0.23 and 0.22 are set from previous modeling
+    causal_dist = dist.Normal(0.23, 0.22).expand([N,]) 
+    #means = numpyro.sample("means", dist.Normal(0, 5).expand([N, K]))
+    #stds = numpyro.sample("stds", dist.HalfNormal(5).expand([N, K]))
+    #components = dist.Normal(means, stds)
+    mixtures = dist.MixtureGeneral(dist.Categorical(probs=mixture_probs),
+                                  [causal_dist, null_dist])
+    numpyro.sample("obs", mixtures, obs=flattened_apms_similarity_scores)
 
 def load(fpath):
     with open(fpath, 'rb') as f:
         dat = pkl.load(f)
     return dat
-   
+
+#Keys are model name, values are model_func, init_func pairs
+_model_dispatch = {
+    "model_10_wt": (model_10_wt, get_cov_model9_init_strategy, lambda x: int(x)),
+    "model_10_vif": (model_10_vif, get_cov_model9_init_strategy, lambda x: int(x)),
+    "model_10_mock": (model_10_mock, get_cov_model9_init_strategy, lambda x: int(x)),
+    "model_10_wt_vif": (model_10_wt_vif, get_cov_model9_init_strategy, lambda x: int(x)),
+    "model_10_wt_mock": (model_10_wt_mock, get_cov_model9_init_strategy, lambda x: int(x)),
+    "model_10_vif_mock": (model_10_vif_mock, get_cov_model9_init_strategy, lambda x: int(x)),
+    "model_10_wt_vif_mock": (model_10_wt_vif_mock, get_cov_model9_init_strategy, lambda x: int(x)),
+    "model_11_path_length": (model_11_path_length, init_to_uniform, lambda x: int(x)),
+        }
+
 @click.command()
 @click.option("--model-id", type=str, help="identifier is prepended to saved files")
 @click.option("--rseed", type=int, default=0)
@@ -573,6 +781,17 @@ def main(model_id, rseed, model_name,model_data, num_warmup, num_samples, includ
     elif model_name == "model12":
         model_data = None
         model = model12
+        init_strategy = init_to_uniform
+    elif model_name == "model13":
+        model_data = None
+        model = model13
+        init_strategy = init_to_uniform
+    elif model_name == "model14":
+        print("model14 in main")
+        model_data = model14_data_getter()
+        # test line
+        model_data['ntest'] = 100
+        model = model14
         init_strategy = init_to_uniform
     else:
         raise ValueError(f"Invalid {model_name}")
