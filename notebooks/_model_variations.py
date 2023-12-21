@@ -696,8 +696,8 @@ def model14(model_data):
             flattened_apms_similarity_scores, dtype=jnp.float32)
     # Test line
     ntest = model_data['ntest']
-    flattened_apms_similarity_scores = flattened_apms_similarity_scores[0:ntest]
-    shuffled = model_data["flattened_apms_shuffled_similarity_scores"][0:ntest]
+    flattened_apms_similarity_scores = flattened_apms_similarity_scores#[0:ntest]
+    shuffled = model_data["flattened_apms_shuffled_similarity_scores"]#[0:ntest]
     N = flattened_apms_similarity_scores.shape[0]
     #null_dist = model_data['null_dist']
     #null_dist = null_dist.expand([N,])
@@ -791,7 +791,6 @@ def main(model_id, rseed, model_name,model_data, num_warmup, num_samples, includ
         print("model14 in main")
         model_data = model14_data_getter()
         # test line
-        model_data['ntest'] = 100
         model = model14
         init_strategy = init_to_uniform
     else:
@@ -810,7 +809,6 @@ def main(model_id, rseed, model_name,model_data, num_warmup, num_samples, includ
                         "energy", # N
                         #"adapt_state",
                             # step_size N
-                            
                         #"trajectory_length",
         )
 
