@@ -743,9 +743,10 @@ _model_dispatch = {
 @click.option("--num-samples", type=int)
 @click.option("--include-potential-energy", is_flag=True, default=False)
 @click.option("--include-mean-accept-prob", is_flag=True, default=False)
+@click.option("--include-extra-fields", is_flag=True, default=True) 
 @click.option("--progress-bar", is_flag=True, default=False)
 def main(model_id, rseed, model_name,model_data, num_warmup, num_samples, include_potential_energy, 
-    progress_bar, include_mean_accept_prob):
+    progress_bar, include_mean_accept_prob, include_extra_fields):
     entered_main_time = time.time()
     rng_key = jax.random.PRNGKey(rseed)
     eprint(f"Model ID: {model_id}")
@@ -796,11 +797,30 @@ def main(model_id, rseed, model_name,model_data, num_warmup, num_samples, includ
     else:
         raise ValueError(f"Invalid {model_name}")
     extra_fields = ()
+    if include_extra_fields:
+        extra_fields = ("potential_energy", # N
+                        "diverging",      # N,
+                        "accept_prob",   # N
+                        "mean_accept_prob", #N
+                        #"step_size",
+                        #"inverse_mass_matrix",
+                        #"effective_sample_size",
+                        #"r_hat",
+                        "num_steps", # N all same
+                        "energy", # N
+                        #"adapt_state",
+                            # step_size N
+                            
+                        #"trajectory_length",
+        )
+
     if include_potential_energy:
         extra_fields = extra_fields + ("potential_energy",)
     if include_mean_accept_prob:
         extra_fields = extra_fields + ("mean_accept_prob",)
+
     nuts = NUTS(model, init_strategy=init_strategy)
+    # Do the warmup
     mcmc = MCMC(nuts, num_warmup=num_warmup, num_samples=num_samples, progress_bar=progress_bar)
     mcmc.run(rng_key, model_data, extra_fields=extra_fields)
     finished_mcmc_time = time.time()
@@ -812,7 +832,8 @@ def main(model_id, rseed, model_name,model_data, num_warmup, num_samples, includ
     savename = model_id + "_" + model_name + "_" + str(rseed) + ".pkl"
     fields = mcmc.get_extra_fields()
     samples = mcmc.get_samples()
-    out = {"extra_fields": fields, "samples": samples, "elapsed_time": elapsed_time}
+    out = {"extra_fields": fields, "samples": samples, "elapsed_time": elapsed_time,
+           }
     with open(savename, "wb") as file:
         pkl.dump(out, file) 
 
