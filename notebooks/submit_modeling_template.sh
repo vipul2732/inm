@@ -25,7 +25,7 @@ date
 hostname
 conda activate wyndevpy39
 which python3
-python3 _model_variations.py --model-id $1 --model-data $2 --num-warmup $3 --num-samples $4 --model-name "${5:-cov_model5}" 
+python3 _model_variations.py --model-id $1 --model-data $2 --num-warmup $3 --num-samples $4 --model-name "${5:-cov_model5}" --rseed $6 
 ## End-of-job summary, if running as a job
 [[ -n "$JOB_ID" ]] && qstat -j "$JOB_ID"  # This is useful for debugging and usage purposes,
                                           # e.g. "did my job exceed its memory request?"
