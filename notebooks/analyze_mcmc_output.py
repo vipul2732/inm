@@ -24,6 +24,7 @@ import numpy as np
 import numpyro
 import numpyro.distributions as dist
 import matplotlib.pyplot as plt
+import pandas as pd
 from numpyro.infer import (
     MCMC,
     NUTS,
@@ -41,6 +42,10 @@ import xarray as xr
 import _model_variations
 from numpyro.infer.util import (
     log_density
+        )
+from _model_variations import (
+        matrix2flat,
+        flat2matrix
         )
 import _BSASA_functions
 import flyplot
@@ -207,35 +212,77 @@ def weights2xarray(w, nnodes, cos_sim_matrix):
     weight_data = xr.DataArray(A, coords=cos_sim_matrix.coords)
     return weight_data
 
-def get_auc_model14(traj):
+def get_auc_model14(trajectory_path: str, n_thresholds: int):
+    """
+    n_thresholds : the number of thresholds to interpolate between 0 and 1
+      the actual number of threhoslds is n_thresholds + 1
+    """
+    thresholds = np.arange(0, 1, 1/n_thresholds)
     N_expected_nodes = 3005
     N_expected_edges = math.comb(N_expected_nodes, 2)
-    tril_indices = np.tril_indices_from(N_expected_nodes, k=-1)
-
+    tril_indices = np.tril_indices(N_expected_nodes, k=-1)
     # Are the nodes in the correct order?
-
-    with open(traj, "rb") as f:
-        traj = pkl.load(f)
-    
-    with open("direct_benchmark.pkl", "rb") as f:
-        direct = pkl.load(f)
-    
-    with open("cocomplex_benchmark.pkl", "rb") as f:
-        cocomplex = pkl.load(f)
-
-    direct_reference = direct.reference.matrix.values[tril_indices]
+    # Let's check
+    apms_data_path = "../table1.csv"
+    apms_ids = pd.read_csv(apms_data_path)
+    # 1 to 1 mapping
+    reference_preyu2uid = {r['PreyGene'].removesuffix('_HUMAN'): r['UniprotId'] for i,r in apms_ids.iterrows()}
+    spectral_count_xarray = load("spectral_count_xarray.pkl")
+    stacked_spectral_counts_array = spectral_count_xarray.stack(y=['AP', 'condition', 'bait', 'rep'])
+    # Remove nodes where all counts are 0
+    empty_nodes = np.sum(stacked_spectral_counts_array != 0, axis=1) == 0
+    stacked_spectral_counts_array = stacked_spectral_counts_array.isel(preyu=~empty_nodes)
+    apms_ids = [reference_preyu2uid[k] for k in stacked_spectral_counts_array.preyu.values]
+    traj = load(trajectory_path)
+    model14_data = load("xr_apms_correlation_matrix.pkl")
+    assert apms_ids == list(model14_data.uid_preyu.values) 
+    # The data loaded in for model 14 matches the ids in referce_prey2uid
+    # And can be mapped back to Gene Identifiers
+    # Model14 data was flattened using the following command
+    # 
+    #apms_tril_indices = jnp.tril_indices(n, k=-1)
+    #flattened_apms_similarity_scores = matrix2flat(
+    #        jnp.array(apms_correlation_matrix.values, dtype=jnp.float32)) 
+    direct = load( "direct_benchmark.pkl")   
+    cocomplex = load("cocomplex_benchmark.pkl")
+    # Check the id mapping
+    assert [reference_preyu2uid[k] for k in direct.reference.matrix.preyu.values] == list(model14_data.uid_preyu.values) 
+    assert [reference_preyu2uid[k] for k in cocomplex.reference.matrix.preyu.values] == list(model14_data.uid_preyu.values) 
+    # ids pass
+    direct_reference = matrix2flat(direct.reference.matrix.values) # same method as data loading 
     del direct
-    cocomplex_reference = cocomplex.reference.matrix.values[tril_indices]
+    cocomplex_reference = matrix2flat(cocomplex.reference.matrix.values) 
     del cocomplex
     assert direct_reference.shape == (N_expected_edges,)
     assert cocomplex_reference.shape == (N_expected_edges,)
-
-    nsamples, nedges = traj['samles']['pT'].shape 
-
-    for edge_list in traj['samples']['pT']:
-        assert edge_list.shape == (N_expected_edges,) edge_list.shape
-        
-         
+    nsamples, nedges = traj['samples']['pT'].shape 
+    direct_auc_array = np.zeros(nsamples) 
+    cocomplex_auc_array = np.zeros(nsamples) 
+    for samples_idx, edge_list in enumerate(traj['samples']['pT']):
+        direct_xs = np.zeros(len(thresholds))
+        direct_ys= np.zeros(len(thresholds))
+        cocomplex_xs = np.zeros(len(thresholds))
+        cocomplex_ys= np.zeros(len(thresholds))
+        for i, threshold in enumerate(thresholds):
+            direct_tpr, direct_ppr = roc_analysis(edge_list, threshold, direct_reference, N_expected_edges)
+            direct_xs[i] = direct_ppr
+            direct_ys[i] = direct_tpr
+            cocomplex_tpr, cocomplex_ppr = roc_analysis(edge_list, threshold, cocomplex_reference, N_expected_edges)
+            cocomplex_xs[i] = cocomplex_tpr
+        direct_auc = sklearn.metrics.auc(direct_xs, direct_ys)
+        direct_auc_array[samples_idx] = direct_auc
+        cocomplex_auc = sklearn.metrics.auc(cocomplex_xs, cocomplex_ys)
+        cocomplex_auc_array[samples_idx] = cocomplex_auc
+    return direct_auc_array, cocomplex_auc_array
+    
+def roc_analysis(pred_array, threshold, reference, N_expected_edges):
+    binary_predictions = pred_array >= threshold
+    positive_predictions = np.sum(binary_predictions)
+    tp = binary_predictions * reference 
+    tpr = np.sum(tp) / np.sum(reference)
+    ppr = np.sum(positive_predictions) / N_expected_edges
+    return tpr, ppr 
+            
 
 def model14_traj2analysis(traj: str):
     """
