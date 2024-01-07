@@ -660,6 +660,23 @@ def matrix2flat(M, row_major=True):
             k += l 
     return a
 
+def flat2matrix(a, n: int, row_major=True):
+    """
+    a : the input flattened array
+    n : the number of columns in the matrix
+    """
+    M = jnp.zeros((n, n))
+    n, m = M.shape
+    k = 0
+    if row_major:
+        for row in range(n):
+            l = m - row - 1
+            M = M.at[row, row+1:m].set(a[k:k + l]) 
+            k += l
+    else:
+        raise ValueError
+    return M + M.T
+
 def model14_data_getter(ntest=3005, from_pickle=True):
     if from_pickle:
         with open("model14_data.pkl", "rb") as f:
