@@ -12,6 +12,37 @@
 #     name: python3
 # ---
 
+# ## What we know
+# - Have Binary PPI Network and BSASA PPI network
+# - Have Binary PPI Distance (taxicab)
+# - Could improve the reference with a PPI score from logisitc regression
+#
+# - AP-MS profile similarity is negativley correlated to Binary PPI Network distance
+# - 
+#
+# ## How to incorporate probabilistic composite connectivity?
+# - Softened composite connectivity?
+# - Restraint for the composite mean that the sum of the edge must equal N - 1
+# - What is N? N is the number of the proteins in the composite.
+# - What if the number of proteins in the composite is given by a random variable N ~ p(N)
+# - Also is a composite defined over a specific condition?
+# - Let's say each composite has a vector where each element i has a probability of being in the composite
+# - N is then the sum of p(i)
+# - The sum of all edges must be at least N - 1
+# - profile similarity * independant saint scores
+#
+#
+# - How many "composites" are there?
+# - Imagine a compoiste for each condition M conditions
+# - We have the SAINT scores per composite, composite connectivity is applied per condition
+# - The network is an average over all conditions
+# - Therefore, average composite connectivity must be satisfied
+# - Essentially, attempt composite connectivity for each of the M conditions
+# - The restaint is the sum of the edges must be less than N - 1.
+# - 
+# - Sparsity - we shouldn't assume a fully connected network
+#
+
 # +
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -44,10 +75,24 @@ import blackjax
 import blackjax.smc.resampling as resampling
 from numpyro.distributions.transforms import Transform
 from numpyro.distributions import constraints
+import numpy as np
+import numpy.typing as npt
 from jax.tree_util import tree_flatten, tree_unflatten
 
 from functools import partial
+from typing import Any
 # -
+
+x = np.arange(-1, 1, 0.1)
+y = sklearn.linear_model.LogisticRegression.
+
+
+import sklearn
+
+# The purpose of types for this notebook is for developer documention, not type checkers
+# JAX typing see : https://jax.readthedocs.io/en/latest/jep/12049-type-annotations.html
+Array = Any
+Shape = jax.core.Shape
 
 import _model_variations as mv
 
@@ -262,6 +307,7 @@ def matrix_regplot(matrix_a, matrix_b, max_distance=10, ylim=5):
     results = sp.stats.pearsonr(a[sel], b[sel])
     plt.xlim(-1, 1)
     plt.ylim(0, ylim)
+    plt.tight_layout()
     plt.show()
     
 matrix_regplot(apms_mini.values, D_mini.values)
@@ -293,7 +339,7 @@ def calculate_network_distance_score_correlation(d, s, is_xr=True, max_distance=
 
 
 
-def get_shortest_distance_from_any_bait(D_reference, bait_names = None):
+def get_shortest_distance_from_any_bait(D_reference, bait_names = None) -> xr.DataArray:
     """
     
     """
@@ -318,81 +364,79 @@ plt.plot(min_distance_to_a_bait, max_saint_xr, 'k.')
 plt.ylabel("Saint Score")
 plt.xlabel("Min Distance to Bait")
 
-min_distance_to_a_bait
-
-max_saint_xr
-
 bait_matrix = get_shortest_distance_from_any_bait(D_reference)
 
 calculate_network_distance_score_correlation(D_mini, apms_mini)
 
 
-def correlation_decohearence(apms_pair_score, D_reference, stepsize=10,
-                            max_distance=10):
+def correlation_decohearence(key, apms_pair_score, D_reference, stepsize=10,
+                            max_distance=10, denominator=1):
     # Sort saint scores in ascending order
     #max_saint_scores = xr.DataArray(max_saint_scores.to_pandas().sort_values())
     #for i in range(len(max_saint_xr), 10):
     
     min_distance_from_any_bait = get_shortest_distance_from_any_bait(D_reference)
     min_distance_from_any_bait = xr.DataArray(min_distance_from_any_bait.to_pandas().sort_values())
-    scores = min_distance_from_any_bait
+    
+    scores : xr.DataArray = min_distance_from_any_bait
     
     
     # Select top and bottom N saint scores
-    factor = 1
-    N = len(scores) // (factor * stepsize)
+
+    N = len(scores) // (denominator * stepsize)
     columns=["N", "slope", "intercept", "rvalue", "pvalue", "stderr", "intercept_stderr"]
     output = np.zeros((N, len(columns)))
-    top_scores = pd.DataFrame(output.copy(), columns=columns)
+    ctrl_scores = pd.DataFrame(output.copy(), columns=columns)
     bot_scores = pd.DataFrame(output.copy(), columns=columns)
 
     k=0
     f = partial(calculate_network_distance_score_correlation, max_distance=max_distance)
-    for i in range(stepsize, len(scores) // factor, stepsize):
+    for i in range(stepsize, len(scores) // denominator, stepsize):
         
-        bot_N = scores[0:i]
-        top_N = scores[-i:]
+        bot_N : xr.DataArray = scores[0:i]
+        ctrl_N : xr.DataArray = bot_N.copy()
         
-        bot_prey_sel = bot_N.preyu.values
-        top_prey_sel = top_N.preyu.values
+        bot_prey_sel : npt.NDArray = bot_N.preyu.values #U14
+        ctrl_prey_sel : npt.NDArray = bot_prey_sel.copy() #U14
         
-        top_apms = apms_pair_score.sel(preyu=top_prey_sel, preyv=top_prey_sel)
+        # Select corresponding apms data
+        #ctrl_apms = apms_pair_score.sel(preyu=ctrl_prey_sel, preyv=ctrl_prey_sel)
         bot_apms = apms_pair_score.sel(preyu=bot_prey_sel, preyv=bot_prey_sel)
         
-        top_D_ref = D_reference.sel(preyu=top_prey_sel, preyv=top_prey_sel)
-        bot_D_ref = D_reference.sel(preyu=bot_prey_sel, preyv=bot_prey_sel)
+        # select corresponding ppi reference
+        D_ref = D_reference.sel(preyu=bot_prey_sel, preyv=bot_prey_sel)
+        #bot_D_ref = D_reference.sel(preyu=bot_prey_sel, preyv=bot_prey_sel)
         
+        # shuffle the control
+        key, key2 = jax.random.split(key)
+        shfl_ctrl_idx : Array = jax.random.permutation(key2, len(ctrl_N))
         
-        top_reg = f(top_apms, top_D_ref)._asdict()
-        bot_reg = f(bot_apms, bot_D_ref)._asdict()
+        ctrl_apms = bot_apms.copy().isel(preyu=shfl_ctrl_idx) # shuffle the AP-MS data
         
-        top_reg = pd.Series({"N": i} | top_reg)
+        ctrl_reg = f(ctrl_apms, D_ref)._asdict()
+        bot_reg = f(bot_apms,   D_ref)._asdict()
+        
+        ctrl_reg = pd.Series({"N": i} | ctrl_reg)
         bot_reg = pd.Series({"N": i} | bot_reg)
         
-        top_scores.iloc[k, :] = top_reg
+        ctrl_scores.iloc[k, :] = ctrl_reg
         bot_scores.iloc[k, :] = bot_reg
         k += 1
         #if k > 2:
         #    break
-    return top_scores, bot_scores
-        
+    return ctrl_scores, bot_scores
 
-min_distance_to_a_bait
-
-t, b = correlation_decohearence(apms_pearson_r, D_reference, stepsize=5, max_distance=15)
-
-t
-
-b
+key = jax.random.PRNGKey(12)
+t, b = correlation_decohearence(key, apms_pearson_r, D_reference, stepsize=5, max_distance=15)
 
 # +
 # Drop the last row
-#t = t.drop(600)
-#b = b.drop(600)
+t = t.drop(600)
+b = b.drop(600)
 
 plt.subplot(221)
-plt.plot(t['N'], t['rvalue'], label="Far from any bait")
-plt.plot(b['N'], b['rvalue'], label="close to any bait")
+plt.plot(t['N'], t['rvalue'], label="Shuffle Control")
+plt.plot(b['N'], b['rvalue'], label="AP-MS")
 plt.legend()
 #plt.xlabel("N")
 plt.ylabel("R value")
@@ -419,6 +463,100 @@ plt.xlabel("N")
 plt.show()
 
 # +
+plt.subplot(121)
+plt.plot(t['N'], t['rvalue'], label="Ctrl")
+plt.plot(t['N'], b['rvalue'], label="AP-MS")
+plt.ylabel("r-value")
+plt.legend()
+plt.xlabel("N")
+plt.xlim(0, 546)
+
+plt.xlabel
+plt.subplot(122)
+plt.plot(t['N'], -np.log10(t['pvalue']), '.', label="Ctrl")
+plt.plot(t['N'], -np.log10(b['pvalue']), 'o', label="AP-MS")
+plt.hlines(7, 0, 546, color='r')
+plt.ylabel("-log10 p-value")
+plt.ylim(0, 10)
+plt.tight_layout()
+plt.xlim(0, 546)
+# -
+
+drc = np.gradient(t['rvalue'])
+dr = np.gradient(b['rvalue'])
+plt.plot(t['N'], drc, alpha=0.1, label="Ctrl")
+plt.plot(t['N'], dr, '.', label="AP-MS")
+plt.xlim(0, 546)
+plt.ylabel("dr / dN")
+plt.vlines(55, -0.2, 0.15, color='r', label="top 55")
+plt.ylim(-0.1, 0.12)
+plt.xlabel("N")
+plt.legend()
+
+
+# ## Idea
+#
+# The AP-MS data follows a weakst link mechanism
+# Use BSASA as a proxy (where is it)
+# Calculate the pairwise BSASA matrix
+# Take the reciprocal (invert BSASA matrix)
+#
+# Calculate the all pairs shortest paths BSASA (Networkkit?) - corresponding to strongest chain
+# Correlate
+#
+#
+# ## Restraints
+# - have p(PPI | r-value)
+
+d_train_idx = (0, 546)
+d_pred_idx = (546, 3005)
+unknown_prey = min_distance_to_a_bait.isel(preyu=np.arange(*d_pred_idx)).preyu.values
+
+unknown_prey
+
+d = pd.read_csv("../significant_cifs/BSASA_reference.csv")
+
+plt.hist(d['bsasa_lst'], bins=50, range=(0,1000))
+plt.show()
+
+d
+
+min_distance_to_a_bait
+
+plt.plot(b['N'], b['slope'], '.')
+plt.vlines(100, -6, 0)
+plt.xlim(0, 546)
+
+# ### Why does the strength of ascociation decay at larger N?
+# 1. Uncertainty in reference.
+#     a. Shortest distances in PDB may be closer than what we know
+#     b. May miss certain distances based on BSASA cutoff
+# 2. Including more proteins 
+
+
+
+plt.subplot(121)
+plt.plot(t['N'], t['intercept'], label="Ctrl")
+plt.plot(t['N'], b['intercept'], label="AP-MS")
+plt.ylabel("intercept")
+plt.legend()
+plt.xlabel("N")
+plt.xlim(0, 546)
+plt.subplot(122)
+plt.plot(t['N'], -np.log10(t['pvalue']), '.', label="Ctrl")
+plt.plot(t['N'], -np.log10(b['pvalue']), 'o', label="AP-MS")
+plt.hlines(7, 0, 546, color='r')
+plt.ylabel("-log10 p-value")
+plt.ylim(0, 10)
+plt.tight_layout()
+plt.xlim(0, 546)
+
+plt.plot(t['N'], t['slope'])
+plt.plot(t['N'], b['slope'])
+plt.xlabel("N")
+plt.ylabel("Slope")
+
+# +
 # Do a scatter plot of minimal bait distance to spectral count variation
 # -
 
@@ -434,42 +572,14 @@ plt.show()
 # - What are the top ranked edges with no support in the PDB?
 # - Do I trust the SAINT score?
 
-math.comb(2459, 2)
-
-t.drop(600)
-
 # +
 
 df = pd.DataFrame(np.zeros((4, 6)), columns=list(t._asdict().keys()))
 # -
 
-top_saint
-
-b
-
-
-
 df + pd.Series(t._asdict())
 
 pd.Series(t._asdict())
-
-correlation_decohearence(apms_pearson_r, D_reference, max_saint_xr)
-
-
-
-max_saint_xr
-
-correlation_decohearence(apms_pearson_r, D_reference, max_saint_xr)
-
-max_saint_xr.where(max_saint_xr < )
-
-xr.DataArray(max_saint_xr.to_pandas().sort_values())
-
-max_saint_xr.sort_values()
-
-help(max_saint_xr.sortby)
-
-D_reference.sel(preyu=top_prey.preyu.values)
 
 df_new = mv.load("df_new.pkl")
 
