@@ -42,6 +42,21 @@
 # 3. Show top accuracy as a function of increased sampling
 # 4. Show top score as a function of increased sampling
 # 5. Finish
+#
+# ## Scores Used in Numpyro Models
+# ### Terms
+# - target density   : $\pi (x) $
+# - Hamiltonian      : $H(x, w) = -\log \pi (x) + V(w)$
+# - potential energy : $U(x) = -\log \pi(x) $
+# - kinematic energy : $V(w)$
+# - log density      : $\log \pi(x)$
+# - state            : (x, w)
+# - p(w)             : 
+#
+# ### Implementation
+# - potential_energy expects unconstrained inputs (done under the hood)
+#
+#
 
 # +
 ## -1.1 Imports
@@ -52,14 +67,19 @@ import jax.numpy as jnp
 import logging
 import networkit as nk
 import numpy as np
+import numpyro
 import math
 from pathlib import Path
+from functools import partial
+import pandas as pd
+import sklearn
 from types import SimpleNamespace
 import matplotlib.pyplot as plt
 # Custom modules
 import synthetic_benchmark
 import _model_variations
 import analyze_mcmc_output
+import seaborn as sns
 
 # Reload custom modules for devlopment
 importlib.reload(synthetic_benchmark)
@@ -151,10 +171,24 @@ plt.colorbar(shrink=0.8)
 plt.matshow(A.values)
 plt.colorbar(shrink=0.8)
 
+reference_flat = _model_variations.matrix2flat(A.values)
+
 data_flat =  _model_variations.matrix2flat(data)
 assert len(data_flat) == math.comb(nb.n_prey, 2)
 
-plt.hist(np.array(model_data['flattened_apms_similarity_scores']), bins=20)
+model_data = _model_variations.model14_data_getter()
+model_data['flattened_apms_similarity_scores'] = data_flat
+model = _model_variations.model14
+
+model_data.keys()
+
+n_true = int(np.sum(reference_flat))
+n_false = len(reference_flat) - n_true
+plt.hist(np.array(data_flat[reference_flat == 0]), label=f"False ({n_false})", bins=100, alpha=0.5)
+plt.hist(np.array(data_flat[reference_flat == 1]), label=f"True  ({n_true})", bins=100, alpha=0.5)
+plt.xlabel("Profile Similarity (Pearson R)")
+plt.ylabel("Frequency")
+plt.legend()
 plt.show()
 
 
@@ -163,7 +197,8 @@ plt.show()
 def _2_1_fit():
     for i in range(nb.m_chains):
         savename = Path("SyntheticBenchmark50/") / f"chain_{i}.pkl"
-        if not Path(savename).is_file():
+        bool_savename = f"SyntheticBenchmark50/0_model14_{i}.pkl"
+        if not Path(bool_savename).is_file():
             logging.info(f"BEGIN sampling {savename}")
             _model_variations._main(
             model_id="0",
@@ -190,15 +225,105 @@ _2_1_fit()
 def _3_1():
     for i in range(nb.m_chains):
         # Load in the trajectory
-        path = Path("SyntheticBenchmark50/") / f"chain_{i}.pkl"
+        path = Path("SyntheticBenchmark50/") / f"0_model14_{i}.pkl"
+        #d = _model_variations.load(path)
         
+        analysis_dict = analyze_mcmc_output.model14_traj2analysis(str(path), np.array(reference_flat))
         # do the sampling analysis
           # calc top score
           # calc accuracy array
           # get the top accuracy
           
           # 0_model14_0 : {top_score, accuracy_array, top_accuracy, potential_energy}
+        break
+    return analysis_dict
+analysis_dict = _3_1()
         
 
+analysis_dict.keys()
 
-analyze_mcmc_output
+numpyro.infer.util.log_densitysityty
+
+numpyro.infer.util.log_density
+numpyro.infer.util.potential_energy
+numpyro.infer.util.log_likelihood
+
+help(numpyro.infer.util.potential_energy)
+
+numpyro.infer.util.potential_energy(model, model_data)
+
+# ?numpyro.infer.util.potential_energy
+
+# +
+# Expect to see low scores correlated with high accuracy
+# This would make a negative slope
+
+path = Path("SyntheticBenchmark50") / f"0_model14_0.pkl"
+_0_model14_0 = _model_variations.load(str(path))
+analysis_dict = analyze_mcmc_output.model14_traj2analysis(str(path), 
+        model_data=model_data, model=model, reference=np.array(reference_flat))
+# -
+
+sns.set_style
+sns.pairplot(pd.DataFrame(analysis_dict))
+plt.show()
+
+# +
+scores = -np.array(analysis_dict['log_density'])
+accuracy = np.array(analysis_dict['accuracy'])
+plt.plot(scores, accuracy, 'ro', alpha=0.03,
+        label="$i$th Network")
+plt.xlabel("Score (-log density)")
+plt.ylabel("Accuracy (AUC ROC)")
+plt.title("Accuracy Score Correlation for a Representative Trajectory")
+
+average_network = np.mean(_0_model14_0['samples']['pT'], axis=0)
+average_network_accuracy = sklearn.metrics.roc_auc_score(reference_flat, average_network)
+
+model14_log_density_func = partial(numpyro.infer.util.log_density,
+            model=model, model_args=(model_data,), model_kwargs={},)
+
+average_network_log_density, _ = model14_log_density_func(params={"pT": average_network})
+
+plt.plot(-average_network_log_density, average_network_accuracy, 'bo',
+        alpha=0.2, label="Average Network")
+
+true_network_accuracy = sklearn.metrics.roc_auc_score(reference_flat,
+                                                     reference_flat)
+true_network_log_density, _ = model14_log_density_func(params={"pT":
+                reference_flat})
+plt.plot(-true_network_log_density, true_network_accuracy,
+        'go', alpha=0.2, label="True Network")
+plt.legend()
+
+# Score of the true network
+_model_variations.model14
+
+
+#sns.pairplot(pd.DataFrame(analysis_dict))
+
+# -
+
+# Conclusion:
+# - The model score is well correlated to accuracy on this synthetic example.
+# - The average network achieves an accuracy of 0.87
+#
+# Is this a funciton of sampling?
+#
+
+
+
+numpyro.infer.util.potential_energy(model, 
+                                    model_args=(model_data,), 
+                                    model_kwargs={}, params={'pT': average_network})
+
+values = numpyro.infer.util.log_density(model, (model_data,), {}, 
+                                        {'pT': _0_model14_0['samples']['pT'] })
+
+# ?numpyro.infer.util.log_density
+
+sklearn.metrics.accuracy_score(np.array(data_flat), np.array(reference_flat))
+
+sklearn.metrics.roc_auc_score(reference_flat, data_flat)
+
+# ?sklearn.metrics.roc_auc_score
