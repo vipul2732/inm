@@ -23,6 +23,17 @@ Sampling:
 - 1 job per chain
 SampleBatch: 
 - A collection of several jobs and chains grouped together
+
+Composite connectivity
+
+1. Set up a particle system with 1 bead per node
+2. Define composites
+3. Apply composite connectivity
+4. Calculate contact frequencies
+5. Calculate a network based on composite connectivity
+6. Compare
+
+
 """
 
 import jax
@@ -39,6 +50,7 @@ from numpyro.infer import (
     init_to_uniform,
     )
 import click
+import pandas as pd
 import pickle as pkl
 import time
 import math
@@ -310,6 +322,21 @@ def model_10_wt(dim, condition_sel="wt"):
         with numpyro.plate('bait', 3):
             dist.sample("obs", dist.MultivariateNormal(mu, scale_tril=L_omega), obs=y) 
 
+def _body_sum_of_path_weights_up_to_N(i, v):
+    A, AN, W = v
+    # Update the distance matrix
+    W = W + AN 
+    # 
+    AN = A @ AN
+    v = A, AN, W
+    return v
+
+
+def sum_of_path_weights_up_to_N(A, N):
+    W = A 
+    A2 = A @ A
+    A, AN, W = jax.lax.fori_loop(2, N, _body_sum_of_path_weights_up_to_N, (A, A2, W))
+    return W 
 
 def _body_shortest_paths_up_to_N(i, v):
     A, AN, D = v
@@ -677,6 +704,8 @@ def flat2matrix(a, n: int, row_major=True):
         raise ValueError
     return M + M.T
 
+
+
 def model14_data_getter(ntest=3005, from_pickle=True):
     if from_pickle:
         with open("model14_data.pkl", "rb") as f:
@@ -700,8 +729,16 @@ def model14_data_getter(ntest=3005, from_pickle=True):
             jnp.array(shuffled_apms_correlation_matrix, dtype=jnp.float32))
     null_dist = Histrogram(flattened_shuffled_apms, bins=1000)
     return {"flattened_apms_similarity_scores" : flattened_apms_similarity_scores,
-            "null_dist" : null_dist} 
-    
+            "flattened_apms_shuffled_similarity_scores" : flattened_shuffled_apms}
+            #"null_dist" : null_dist} 
+
+def preyu2uid_mapping_dict():
+    apms_data_path = "../table1.csv"
+    apms_ids = pd.read_csv(apms_data_path)
+    # 1 to 1 mapping
+    reference_preyu2uid = {r['PreyGene'].removesuffix('_HUMAN'): r['UniprotId'] for i,r in apms_ids.iterrows()}
+    return reference_preyu2uid
+
 def model14(model_data):
     """
     M : pT_{i, j} edge weights
@@ -751,6 +788,8 @@ _model_dispatch = {
     "model_11_path_length": (model_11_path_length, init_to_uniform, lambda x: int(x)),
         }
 
+
+
 @click.command()
 @click.option("--model-id", type=str, help="identifier is prepended to saved files")
 @click.option("--rseed", type=int, default=0)
@@ -763,6 +802,12 @@ _model_dispatch = {
 @click.option("--include-extra-fields", is_flag=True, default=True) 
 @click.option("--progress-bar", is_flag=True, default=False)
 def main(model_id, rseed, model_name,model_data, num_warmup, num_samples, include_potential_energy, 
+    progress_bar, include_mean_accept_prob, include_extra_fields):
+    _main(model_id, rseed, model_name, model_data, num_warmup, num_samples,
+          include_potential_energy, progress_bar, include_mean_accept_prob,
+          include_extra_fields)
+
+def _main(model_id, rseed, model_name,model_data, num_warmup, num_samples, include_potential_energy, 
     progress_bar, include_mean_accept_prob, include_extra_fields):
     entered_main_time = time.time()
     rng_key = jax.random.PRNGKey(rseed)
@@ -806,7 +851,12 @@ def main(model_id, rseed, model_name,model_data, num_warmup, num_samples, includ
         init_strategy = init_to_uniform
     elif model_name == "model14":
         print("model14 in main")
-        model_data = model14_data_getter()
+        if model_data is None:
+            model_data = model14_data_getter()
+        else:
+            temp = model14_data_getter()
+            temp["flattened_apms_similarity_scores"] = model_data
+
         # test line
         model = model14
         init_strategy = init_to_uniform
