@@ -212,6 +212,13 @@ def weights2xarray(w, nnodes, cos_sim_matrix):
     weight_data = xr.DataArray(A, coords=cos_sim_matrix.coords)
     return weight_data
 
+def load_flattened_reference():
+    direct = load( "direct_benchmark.pkl")   
+    cocomplex = load("cocomplex_benchmark.pkl")
+    direct_reference = matrix2flat(direct.reference.matrix.values) # same method as data loading 
+    cocomplex_reference = matrix2flat(cocomplex.reference.matrix.values) 
+    return direct_reference, cocomplex_reference
+
 def get_auc_model14(trajectory_path: str, n_thresholds: int):
     """
     n_thresholds : the number of thresholds to interpolate between 0 and 1
@@ -274,7 +281,18 @@ def get_auc_model14(trajectory_path: str, n_thresholds: int):
         cocomplex_auc = sklearn.metrics.auc(cocomplex_xs, cocomplex_ys)
         cocomplex_auc_array[samples_idx] = cocomplex_auc
     return direct_auc_array, cocomplex_auc_array
+
+def generate_roc_curve(thresholds, reference, prediction):
+    xs = np.zeros(len(thresholds))
+    ys = np.zeros(len(thresholds))
+    for i, threshold in enumerate(thresholds):
+        direct_tpr, direct_ppr = roc_analysis(prediction, threshold, reference, len(reference))
+        xs[i] = direct_ppr
+        ys[i] = direct_tpr
+    return xs, ys
+
     
+
 def roc_analysis(pred_array, threshold, reference, N_expected_edges):
     binary_predictions = pred_array >= threshold
     positive_predictions = np.sum(binary_predictions)
@@ -312,6 +330,9 @@ def model14_traj2analysis(traj: str):
 @click.option("--model-name")
 @click.option("--fig-dpi", type=int, default=300)
 def main(trajectory_name, analysis_name, fig_dpi, model_name):
+    _main(trajectory_name, analysis_name, fig_dpi, model_name)
+
+def _main(trajectory_name, analysis_name, fig_dpi, model_name):
     dir_name = analysis_name + "__" + trajectory_name
     assert not Path(dir_name).is_dir()
     os.mkdir(dir_name) 
