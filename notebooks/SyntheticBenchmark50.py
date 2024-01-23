@@ -91,6 +91,309 @@ importlib.reload(synthetic_benchmark)
 importlib.reload(_model_variations)
 importlib.reload(analyze_mcmc_output)
 
+
+# +
+def synthetic_benchmark(analysis_name : str,
+                        n_prey : int,
+                        n_bait : int,
+                        d_crit : int
+                        dir_name : str,
+                        rseed : int,
+                        edge_probability : float,
+                        num_warmup=500,
+                        num_samples=1000,
+                        m_chains=400,
+                        fig_dpi=300,
+                        model_name="model14",
+                        initial_position = None,
+                        fit_up_to = 100,
+                        analyze_next_N = 100
+                        ):
+    """
+    Make a directoy, generate all figures
+    
+    Params:
+      analysis_name : A name for the analysis
+      n_prey : the number of prey types
+      n_bait : the number of bait types
+      d_crit : The maximal distance to search for shortest paths
+      dir_name : a path to a directory for the analysis
+      rseed : the seed for the random number generator
+      edge_probability : the independant edge probability for the ground truth network
+      num_warmup : number of warmup samples
+      num_samples : number of MCMC samples for the NUTS sampler
+      fig_dpi : the dpi for figures
+      model_name : the name of the model to use for inference
+      fit_up_to : Fit up to the next N trajectories
+      analyze_next_N: Get log density, accuracy, precision, for the next N trajectories
+      initial_position : instead of random intialization begin at a specific position
+      overwrite_directory : overwrite everything
+      
+    """
+    
+    # Make a directory
+    assert n_prey > 2
+    dir_path = Path(dir_name)
+    if not dir_path.is_dir():
+        dir_path.mkdir()
+        
+    # Set up logging
+    time = datetime.datetime.now()
+    log_filename = dir_path / f"{analysis_name}.log"
+    # Set up the logger
+    logging.basicConfig(filename=str(log_filename), encoding="utf-8", level=logging.DEBUG, format='%(asctime)s %(message)s')
+    logging.info("synthetic_benchmark()")
+    logging.info("Parameters")
+    logging.info(f"analysis_name:{analysis_name}")
+    logging.info(f"n_prey:{n_prey}")
+    logging.info(f"dir_name:{str(dir_name)}")
+    logging.info(f"rseed:{rseed}")
+    logging.info(f"edge_probability{edge_probability}")
+    logging.info(f"num_warmup:{num_warmup}")
+    logging.info(f"num_samples:{num_samples}")
+    logging.info(f"m_chains:{m_chains}")
+    logging.info(f"fig_dpi:{fig_dpi}")
+    logging.info(f"model_name:{model_name}")
+    
+    # Make the PRNGKey
+    key = jax.random.PRNGKey(rseed)
+    
+    key, keygen = jax.random.split(key)
+    A, bait_idx, prey_idx = synthetic_benchmark.get_bait_prey_network(key, n_prey=n_prey,
+                                                                     n_bait=n_bait, d_crit=d_crit)
+    
+    # Plot the ground truth network
+    A.plot() # xarray
+    plt.hlines(np.array(bait_idx), -1, 50, label="Bait", alpha=0.8, color='r')
+    plt.legend()
+    plt.savefig(str(dir_path / "GroundTruth.png"), dpi=fig_dpi)
+    
+    # Calculate the prey distance matrix
+    D = _model_variations.shortest_paths_up_to_23(A.values)
+    
+    # 
+    plt.matshow(D)
+    plt.colorbar(shrink=0.8, label="Shortest path")
+    plt.title("Ground Truth Distance Matrix")
+    plt.savefig(str(dir_path / "GroundTruthDistanceMatrix.png", dpi=fig_dpi))
+    
+    Gtruth = adjacency2graph(A, weighted=False)
+    
+    # Plot the connected components
+    nk.plot.connectedComponentsSizes(G)
+    plt.title("connected component sizes") # A single connected component
+    
+    # 1.1 Generate similarities
+    key, keygen = jax.random.PRNGKey(keygen)
+    data = synthetic_benchmark.data_from_network_model14_rng(key, A.values)
+    
+    # Plot the similarities
+    plt.matshow(data)
+    plt.colorbar(shrink=0.8, label="Profile similarity")
+    plt.savefig(str(dir_path / "SyntheticDataMatrix.png"), dpi=fig_dpi.dpi)
+    
+    # Plot the Ground truth contact map
+    plt.matshow(A.values, cmap="binary")
+    plt.colorbar(shrink=0.8, label="Edge weight")
+    plt.savefig(str(dir_path / "GroundTruthMatplot.png"), dpi=fig_dpi)
+    
+    # Flatten the inputs for modeling
+    
+    reference_flat = _model_variations.matrix2flat(A.values) # use this method to flatten and unflatten matrices
+    # so that indices are preserved
+    
+    data_flat =  _model_variations.matrix2flat(data)
+    assert len(data_flat) == math.comb(n_prey, 2)
+    
+    # Model 14 is the mixture model
+    # Model 15 has beta priors, not much different
+    
+    model14_names = ("model14", "model15")
+
+    if model_name in model14_names:
+        model_data = _model_variations.model14_data_getter()
+        model_data['flattened_apms_similarity_scores'] = data_flat
+        model = _model_variations.model14
+    else:
+        raise ValueError(f"Unknown model name {model_name}")
+    
+    # Plot the reference and causal edges
+    n_true = int(np.sum(reference_flat))
+    n_false = len(reference_flat) - n_true
+    plt.hist(np.array(data_flat[reference_flat == 0]), label=f"False ({n_false})", bins=100, alpha=0.5)
+    plt.hist(np.array(data_flat[reference_flat == 1]), label=f"True  ({n_true})", bins=100, alpha=0.5)
+    plt.xlabel("Profile Similarity (Pearson R)")
+    plt.ylabel("Frequency")
+    plt.legend()
+    plt.savefig(str(dir_path / "SynthDataDistributions.png"), dpi=fig_dpi)
+    
+    # Fit the model m_chain times writing to the file system
+    fit(model_name = model_name
+        m_chains = m_chains,
+        dir_path = dir_path,
+        data_flat = data_flat,
+        num_warmup = num_warmup,
+        num_samples = num_samples)
+    
+    # Load in the first trajectory
+    path = dir_path / f"0_{model_name}_0.pkl"
+    _0_model14_0 = _model_variations.load(str(path))
+    
+    if model_name in model14_names:
+        analysis_dict = analyze_mcmc_output.model14_traj2analysis(
+                str(path), 
+                model_data=model_data,
+                model=model,
+                reference=np.array(reference_flat))
+        
+    # Analyze samples
+    analyze_samples(m_chains = m_chains,
+                    dir_path = dir_path,
+                    model_name = model_name,
+                    model_data = model_data,
+                    model = model,
+                    reference_flat = reference_flat,
+                    analyze_next_N = analyze_next_N,)
+    
+    
+    else:
+        raise ValueError(f"Unkown model name {model_name}")
+
+        
+## 2.1 Fitting
+def fit(model_name="model14",
+        m_chains,
+        dir_path: Path,
+        data_flat,
+        num_warmup,
+        num_samples,
+        fit_up_to = 100):
+    logging.info("BEGIN sampling")
+    k = 0
+    for i in range(m_chains):
+        savename = dir_path / f"chain_{i}.pkl"
+        bool_savename = f"{str(dir_path)}/0_{model_name}_{i}.pkl"
+        if not Path(bool_savename).is_file():
+            logging.info(f"BEGIN sampling {savename}")
+            _model_variations._main(
+            model_id="0",
+            model_name=model_name,
+            rseed=i,
+            model_data=data_flat,
+            num_warmup=num_warmup,
+            num_samples=num_samples,
+            include_potential_energy=True,
+            progress_bar=True,
+            save_dir=str(dir_path),
+            include_mean_accept_prob=False,
+            include_extra_fields=True)
+            logging.info(f"END sampling {savename}")
+            k += 1
+            if k >= fit_up_to:
+                break
+    logging.info("END sampling")
+            
+
+## 2.1 Fitting
+def _2_1_fit(model_name="model14"):
+    for i in range(nb.m_chains):
+        savename = Path("SyntheticBenchmark50/") / f"chain_{i}.pkl"
+        bool_savename = f"SyntheticBenchmark50/0_{model_name}_{i}.pkl"
+        if not Path(bool_savename).is_file():
+            logging.info(f"BEGIN sampling {savename}")
+            _model_variations._main(
+            model_id="0",
+            model_name=model_name,
+            rseed=i,
+            model_data=data_flat,
+            num_warmup=nb.num_warmup,
+            num_samples=nb.num_samples,
+            include_potential_energy=True,
+            progress_bar=True,
+            save_dir="SyntheticBenchmark50",
+            include_mean_accept_prob=False,
+            include_extra_fields=True)
+            logging.info(f"END sampling {savename}")
+        else:
+            logging.info(f"SKIP sampling {savename} exists.")  
+
+            
+def analyze_samples(m_chains,
+                    dir_path,
+                    model_name,
+                    model_data,
+                    model,
+                    reference_flat,
+                    analyze_next_N):
+    k = 0
+    for i in range(m_chains):
+        # Load in the trajectory
+        save_path = dir_path / f"0_{model_name}_{i}_analysis.pkl"
+        if not save_path.is_file():
+            k += 1
+            logging.info(f"WRITE analysis for {str(save_path)}")
+
+            traj_path = dir_path / f"0_{model_name}_{i}.pkl"
+            #d = _model_variations.load(path)
+
+            # Calculate sampling analysis for each trajectory
+            if model_name in ("model14", "model15"):
+            analysis_dict = analyze_mcmc_output.model14_traj2analysis(str(traj_path), 
+                    model_data=model_data, model=model, reference=np.array(reference_flat))
+            else:
+                raise NotImplementedError
+            # do the sampling analysis
+              # calc top score
+              # calc accuracy array
+              # get the top accuracy
+
+              # 0_model14_0 : {top_score, accuracy_array, top_accuracy, potential_energy}
+            with open(str(save_path), "wb") as f:
+                pkl.dump(analysis_dict, f)
+            if k >= analyze_next_N:
+                break
+    return analysis_dict
+
+## 3.1 Sampling Analysis
+def _3_1():
+    for i in range(nb.m_chains):
+        # Load in the trajectory
+        save_path = Path(f"SyntheticBenchmark50/0_model14_{i}_analysis.pkl")
+        if not save_path.is_file():
+            logging.info(f"WRITE analysis for {str(save_path)}")
+
+            path = Path("SyntheticBenchmark50/") / f"0_model14_{i}.pkl"
+            #d = _model_variations.load(path)
+
+            # Calculate sampling analysis for each trajectory
+            analysis_dict = analyze_mcmc_output.model14_traj2analysis(str(path), 
+                    model_data=model_data, model=model, reference=np.array(reference_flat))
+            # do the sampling analysis
+              # calc top score
+              # calc accuracy array
+              # get the top accuracy
+
+              # 0_model14_0 : {top_score, accuracy_array, top_accuracy, potential_energy}
+            with open(str(save_path), "wb") as f:
+                pkl.dump(analysis_dict, f)
+        else:
+            logging.info(f"SKIP Writing analysis for {str(save_path)}")
+    return analysis_dict
+    
+def adjacency2graph(A, weighted=False):
+    n, m = A.shape
+    G = nk.Graph(n, weighted=weighted)
+    for u in range(n):
+        for v in range(u+1, m):
+            w = A[u, v]
+            if weighted:
+                G.addEdge(u, v, w)
+            else:
+                if w > 0:
+                    G.addEdge(u, v, w)
+    return G
+
+
 # -
 
 ## -1.2 Make a directory if it doesn't exist
@@ -144,24 +447,6 @@ D = _model_variations.shortest_paths_up_to_23(A.values)
 plt.matshow(D)
 plt.colorbar(shrink=0.8, label="Shortest path")
 
-
-# +
-def adjacency2graph(A, weighted=False):
-    n, m = A.shape
-    G = nk.Graph(n, weighted=weighted)
-    for u in range(n):
-        for v in range(u+1, m):
-            w = A[u, v]
-            if weighted:
-                G.addEdge(u, v, w)
-            else:
-                if w > 0:
-                    G.addEdge(u, v, w)
-    return G
-                
-            
-# -
-
 G = adjacency2graph(A)
 
 nk.plot.connectedComponentsSizes(G)
@@ -183,6 +468,7 @@ plt.savefig(str(nb.dir_path / "GroundTruthMatplot.png"), dpi=nb.dpi)
 #
 # $y_{u,v} \sim p(y_{u,v} | \pi_{T_{u,v}})$
 
+# +
 reference_flat = _model_variations.matrix2flat(A.values)
 
 data_flat =  _model_variations.matrix2flat(data)
@@ -191,10 +477,10 @@ assert len(data_flat) == math.comb(nb.n_prey, 2)
 model_data = _model_variations.model14_data_getter()
 model_data['flattened_apms_similarity_scores'] = data_flat
 model = _model_variations.model14
+# -
 
 model_data.keys()
 
-# +
 n_true = int(np.sum(reference_flat))
 n_false = len(reference_flat) - n_true
 plt.hist(np.array(data_flat[reference_flat == 0]), label=f"False ({n_false})", bins=100, alpha=0.5)
@@ -202,11 +488,7 @@ plt.hist(np.array(data_flat[reference_flat == 1]), label=f"True  ({n_true})", bi
 plt.xlabel("Profile Similarity (Pearson R)")
 plt.ylabel("Frequency")
 plt.legend()
-
 plt.savefig(str(nb.dir_path / "SynthDataDistributions.png"), dpi=nb.dpi)
-# -
-
-990 / (990 + 235)
 
 
 # +
@@ -241,32 +523,8 @@ _0_model14_0 = _model_variations.load(str(path))
 analysis_dict = analyze_mcmc_output.model14_traj2analysis(str(path), 
         model_data=model_data, model=model, reference=np.array(reference_flat))
 
+# +
 
-## 3.1 Sampling Analysis
-def _3_1():
-    for i in range(nb.m_chains):
-        # Load in the trajectory
-        save_path = Path(f"SyntheticBenchmark50/0_model14_{i}_analysis.pkl")
-        if not save_path.is_file():
-            logging.info(f"WRITE analysis for {str(save_path)}")
-
-            path = Path("SyntheticBenchmark50/") / f"0_model14_{i}.pkl"
-            #d = _model_variations.load(path)
-
-            # Calculate sampling analysis for each trajectory
-            analysis_dict = analyze_mcmc_output.model14_traj2analysis(str(path), 
-                    model_data=model_data, model=model, reference=np.array(reference_flat))
-            # do the sampling analysis
-              # calc top score
-              # calc accuracy array
-              # get the top accuracy
-
-              # 0_model14_0 : {top_score, accuracy_array, top_accuracy, potential_energy}
-            with open(str(save_path), "wb") as f:
-                pkl.dump(analysis_dict, f)
-        else:
-            logging.info(f"SKIP Writing analysis for {str(save_path)}")
-    return analysis_dict
 _3_1()
 
 # +
