@@ -108,7 +108,7 @@ def synthetic_benchmark_fn(analysis_name : str,
                         fit_up_to = 100,
                         analyze_next_N = 100,
                         generate_cartoon_figures = True,
-                        chain_combos_up_to_N = 10,
+                        n_successive_trajectories_to_analyze = 100,
                         ):
     """
     Make a directoy, generate all figures
@@ -228,7 +228,6 @@ def synthetic_benchmark_fn(analysis_name : str,
         model = _model_variations.model14
     else:
         raise ValueError(f"Unknown model name {model_name}")
-    
     # Plot the reference and causal edges
     fig, ax = plt.subplots()
     n_true = int(np.sum(reference_flat))
@@ -248,22 +247,22 @@ def synthetic_benchmark_fn(analysis_name : str,
         data_flat = data_flat,
         num_warmup = num_warmup,
         num_samples = num_samples,
-        fit_up_to = fit_up_to)
-    
+        fit_up_to = fit_up_to,
+        initial_position = initial_position)
     # Load in the first trajectory
-    path = dir_path / f"0_{model_name}_0.pkl"
+    example_path = dir_path / f"0_{model_name}_0.pkl"
     # Example trajectory
-    _0_model14_0 = _model_variations.load(str(path))
+    example_samples = _model_variations.load(str(example_path))
     
     if model_name in model14_names:
         analysis_dict = analyze_mcmc_output.model14_traj2analysis(
-                str(path), 
+                str(example_path), 
                 model_data=model_data,
                 model=model,
                 reference=np.array(reference_flat))
     else:
         raise ValueError(f"Unkown model name {model_name}")
-        
+    logging.info("Analyzing samples")        
     # Analyze samples
     analyze_samples(m_chains = m_chains,
                     dir_path = dir_path,
@@ -302,10 +301,10 @@ def synthetic_benchmark_fn(analysis_name : str,
         plt.xlim(-2, 2)
         plt.savefig(f"{str(dir_path)}/HighUncertaintyCartoon.png", dpi=fig_dpi)
         plt.close()
-    
+
     # Accuracy score correlation for an example trajectory
     average_network = accuracy_plot(analysis_dict = analysis_dict,
-                                    samples = samples,
+                                    samples = example_samples,
                                     model = model,
                                     model_data = model_data,
                                     model_name = model_name,
@@ -318,14 +317,13 @@ def synthetic_benchmark_fn(analysis_name : str,
     # Why are the accuracy and precision in different modules?
     # Should place all benchmarking funcitons in a single module 
     average_precision = analyze_mcmc_output.model14_ap_score(
-            traj_path = str(path), 
+            traj_path = str(example_path), 
             model = model,
             model_data = model_data,
             reference = np.array(reference_flat))
        
     precision_plot(
             analysis_dict = analysis_dict,
-            scores = scores,
             average_precision = average_precision,
             reference_flat = reference_flat,
             average_network = average_network,
@@ -354,17 +352,24 @@ def synthetic_benchmark_fn(analysis_name : str,
     plt.legend()
     plt.savefig(str(dir_path / "ExampleTwoEdges.png"), dpi=fig_dpi)
 
-    logging.info("Calculate chain combinations")
-    key, keygen  = jax.random.split(keygen)
-    combos = calculate_chain_combinations(key = key, chain_combos_up_to_N = chain_combos_up_to_N)
-    # Refactor this plot
-    top_combo_scores, top_combo_accuracy = calc_top_score_top_accuracy(combos)
+    #
+    acc_mat, scr_mat = get_top_accuracy_and_top_score_matrices_from_dir(
+            dir_path = dir_path,
+            traj_idx_arr = n_successive_trajectories_to_analyze,
+            n = num_samples,
+            model_name = model_name)
+    results = calc_top_score_top_accuracy(
+            rng_key = key,
+            accuracy_matrix = acc_mat,
+            score_matrix = scr_mat,
+            k = num_bootstraps,
+            J = n_successive_trajectories_to_analyze)
     top_accuracy_top_score_figure(
-            top_combos_scores = top_combo_scores,
-            top_combo_accuracy = top_combo_accuracy,
-            dir_name = dir_name,
-            fig_dpi = fig_dpi,)
-
+            dir_path,
+            results,
+            n_successive_trajectories_to_analyze,
+            fig_dpi)
+            
 def _():
     """
     1. For k trajectories get successive trajectory groups
@@ -383,10 +388,22 @@ def fit(
         num_warmup,
         num_samples,
         model_name="model14",
-        fit_up_to = 100):
+        fit_up_to = 100,
+        initial_position = None):
     logging.info("BEGIN sampling")
     k = 0
+    warmup_savename = "0" + "_" + model_name + "_" + "hmc_warmup.pkl"
+    warmup_savepath = dir_path / warmup_savename 
     for i in range(m_chains):
+        k += 1
+        if k >= fit_up_to:
+            break
+        if warmup_savepath.is_file():
+            load_warmup = True
+            save_warmup = False
+        else:
+            load_warmup = False
+            save_warmup = True
         savename = dir_path / f"chain_{i}.pkl"
         bool_savename = f"{str(dir_path)}/0_{model_name}_{i}.pkl"
         if not Path(bool_savename).is_file():
@@ -402,11 +419,11 @@ def fit(
             progress_bar=True,
             save_dir=str(dir_path),
             include_mean_accept_prob=False,
-            include_extra_fields=True)
+            include_extra_fields=True,
+            save_warmup = save_warmup,
+            load_warmup = load_warmup,
+            initial_position = initial_position)
             logging.info(f"END sampling {savename}")
-            k += 1
-            if k >= fit_up_to:
-                break
     logging.info("END sampling")
 
 ## 2.1 Fitting
@@ -505,12 +522,15 @@ def analyze_samples(m_chains,
                     model,
                     reference_flat,
                     analyze_next_N):
+    analysis_dict = {}
     k = 0
     for i in range(m_chains):
         # Load in the trajectory
         save_path = dir_path / f"0_{model_name}_{i}_analysis.pkl"
         if not save_path.is_file():
             k += 1
+            if k >= analyze_next_N:
+                break
             logging.info(f"WRITE analysis for {str(save_path)}")
 
             traj_path = dir_path / f"0_{model_name}_{i}.pkl"
@@ -533,8 +553,6 @@ def analyze_samples(m_chains,
               # 0_model14_0 : {top_score, accuracy_array, top_accuracy, potential_energy}
             with open(str(save_path), "wb") as f:
                 pkl.dump(analysis_dict, f)
-            if k >= analyze_next_N:
-                break
     return analysis_dict
 
 ## 3.1 Sampling Analysis
@@ -576,8 +594,8 @@ def adjacency2graph(A, weighted=False):
                     G.addEdge(u, v, w)
     return G
 
-def precision_plot(analysis_dict, scores, average_precision, reference_flat, average_network, model_name, dir_path, fig_dpi,):
-    #scores = -np.array(analysis_dict['log_density'])
+def precision_plot(analysis_dict, average_precision, reference_flat, average_network, model_name, dir_path, fig_dpi,):
+    scores = -np.array(analysis_dict['log_density'])
     #accuracy = np.array(analysis_dict['accuracy'])
     plt.plot(scores,
             average_precision['AP'],
