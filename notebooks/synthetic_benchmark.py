@@ -62,7 +62,6 @@ Index combinations of trajectories from 1 to A
 - Calculate combinations without replacement 
 
 Naming Conventions
-
 """
 
 import jax
@@ -70,6 +69,7 @@ import jax.numpy as jnp
 import numpy as np
 import math
 import _model_variations as mv
+import pickle as pkl
 import xarray as xr
 
 _test_key = jax.random.PRNGKey(0)
@@ -149,22 +149,54 @@ def get_connected_network_from_distance(A, D, d_crit, bait_idx_array,
     Aconnected = A.sel(preyu=prey_idx, preyv=prey_idx)
     return Aconnected, prey_idx
 
-def generate_synthetic_network_composites(key, N, edge_prob, bait_idx_array):
+def get_bait_prey_network(rng_key, n_prey, n_bait: int, d_crit,
+                          edge_prob=0.2, max_path_length=21):
     """
-    Params
-    key : prng key
-    N : the number of nodes in the network
-    edge_prob : the probability an edge occurs 
-    bait_list : an array of bait indices 
-    d_crit : the distance threshold (taxicab) from which to remove prey if they
-    are not connected to any bait.
+    A jax PRNGKey
+    n_bait : the number of unique bait types
+    d_crit : The maximal distance to at which prey are not considered connected
+    to the bait
+    edge_prob : the independant edge probability
+    max_path_length : the maximal length of paths for distance matrix calculation
+    """
+    assert n_prey > n_bait , "There must be more prey types than bait types"
+    keys = jax.random.split(rng_key, 2) 
+    A, D = adjacency_and_distance_rng(keys[0], n_prey, edge_prob, max_path_length)  
+    bait_idx_array = bait_list_rng(keys[1], n_prey, n_bait)
+    Aconnected, prey_idx = get_connected_network_from_distance(A, D, d_crit,
+                           bait_idx_array)
+    return Aconnected, bait_idx_array, prey_idx
+     
 
-    Returns:
-      An adjaceny matrix of of the generated network 
-    """
 
-def generate_synthetic_data_from_network(key, A, model_name = "model14"):
+
+def data_from_network_model14_rng(rng_key, A, mu=0.23, sigma=0.21, ntest=3005):
     """
-    Using the data likelihood generate synthetic data
+    Assume a binary matrix input A 
+    Given an adjacency matrix  
+    mu : 0.23
+    sigma : 0.21
+    Assumptions : Same number of conditions
+    Params:
+    1. Load in the network
+    2. Count the number of edges
+    3. Generate that many samples from the causal distribution
+    4. Generate the remaining using the null 
     """
-    ...
+    k1, k2 = jax.random.split(rng_key)
+    A = A.astype(bool)
+    causal = jax.random.normal(k1, A.shape) * sigma + mu  
+    # Load in null data
+    with open("shuffled_apms_correlation_matrix.pkl", "rb") as f:
+        shuffled_apms_correlation_matrix = pkl.load(f)
+    shuffled_apms_correlation_matrix = shuffled_apms_correlation_matrix[0:ntest, 0:ntest]
+    flattened_shuffled_apms = mv.matrix2flat(
+            jnp.array(shuffled_apms_correlation_matrix, dtype=jnp.float32))
+    null_dist = mv.Histogram(flattened_shuffled_apms, bins=1000)
+    Null = null_dist.sample(k2, sample_shape=A.shape)
+    Samples = jnp.where(A, causal, Null) 
+    Samples = jnp.tril(Samples, k=-1)
+    Samples = Samples + Samples.T
+    return Samples
+
+
