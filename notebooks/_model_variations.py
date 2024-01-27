@@ -50,6 +50,7 @@ from numpyro.infer import (
     init_to_uniform,
     )
 import click
+from pathlib import Path
 import pandas as pd
 import pickle as pkl
 import time
@@ -749,7 +750,7 @@ def model14(model_data):
     flattened_apms_similarity_scores = jnp.array(
             flattened_apms_similarity_scores, dtype=jnp.float32)
     # Test line
-    ntest = model_data['ntest']
+    #ntest = model_data['ntest']
     flattened_apms_similarity_scores = flattened_apms_similarity_scores#[0:ntest]
     shuffled = model_data["flattened_apms_shuffled_similarity_scores"]#[0:ntest]
     N = flattened_apms_similarity_scores.shape[0]
@@ -758,6 +759,43 @@ def model14(model_data):
     #mixture_probs = numpyro.sample("mixture_probs", dist.Dirichlet(jnp.ones(K)).expand([N,]))
     # Prior edge probability is 0.67
     pT = numpyro.sample("pT", dist.Uniform(0, 1).expand([N,]))
+    #pT = numpyro.sample("pT", dist.Beta(4, 2).expand([N,])) # Mean is 0.66
+    mixture_probs = jnp.array([pT, 1-pT]).T
+    # 1. Null distribution
+    null_dist = Histogram(shuffled, bins=1000).expand([N,])
+    # Hyper priors 0.23 and 0.22 are set from previous modeling
+    causal_dist = dist.Normal(0.23, 0.22).expand([N,]) 
+    #means = numpyro.sample("means", dist.Normal(0, 5).expand([N, K]))
+    #stds = numpyro.sample("stds", dist.HalfNormal(5).expand([N, K]))
+    #components = dist.Normal(means, stds)
+    mixtures = dist.MixtureGeneral(dist.Categorical(probs=mixture_probs),
+                                  [causal_dist, null_dist])
+    numpyro.sample("obs", mixtures, obs=flattened_apms_similarity_scores)
+
+def model15(model_data):
+    """"
+    Model 15 is exactly the same as model 14 except we use a non uniform prior
+    for the edge weight
+    """
+    """
+    M : pT_{i, j} edge weights
+    """
+    #assert data.shape[0] == N, "The number of data points must be equal to N"
+    # Load in variables from model data to allow proper tracing
+    flattened_apms_similarity_scores = model_data["flattened_apms_similarity_scores"]
+    flattened_apms_similarity_scores = jnp.array(
+            flattened_apms_similarity_scores, dtype=jnp.float32)
+    # Test line
+    #ntest = model_data['ntest']
+    flattened_apms_similarity_scores = flattened_apms_similarity_scores#[0:ntest]
+    shuffled = model_data["flattened_apms_shuffled_similarity_scores"]#[0:ntest]
+    N = flattened_apms_similarity_scores.shape[0]
+    #null_dist = model_data['null_dist']
+    #null_dist = null_dist.expand([N,])
+    #mixture_probs = numpyro.sample("mixture_probs", dist.Dirichlet(jnp.ones(K)).expand([N,]))
+    # Prior edge probability is 0.67
+    # Hyperprior set by plotting Beta Distribution during Synthetic Benchmark50 notebook
+    pT = numpyro.sample("pT", dist.Beta(0.5, 0.5)) 
     #pT = numpyro.sample("pT", dist.Beta(4, 2).expand([N,])) # Mean is 0.66
     mixture_probs = jnp.array([pT, 1-pT]).T
     # 1. Null distribution
@@ -788,32 +826,7 @@ _model_dispatch = {
     "model_11_path_length": (model_11_path_length, init_to_uniform, lambda x: int(x)),
         }
 
-
-
-@click.command()
-@click.option("--model-id", type=str, help="identifier is prepended to saved files")
-@click.option("--rseed", type=int, default=0)
-@click.option("--model-name", type=str)
-@click.option("--model-data")
-@click.option("--num-warmup", type=int)
-@click.option("--num-samples", type=int)
-@click.option("--include-potential-energy", is_flag=True, default=False)
-@click.option("--include-mean-accept-prob", is_flag=True, default=False)
-@click.option("--include-extra-fields", is_flag=True, default=True) 
-@click.option("--progress-bar", is_flag=True, default=False)
-def main(model_id, rseed, model_name,model_data, num_warmup, num_samples, include_potential_energy, 
-    progress_bar, include_mean_accept_prob, include_extra_fields):
-    _main(model_id, rseed, model_name, model_data, num_warmup, num_samples,
-          include_potential_energy, progress_bar, include_mean_accept_prob,
-          include_extra_fields)
-
-def _main(model_id, rseed, model_name,model_data, num_warmup, num_samples, include_potential_energy, 
-    progress_bar, include_mean_accept_prob, include_extra_fields):
-    entered_main_time = time.time()
-    rng_key = jax.random.PRNGKey(rseed)
-    eprint(f"Model ID: {model_id}")
-    eprint(f"Model Name: {model_name}")
-    eprint(jax.devices())
+def model_dispatcher(model_name, model_data):
     if model_name in _model_dispatch:
         model, init_strategy, data_func = _model_dispatch[model_name]
         model_data = data_func(model_data)
@@ -856,12 +869,98 @@ def _main(model_id, rseed, model_name,model_data, num_warmup, num_samples, inclu
         else:
             temp = model14_data_getter()
             temp["flattened_apms_similarity_scores"] = model_data
-
+            model_data = temp
         # test line
         model = model14
         init_strategy = init_to_uniform
+    elif model_name == "model15":
+        print("model15 in main")
+        if model_data is None:
+            model_data = model14_data_getter()
+        else:
+            temp = model14_data_getter()
+            temp["flattened_apms_similarity_scores"] = model_data
+            model_data = temp
+        # test line
+        model = model15
+        init_strategy = init_to_uniform
     else:
         raise ValueError(f"Invalid {model_name}")
+    return model, model_data, init_strategy
+
+def init_position_dispatcher(initial_position_fp, model_id):
+    if model_id == "model_14":
+        with open(initial_position_fp, "rb") as f:
+            d = pkl.load(f) # dictionary of sample sites
+        return init_to_value(values=d)
+    else:
+        raise NotImplementedError 
+
+    
+
+@click.command()
+@click.option("--model-id", type=str, help="identifier is prepended to saved files")
+@click.option("--rseed", type=int, default=0)
+@click.option("--model-name", type=str)
+@click.option("--model-data")
+@click.option("--num-warmup", type=int)
+@click.option("--num-samples", type=int)
+@click.option("--include-potential-energy", is_flag=True, default=False)
+@click.option("--include-mean-accept-prob", is_flag=True, default=False)
+@click.option("--include-extra-fields", is_flag=True, default=True) 
+@click.option("--progress-bar", is_flag=True, default=False)
+@click.option("--save-dir", default=None)
+@click.option("--initial-position", default=None)
+@click.option("--save-warmup", default=False)
+@click.option("--load-warmup", default=False)
+def main(model_id,
+         rseed,
+         model_name,
+         model_data,
+         num_warmup,
+         num_samples,
+         include_potential_energy,
+         include_mean_accept_prob,
+         indluce_extra_fields,
+         progress_bar,
+         save_dir,
+         initial_position,
+         save_warmup,
+         load_warmup):
+    _main(model_id = model_id,
+          rseed = rseed,
+          model_name = model_name,
+          model_data = model_data,
+          num_warmup = num_warmup,
+          num_samples = num_samples,
+          include_potential_energy = include_potential_energy,
+          include_mean_accept_prob = include_mean_accept_prob,
+          include_extra_fields = include_extra_fields,
+          progress_bar = progress_bar,
+          save_dir = save_dir,
+          initial_position = initial_position,
+          save_warmup = save_warmup,
+          load_warmup = load_warmup)
+
+def _main(model_id,
+         rseed,
+         model_name,
+         model_data,
+         num_warmup,
+         num_samples,
+         include_potential_energy,
+         include_mean_accept_prob,
+         include_extra_fields,
+         progress_bar,
+         save_dir,
+         initial_position,
+         save_warmup,
+         load_warmup):
+    entered_main_time = time.time()
+    rng_key = jax.random.PRNGKey(rseed)
+    eprint(f"Model ID: {model_id}")
+    eprint(f"Model Name: {model_name}")
+    eprint(jax.devices())
     extra_fields = ()
     if include_extra_fields:
         extra_fields = ("potential_energy", # N
@@ -878,15 +977,30 @@ def _main(model_id, rseed, model_name,model_data, num_warmup, num_samples, inclu
                             # step_size N
                         #"trajectory_length",
         )
-
+    model, model_data, init_strategy = model_dispatcher(model_name, model_data)
     if include_potential_energy:
         extra_fields = extra_fields + ("potential_energy",)
     if include_mean_accept_prob:
         extra_fields = extra_fields + ("mean_accept_prob",)
 
+    # Check if we should initalize to a certain value
+    if initial_position:
+        init_strategy = init_position_dispatcher(initial_position, model_id)
+    warmup_savename = model_id + "_" + model_name + "_" + "hmc_warmup.pkl"
+    warmup_savename = str(Path(save_dir) / warmup_savename)
     nuts = NUTS(model, init_strategy=init_strategy)
     # Do the warmup
     mcmc = MCMC(nuts, num_warmup=num_warmup, num_samples=num_samples, progress_bar=progress_bar)
+    if save_warmup:
+        rng_key, key = jax.random.split(rng_key)
+        mcmc.warmup(key, model_data = model_data)
+        warmup_state = mcmc.last_state
+        with open(warmup_savename, "wb") as f:
+            pkl.dump(warmup_state, f)
+    if load_warmup:
+        with open(warmup_savename, "rb") as f:
+            warmup_state = pkl.load(f)
+        mcmc.post_warmup_state = warmup_state 
     mcmc.run(rng_key, model_data, extra_fields=extra_fields)
     finished_mcmc_time = time.time()
     elapsed_time = finished_mcmc_time - entered_main_time
@@ -895,15 +1009,15 @@ def _main(model_id, rseed, model_name,model_data, num_warmup, num_samples, inclu
     eprint(f"elapsed time (m): {elapsed_time / 60}")
     eprint(f"elapsed time (h): {elapsed_time / (60 * 60)}")
     savename = model_id + "_" + model_name + "_" + str(rseed) + ".pkl"
+    if save_dir is not None:
+        savename = Path(save_dir) / savename
+        savename = str(savename)
     fields = mcmc.get_extra_fields()
     samples = mcmc.get_samples()
+
     out = {"extra_fields": fields, "samples": samples, "elapsed_time": elapsed_time,
            }
     with open(savename, "wb") as file:
         pkl.dump(out, file) 
-
 if __name__ == "__main__":
     main()
-
-#model_id, rseed, model_name,
-#         model_data, num_warmup, num_samples, include_potential_energy

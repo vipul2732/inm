@@ -109,6 +109,8 @@ def synthetic_benchmark_fn(analysis_name : str,
                         analyze_next_N = 100,
                         generate_cartoon_figures = True,
                         n_successive_trajectories_to_analyze = 100,
+                        num_bootstraps = 50,   
+                        init_to_value_fp = None,
                         ):
     """
     Make a directoy, generate all figures
@@ -129,7 +131,7 @@ def synthetic_benchmark_fn(analysis_name : str,
       analyze_next_N: Get log density, accuracy, precision, for the next N trajectories
       initial_position : instead of random intialization begin at a specific position
       overwrite_directory : overwrite everything
-      
+      init_to_value_fp : use an initial position when sampling if the file path is set  
     """
     
     # Make a directory
@@ -240,6 +242,9 @@ def synthetic_benchmark_fn(analysis_name : str,
     plt.savefig(str(dir_path / "SynthDataDistributions.png"), dpi=fig_dpi)
     plt.close()
     
+    # Make the inital position relative to the analysis directory
+    if initial_position is not None:
+        initial_position = str(dir_path / initial_posiiton)
     # Fit the model m_chain times writing to the file system
     fit(model_name = model_name,
         m_chains = m_chains,
@@ -328,29 +333,50 @@ def synthetic_benchmark_fn(analysis_name : str,
             reference_flat = reference_flat,
             average_network = average_network,
             model_name = "model14",
+            model = model,
+            model_data = model_data,
             dir_path = dir_path,
             fig_dpi = fig_dpi)
     # decoy_1 = reference_flat * 0.21
 
     # Plot example score distributions for two edges
-
+    fig, ax = plt.subplots()
+    scores = analysis_dict['log_density'] * -1
     plt.plot(-scores)
     plt.xlabel("MCMC Step")
     plt.ylabel("Score (-log density)")
     plt.savefig(str(dir_path / "ExampleCatterpilliar.png"), dpi=fig_dpi)
+    plt.close()
     
+    fig, ax = plt.subplots()
     plt.hist(-scores, bins=30)
     plt.xlabel("Score")
     plt.ylabel("Frequency")
     plt.savefig(str(dir_path / "ExampleScoreDistribution.png"), dpi=fig_dpi)
-    
-    plt.hist(_0_model14_0['samples']['pT'][:, 0], bins=100, label="False Edge")
-    plt.hist(_0_model14_0['samples']['pT'][:, 2], bins=100, alpha=0.5, label="True Edge")
+    plt.close()
+
+    fig, ax = plt.subplots()
+    # Select the first true and false edges
+    true_edge_idx = 0
+    false_edge_idx = 0
+    for i in range(n_prey):
+        if reference_flat[i] == 1:
+            break
+    true_edge_idx = i
+    for i in range(n_prey):
+        if reference_flat[i] == 0:
+            break
+    false_edge_idx = i
+
+
+    plt.hist(example_samples['samples']['pT'][:, false_edge_idx], bins=100, label="False Edge")
+    plt.hist(example_samples['samples']['pT'][:, true_edge_idx], bins=100, alpha=0.5, label="True Edge")
     plt.title("Representative Distributions for two edges")
     plt.xlabel("$\pi_T$")
     plt.ylabel("Frequency")
     plt.legend()
     plt.savefig(str(dir_path / "ExampleTwoEdges.png"), dpi=fig_dpi)
+    plt.close()
 
     #
     acc_mat, scr_mat = get_top_accuracy_and_top_score_matrices_from_dir(
@@ -358,6 +384,7 @@ def synthetic_benchmark_fn(analysis_name : str,
             traj_idx_arr = n_successive_trajectories_to_analyze,
             n = num_samples,
             model_name = model_name)
+
     results = calc_top_score_top_accuracy(
             rng_key = key,
             accuracy_matrix = acc_mat,
@@ -461,6 +488,7 @@ def accuracy_plot(analysis_dict, samples, model, model_data, model_name,
     6. Saves the plots
     7. Returns the average network from step 2
     """
+    fig, ax = plt.subplots()
     # Place scores and accuracy in arrays
     scores = -np.array(analysis_dict['log_density'])
     accuracy = np.array(analysis_dict['accuracy'])
@@ -512,6 +540,7 @@ def accuracy_plot(analysis_dict, samples, model, model_data, model_name,
         save_name = str(save_path) + "_decoy.png"
     plt.legend()
     plt.savefig(save_name, dpi=fig_dpi)
+    plt.close()
     # Return average network
     return average_network
 
@@ -534,6 +563,9 @@ def analyze_samples(m_chains,
             logging.info(f"WRITE analysis for {str(save_path)}")
 
             traj_path = dir_path / f"0_{model_name}_{i}.pkl"
+            if not traj_path.is_file():
+                logging.info(f"{str(traj_path)} is not a file. Skipping")
+                continue
             #d = _model_variations.load(path)
 
             # Calculate sampling analysis for each trajectory
@@ -594,9 +626,10 @@ def adjacency2graph(A, weighted=False):
                     G.addEdge(u, v, w)
     return G
 
-def precision_plot(analysis_dict, average_precision, reference_flat, average_network, model_name, dir_path, fig_dpi,):
+def precision_plot(analysis_dict, average_precision, reference_flat, average_network, model_name, model, model_data, dir_path, fig_dpi,):
     scores = -np.array(analysis_dict['log_density'])
     #accuracy = np.array(analysis_dict['accuracy'])
+    fig, ax = plt.subplots()
     plt.plot(scores,
             average_precision['AP'],
             'ro',
@@ -608,17 +641,20 @@ def precision_plot(analysis_dict, average_precision, reference_flat, average_net
 
     #average_network = np.mean(_0_model14_0['samples']['pT'], axis=0)
     #average_network_accuracy = sklearn.metrics.roc_auc_score(reference_flat, average_network)
-
-    #model14_log_density_func = partial(numpyro.infer.util.log_density,
-                #model=model, model_args=(model_data,), model_kwargs={},)
-
-    #average_network_log_density, _ = model14_log_density_func(params={"pT": average_network})
+    
+    if model_name == "model14":
+        log_density_func = partial(numpyro.infer.util.log_density,
+                    model=model, model_args=(model_data,), model_kwargs={},)
+    else:
+        raise NotImplementedError
+    average_network_log_density, _ = log_density_func(params={"pT": average_network})
     average_network_precision = sklearn.metrics.average_precision_score(reference_flat, average_network)
     plt.plot(-average_network_log_density, average_network_precision, 'b+',
             label="Average Network")
 
     true_network_precision = sklearn.metrics.average_precision_score(reference_flat,
                                                          reference_flat)
+    true_network_log_density, _ = log_density_func(params={"pT": np.clip(reference_flat, 0.001, 0.999)})
     plt.plot(-true_network_log_density, true_network_precision,
             'g^', label="True Network")
     plt.legend()
@@ -626,13 +662,14 @@ def precision_plot(analysis_dict, average_precision, reference_flat, average_net
     # Score of the true network
 
     all_scores = -np.array(list(analysis_dict['log_density']) + [average_network_log_density] + [true_network_log_density])
-    all_accuracy = np.array(list(average_precision['AP']) + [average_network_accuracy] + [true_network_accuracy])
+    all_accuracy = np.array(list(average_precision['AP']) + [average_network_precision] + [true_network_precision])
 
     lin_reg = sp.stats.pearsonr(all_scores, all_accuracy)
     plt.text(-1200, 0.9, f"Pearson R {round(lin_reg.statistic, 3)}")
     plt.ylim(0, 1.05)
     #sns.pairplot(pd.DataFrame(analysis_dict))
     plt.savefig(str(dir_path / f"PrecisionScoreCorrelation_{model_name}.png"), dpi=fig_dpi)
+    plt.close()
 
 ## 0.1 Ground Truth Generation
 def _0_1_ground_truth_generation():
