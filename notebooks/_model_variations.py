@@ -639,6 +639,134 @@ def model13(model_data):
     # What to do about double counting the direct interactions?
     numpyro.sample("COS_SYM", dist.Normal(P < 3, STD), obs=jax_cos_sim_matrix)
 
+class CompositeConnectivity(dist.Distribution):
+    """
+    Given an edge array  and an edge_indexing_arr, place a lower bound on the
+    sum of the edges at the indexes such that the sum is >= N - 1 where N is the length of the indexing list. 
+    Params:
+      edge_idx : an indexing array of edges in the composite
+      N : the number of nodes in the composite
+    """
+    def __init__(self, edge_idx, N, scale=1.0, mu_w = 0.5, magnitude=1.0,validate_args=None):
+        self.edge_idx = edge_idx
+        self.N = N
+        self.support = dist.constraints.real
+        self.scale = scale
+        self.n_choose_2 = math.comb(N, 2)
+        self.mu_x = self.n_choose_2 * mu_w 
+        self.mag = magnitude
+        super(CompositeConnectivity, self).__init__(batch_shape=(), 
+              event_shape=(), validate_args=validate_args)
+    def sample(self, key, sample_shape=()):
+        ...
+    def log_prob(self, value):
+        edge_weights = value[self.edge_idx]
+        x = jnp.sum(edge_weights) - self.N -1 -self.mu_x # composite connectivity 
+        x = x * self.scale
+        y = jax.nn.sigmoid(x+1) * self.mag # shift the curve to the right
+        return y
+
+def simple_bait_prey_score_fn(d, k=8, slope=1.0): 
+    """
+    This linear score maps to the exponential distribution
+    The score is the average number of connected prey where connected is defined
+    as the bait-prey distance less than k 
+    Params:
+      d : a bait-prey distance array
+      k : int the distance thresholds
+    """
+    return jnp.mean(d < k) * slope
+
+def sigmoid_bait_prey_score_fn(d, N, k=8, slope=10, yscale=2.0):
+    """
+    d : The bait prey distance vector (including the bait)
+    N : the number of molecular types in the composite
+    """
+    x = jnp.sum(d < k) - N
+    x = x + 0.5
+    x = x * slope
+    return (jax.nn.sigmoid(x) - 0.5) * yscale
+
+def m_from_n_choose2(c, DTYPE=jnp.int32):
+    """
+    The inverse function of N choose two over valid values of n choose 2 
+    """
+    return jnp.ceil(jnp.sqrt(8 * c + 1) // 2 + 0.5).astype(DTYPE) 
+
+class BaitPreyConnectivity(dist.Distribution):
+    """
+
+    The first index of the composite must be the bait
+    Ensures that every prey is connected to the bait either directly or indirectly.
+
+    Given an edge_weight_lst, an array of composite indices, and a bait_idx
+    calculate D_composite up to N, the all pairs shortest paths distance matrix of composite connectivtiy.
+
+    Score the average number of connected prey
+
+    1. Given a list of nodes particle_idxs in the composite
+    2. Get the edge weights at the list_values
+    3. Create the dense matrix representation of the edge weights
+    4. Map the matrix to binary protein interactions
+    5. Calculate the all pairs shortest paths within the composite
+    6. Get the list of shortests paths to the bait
+    7. Count the number of paths with a distance less the d_max
+    8. Score the number of connected prey
+
+    M = N * (N-1) // 2 = 1/2 N **2 - 1/2 N
+    2 M = N**2 - N
+    
+
+    """
+    def __init__(self,
+        edge_idxs,
+        Ndense,
+        dist_score_fn=simple_bait_prey_score_fn,
+        maximal_shortest_path_to_calculate=10,
+        binary_ppi_threshold=0.5, validate_args=None):
+
+        M = edge_idxs.shape[0]
+        #N = m_from_n_choose2(M) 
+
+        self.edge_idxs = edge_idxs 
+        self.bait_idx_global = edge_idxs[0] 
+        self.bait_idx_dense = 0 
+        self.N = Ndense
+        self.M = M
+        self.maximal_shortest_path_to_calculate = maximal_shortest_path_to_calculate
+        self.binary_ppi_threshold = binary_ppi_threshold
+        self.dist_score_fn = dist_score_fn
+
+        super(BaitPreyConnectivity, self).__init__(batch_shape=(), 
+              event_shape=(), validate_args=validate_args)
+    
+    def get_dense_matrix_from_edge_weight_lst(self, edge_weights):
+        composite_edges = edge_weights[self.edge_idxs]
+        adjacency_w = flat2matrix(composite_edges, self.N)
+        return adjacency_w
+
+    def weight2binary(self, a, DTYPE=jnp.int32):
+        """
+        Given an array a and a threshold, return the binary representation of a
+        where all elements less than threshold are 0 and elements >= threshold are 1
+        """
+        threshold = self.binary_ppi_threshold
+        return jnp.where(a < threshold, jnp.array([0], dtype=DTYPE), jnp.array([1], dtype=DTYPE))
+    
+    def apsp_up_to_dmax(self, A):
+        return shortest_paths_up_to_N(A, self.maximal_shortest_path_to_calculate)
+
+    def log_prob(self, edge_weights):
+        A = self.get_dense_matrix_from_edge_weight_lst(edge_weights) # (N, N)
+        A = self.weight2binary(A)  # (N, N)
+        # Warshal O(N^3)
+        D = self.apsp_up_to_dmax(A) # (N, N) 
+        # New coordinate of the composite idx
+        distance2bait = D[self.bait_idx_dense, :] #(N,)
+        # Set the distance of a bait to itself as 0, bait must satisfy the restraint
+        distance2bait = distance2bait.at[self.bait_idx_dense].set(0) #(N, )
+        return self.dist_score_fn(distance2bait)
+
 
 class Histogram(dist.Distribution):
     def __init__(self, a, bins, density=True, validate_args=None):
@@ -674,6 +802,7 @@ def matrix2flat(M, row_major=True):
     """
     n, m = M.shape
     N = math.comb(n, 2)
+    #N = n * (n-1) // 2 
     a = jnp.zeros(N, dtype=M.dtype)
     k=0
     if row_major:
@@ -809,6 +938,390 @@ def model15(model_data):
                                   [causal_dist, null_dist])
     numpyro.sample("obs", mixtures, obs=flattened_apms_similarity_scores)
 
+def model16(model_data):
+    """"
+    Model 15 is exactly the same as model 14 except we use a non uniform prior
+    for the edge weight
+
+    Use lower bounds for edge weights
+    M : pT_{i, j} edge weights
+    """
+    #assert data.shape[0] == N, "The number of data points must be equal to N"
+    # Load in variables from model data to allow proper tracing
+    flattened_apms_similarity_scores = model_data["flattened_apms_similarity_scores"]
+    flattened_apms_similarity_scores = jnp.array(
+            flattened_apms_similarity_scores, dtype=jnp.float32)
+    # Test line
+    #ntest = model_data['ntest']
+    flattened_apms_similarity_scores = flattened_apms_similarity_scores#[0:ntest]
+    shuffled = model_data["flattened_apms_shuffled_similarity_scores"]#[0:ntest]
+    N = flattened_apms_similarity_scores.shape[0]
+    #null_dist = model_data['null_dist']
+    #null_dist = null_dist.expand([N,])
+    #mixture_probs = numpyro.sample("mixture_probs", dist.Dirichlet(jnp.ones(K)).expand([N,]))
+    # Prior edge probability is 0.67
+    # Hyperprior set by plotting Beta Distribution during Synthetic Benchmark50 notebook
+    pT = numpyro.sample("pT", dist.Beta(0.5, 0.5)) 
+    #pT = numpyro.sample("pT", dist.Beta(4, 2).expand([N,])) # Mean is 0.66
+    mixture_probs = jnp.array([pT, 1-pT]).T
+    # 1. Null distribution
+    null_dist = Histogram(shuffled, bins=1000).expand([N,])
+    # Hyper priors 0.23 and 0.22 are set from previous modeling
+    causal_dist = dist.Normal(0.23, 0.22).expand([N,]) 
+    #means = numpyro.sample("means", dist.Normal(0, 5).expand([N, K]))
+    #stds = numpyro.sample("stds", dist.HalfNormal(5).expand([N, K]))
+    #components = dist.Normal(means, stds)
+    mixtures = dist.MixtureGeneral(dist.Categorical(probs=mixture_probs),
+                                  [causal_dist, null_dist])
+    numpyro.sample("obs", mixtures, obs=flattened_apms_similarity_scores)
+
+def model17_test():
+    a = jnp.array([0, 1, 5, 8, 7, 9])
+    e = numpyro.sample("pT", dist.Beta(0.5, 0.5).expand([50,])) 
+    cc = CompositeConnectivity(a, 4)
+    cc1_ld = cc.log_prob(e)
+    numpyro.factor('cc1_ld', cc1_ld)
+
+def model18_test(w):
+    a = jnp.array([0, 1, 5, 8, 7, 9])
+    e = numpyro.sample("pT", dist.Beta(w, w).expand([50,])) 
+    cc = CompositeConnectivity(a, 4)
+    cc1_ld = cc.log_prob(e)
+    numpyro.factor('cc1_ld', cc1_ld)
+
+def model18_test2(w):
+    a = jnp.array([0, 1, 5, 8, 7, 9])
+    e = numpyro.sample("pT", dist.Beta(w, w).expand([50,])) 
+    e = jnp.clip(e, a_min=0.001, a_max=0.999)
+    cc = CompositeConnectivity(a, 4)
+    cc1_ld = cc.log_prob(e)
+    numpyro.factor('cc1_ld', cc1_ld)
+
+def model18_test3(w, scale=1):
+    a = jnp.arange(28) 
+    e = numpyro.sample("pT", dist.Beta(w, w).expand([50,])) 
+    e = jnp.clip(e, a_min=0.001, a_max=0.999)
+    cc = CompositeConnectivity(a, 8, scale=scale)
+    cc1_ld = cc.log_prob(e)
+    numpyro.factor('cc1_ld', cc1_ld)
+
+def model18_test4(w, scale=1):
+    x = numpyro.sample('x', dist.Uniform(-10, 10))
+    x_lp = dist.Normal().log_prob(x)
+    numpyro.factor('x_lp', x_lp)
+
+
+def model18_test5():
+    probs = jnp.ones(50) * 0.5
+    d = dist.Bernoulli(probs=probs)
+    with numpyro.plate('edges', 50):
+        e = numpyro.sample('e', d, infer={'enumerate': 'parallel'})
+
+def model18_test6(w, scale, mag):
+    a = jnp.arange(153) 
+    e = numpyro.sample("pT", dist.Beta(w, w).expand([500,])) 
+    e_at_composite = e[a]
+    x = jnp.sum(e_at_composite)
+    numpyro.deterministic('x', x)
+    e = jnp.clip(e, a_min=0.001, a_max=0.999)
+    cc = CompositeConnectivity(a, 18, scale=scale, magnitude=mag)
+    cc1_ld = cc.log_prob(e)
+    numpyro.factor('cc1_ld', cc1_ld)
+
+def model18_test7():
+    """
+    Keep the basal frequency of edges low
+    """
+    # Imagine a single composite
+    z = numpyro.sample("pT", dist.Beta(0.01, 0.4).expand([6,]))
+    e = jax.nn.sigmoid((z-0.5)*20) 
+    numpyro.deterministic('e', e)
+    x = jnp.sum(e) # sum of edge weights
+    # Composite connectivity
+    y = jax.nn.sigmoid((x-4+1)*jnp.square(4))
+    numpyro.factor('y', y)
+
+def model19_test1(m_total, n_cc1, m_cc1, sig_scale=100, cc_scale=4):
+    # Latent unconstrained edge weights
+    z = numpyro.sample('z', dist.Normal().expand([m_total,]))
+    e = jax.nn.sigmoid(z * sig_scale)
+    a = jnp.arange(m_cc1)
+    cc = CompositeConnectivity(a, n_cc1, scale=cc_scale)
+    e_at_cc1 = e[a]
+    numpyro.deterministic('e_at_cc1', e_at_cc1)
+    numpyro.deterministic('x', jnp.sum(e_at_cc1))
+    numpyro.factor('cc1_lp', cc.log_prob(e))
+
+def model19_test2(m_total, n_cc1, m_cc1, sig_scale=100, cc_scale=4):
+    # Latent unconstrained edge weights
+    z = numpyro.sample('z', dist.Normal().expand([m_total,]))
+    e = jax.nn.sigmoid(z * sig_scale)
+    a = jnp.arange(m_cc1)
+    b = jnp.array([0, 1, 18, 19, 8, 17]) 
+    c = jnp.array([8, 15, 1]) 
+    d = jnp.array([0])
+    cc = CompositeConnectivity(a, n_cc1, scale=cc_scale)
+    cc2 = CompositeConnectivity(b, 4, scale=cc_scale) 
+    cc3 = CompositeConnectivity(c, 3, scale=cc_scale)
+    cc4 = CompositeConnectivity(d, 2, scale=cc_scale)
+    e_at_cc1 = e[a]
+    e_at_cc2 = e[b]
+    numpyro.deterministic('e_at_cc1', e_at_cc1)
+    numpyro.deterministic('e_at_cc2', e_at_cc2)
+    numpyro.deterministic('x', jnp.sum(e_at_cc1))
+    numpyro.deterministic('y', jnp.sum(e_at_cc2))
+    numpyro.factor('cc1_lp', cc.log_prob(e))
+    numpyro.factor('cc2_lp', cc2.log_prob(e))
+    numpyro.factor('cc3_lp', cc3.log_prob(e))
+    numpyro.factor('cc4_lp', cc4.log_prob(e))
+
+def model20_test1():
+    # (5, 5) graph
+    N = 5
+    M =  N * (N-1) // 2
+    z = numpyro.sample('z', dist.Beta(0.01, 0.04).expand([M,]))
+    e = jax.nn.sigmoid((z-0.5) * 100)
+    numpyro.deterministic('e', e)
+    # composite1
+    c1 = jnp.array([0, 1, 2])
+    c2 = jnp.array([1, 2, 3])
+    bp1 = BaitPreyConnectivity(c1)
+    bp2 = BaitPreyConnectivity(c2)
+    s1 = bp1.log_prob(e)
+    s2 = bp2.log_prob(e)
+    numpyro.factor('bp1', s1) 
+    numpyro.factor('bp2', s2) 
+
+def model20_test2():
+    N = 20
+    # (20, 20) graph
+    M = N * (N-1) // 2
+    z = numpyro.sample('z', dist.Beta(0.01, 0.04).expand([M,]))
+    e = jax.nn.sigmoid((z-0.5) * 100)
+    numpyro.deterministic('e', e)
+    # composite1
+    c1 = jnp.array([0, 1, 2])
+    c2 = jnp.array([1, 2, 3, 4])
+    c3 = jnp.array([1, 2, 7, 9, 11]) 
+    bp1 = BaitPreyConnectivity(c1)
+    bp2 = BaitPreyConnectivity(c2)
+    bp3 = BaitPreyConnectivity(c3)
+
+    s1 = bp1.log_prob(e)
+    s2 = bp2.log_prob(e)
+    s3 = bp3.log_prob(e)
+    numpyro.factor('bp1', s1) 
+    numpyro.factor('bp2', s2) 
+    numpyro.factor('bp3', s3)
+
+def model20_test3():
+    N = 20
+    # (20, 20) graph
+    M = N * (N-1) // 2
+    z = numpyro.sample('z', dist.Beta(0.01, 0.04).expand([M,]))
+    e = jax.nn.sigmoid((z-0.5) * 100)
+    numpyro.deterministic('e', e)
+    # composite1
+    c1 = jnp.array([0, 1, 2])
+    c2 = jnp.array([1, 2, 3, 4])
+    c3 = jnp.array([1, 2, 7, 9, 11]) 
+    c4 = jnp.array([1, 2])
+    bp1 = BaitPreyConnectivity(c1)
+    bp2 = BaitPreyConnectivity(c2)
+    bp3 = BaitPreyConnectivity(c3)
+    bp4 = BaitPreyConnectivity(c4)
+    s1 = bp1.log_prob(e)
+    s2 = bp2.log_prob(e)
+    s3 = bp3.log_prob(e)
+    s4 = bp4.log_prob(e)
+    numpyro.factor('bp1', s1) 
+    numpyro.factor('bp2', s2) 
+    numpyro.factor('bp3', s3)
+    numpyro.factor('bp4', s4)
+
+def model20_test4():
+    N = 3 
+    # (20, 20) graph
+    M = N * (N-1) // 2
+    #z = numpyro.sample('z', dist.Beta(0.01, 0.04).expand([M,]))
+    z = numpyro.sample('z', dist.Normal(loc=0.5).expand([M,]))
+    e = jax.nn.sigmoid((z-0.5) * 100)
+    numpyro.deterministic('e', e)
+    # composite1
+    c4 = jnp.array([0, 1])
+    bp4 = BaitPreyConnectivity(c4)
+    s4 = bp4.log_prob(e)
+    numpyro.factor('bp4', s4)
+
+def model20_test5():
+    score_fn = Partial(simple_bait_prey_score_fn, slope=2.)
+    N = 3 
+    # (20, 20) graph
+    M = N * (N-1) // 2
+    #z = numpyro.sample('z', dist.Beta(0.01, 0.04).expand([M,]))
+    z = numpyro.sample('z', dist.Normal(loc=0.5).expand([M,]))
+    e = jax.nn.sigmoid((z-0.5) * 100)
+    numpyro.deterministic('e', e)
+    # composite1
+    c4 = jnp.array([0, 1])
+    bp4 = BaitPreyConnectivity(c4, dist_score_fn=score_fn)
+    s4 = bp4.log_prob(e)
+    numpyro.factor('bp4', s4)
+
+def model20_test6a(eidx, slope):
+    score_fn = Partial(simple_bait_prey_score_fn, slope=slope)
+    N = 3 
+    # (20, 20) graph
+    M = N * (N-1) // 2
+    #z = numpyro.sample('z', dist.Beta(0.01, 0.04).expand([M,]))
+    z = numpyro.sample('z', dist.Normal(loc=0.5).expand([M,]))
+    e = jax.nn.sigmoid((z-0.5) * 100)
+    numpyro.deterministic('e', e)
+    # composite1 [0, 1]
+    ec4 = jnp.array([eidx])
+    # composite 2 [1, 2]
+    #ec1 = jnp.array([2])
+    bp4 = BaitPreyConnectivity(ec4, Ndense=2, dist_score_fn=score_fn)
+    #bp1 = BaitPreyConnectivity(ec1, dist_score_fn=score_fn) 
+    s4 = bp4.log_prob(e)
+    #s1 = bp1.log_prob(e)
+    numpyro.factor('bp4', s4)
+    #numpyro.factor('bp1', s1)
+
+def model20_test6b(eidx, slope):
+    score_fn = Partial(simple_bait_prey_score_fn, slope=slope)
+    N = 3 
+    # (20, 20) graph
+    M = N * (N-1) // 2
+    #z = numpyro.sample('z', dist.Beta(0.01, 0.04).expand([M,]))
+    z = numpyro.sample('z', dist.Normal(loc=0.5).expand([M,]))
+    e = jax.nn.sigmoid((z-0.5) * 100)
+    numpyro.deterministic('e', e)
+    # composite1 [0, 1]
+    ec4 = jnp.array([eidx])
+    ec1 = jnp.array([2])
+    # composite 2 [1, 2]
+    bp4 = BaitPreyConnectivity(ec4, Ndense=2, dist_score_fn=score_fn)
+    bp1 = BaitPreyConnectivity(ec1, Ndense=2, dist_score_fn=score_fn) 
+    s4 = bp4.log_prob(e)
+    s1 = bp1.log_prob(e)
+    numpyro.factor('bp4', s4)
+    numpyro.factor('bp1', s1)
+
+def model20_test6c(slope):
+    # V={0,1,2, 3} Cm={0, 1, 2, 3}
+    score_fn = Partial(simple_bait_prey_score_fn, slope=slope)
+    N = 4 
+    # (20, 20) graph
+    M = N * (N-1) // 2
+    #z = numpyro.sample('z', dist.Beta(0.01, 0.04).expand([M,]))
+    z = numpyro.sample('z', dist.Normal(loc=0.5).expand([M,]))
+    e = jax.nn.sigmoid((z-0.5) * 100)
+    numpyro.deterministic('e', e)
+    # composite1 [0, 1]
+    ec4 = jnp.array([0, 1, 2, 3, 4, 5])
+    # composite 2 [1, 2]
+    bp4 = BaitPreyConnectivity(ec4, Ndense=4, dist_score_fn=score_fn)
+    s4 = bp4.log_prob(e)
+    numpyro.factor('bp4', s4)
+
+def model20_test6d(slope, yscale):
+    # V={0,1,2, 3} Cm={0, 1, 2, 3}
+    N = 4 
+    score_fn = Partial(sigmoid_bait_prey_score_fn, slope=slope, N=N, yscale=yscale
+                       )
+    # (20, 20) graph
+    M = N * (N-1) // 2
+    #z = numpyro.sample('z', dist.Beta(0.01, 0.04).expand([M,]))
+    z = numpyro.sample('z', dist.Normal(loc=0.5).expand([M,]))
+    e = jax.nn.sigmoid((z-0.5) * 100)
+    numpyro.deterministic('e', e)
+    # composite1 [0, 1]
+    ec4 = jnp.array([0, 1, 2, 3, 4, 5])
+    # composite 2 [1, 2]
+    bp4 = BaitPreyConnectivity(ec4, Ndense=4, dist_score_fn=score_fn)
+    s4 = bp4.log_prob(e)
+    numpyro.factor('bp4', s4)
+
+def model20_test6e_1a(slope, yscale):
+    # V={0,1,2, 3}
+    # Cm={0, 1, 2}
+    # 0 : (0, 1)
+    # 1 : (0, 2)
+    # 2 : (0, 3)
+    # 3 : (1, 2)
+    # 4 : (1, 3)
+    # 5 : (2, 3)
+    N = 4 
+    score_fn = Partial(sigmoid_bait_prey_score_fn, slope=slope, N=N, yscale=yscale)
+    # (20, 20) graph
+    M = N * (N-1) // 2
+    #z = numpyro.sample('z', dist.Beta(0.01, 0.04).expand([M,]))
+    z = numpyro.sample('z', dist.Normal(loc=0.5).expand([M,]))
+    e = jax.nn.sigmoid((z-0.5) * 100)
+    numpyro.deterministic('e', e)
+    # composite1 [0, 1]
+    # cm = {0, 1, 2}
+    ec1 = jnp.array([0, 1,3]) 
+    # cm = {1, 2, 3}
+    bp1 = BaitPreyConnectivity(ec1, Ndense=3, dist_score_fn=score_fn)
+    s1 = bp1.log_prob(e)
+    numpyro.factor('bp1', s1)
+
+
+def model20_test6e_1b():
+    # V={0,1,2, 3}
+    # Cm={0, 1, 2}
+    # 0 : (0, 1)
+    # 1 : (0, 2)
+    # 2 : (0, 3)
+    # 3 : (1, 2)
+    # 4 : (1, 3)
+    # 5 : (2, 3)
+    N = 3 
+    Ndense=3
+    yscale=20.
+    slope=10.
+    score_fn = Partial(sigmoid_bait_prey_score_fn, slope=slope, Ndense=Ndense, yscale=yscale)
+    # (20, 20) graph
+    M = N * (N-1) // 2
+    #z = numpyro.sample('z', dist.Beta(0.01, 0.04).expand([M,]))
+    z = numpyro.sample('z', dist.Normal(loc=0.5).expand([M,]))
+    e = jax.nn.sigmoid((z-0.5) * 100)
+    numpyro.deterministic('e', e)
+    # composite1 [0, 1]
+    # cm = {0, 1, 2}
+    ec1 = jnp.array([0, 1,3]) 
+    # cm = {1, 2, 3}
+    bp1 = BaitPreyConnectivity(ec1, Ndense=Ndense, dist_score_fn=score_fn)
+    s1 = bp1.log_prob(e)
+    numpyro.factor('bp1', s1)
+
+
+
+def model21_test():
+    score_fn = Partial(simple_bait_prey_score_fn, slope=slope)
+    N = 3 
+    # (20, 20) graph
+    M = N * (N-1) // 2
+    #z = numpyro.sample('z', dist.Beta(0.01, 0.04).expand([M,]))
+    z = numpyro.sample('z', dist.Normal(loc=0.5).expand([M,]))
+    e = jax.nn.sigmoid((z-0.5) * 100)
+    numpyro.deterministic('e', e)
+    # composite1 [0, 1]
+    ec4 = jnp.array([eidx])
+    # composite 2 [1, 2]
+    #ec1 = jnp.array([2])
+    bp4 = BaitPreyConnectivity(ec4, Ndense=2, dist_score_fn=score_fn)
+    #bp1 = BaitPreyConnectivity(ec1, dist_score_fn=score_fn) 
+    s4 = bp4.log_prob(e)
+    #s1 = bp1.log_prob(e)
+    numpyro.factor('bp4', s4)
+    #numpyro.factor('bp1', s1)
+
+
+
+
 def load(fpath):
     with open(fpath, 'rb') as f:
         dat = pkl.load(f)
@@ -888,8 +1401,8 @@ def model_dispatcher(model_name, model_data):
         raise ValueError(f"Invalid {model_name}")
     return model, model_data, init_strategy
 
-def init_position_dispatcher(initial_position_fp, model_id):
-    if model_id == "model_14":
+def init_position_dispatcher(initial_position_fp, model_name):
+    if model_name == "model14":
         with open(initial_position_fp, "rb") as f:
             d = pkl.load(f) # dictionary of sample sites
         return init_to_value(values=d)
@@ -985,7 +1498,7 @@ def _main(model_id,
 
     # Check if we should initalize to a certain value
     if initial_position:
-        init_strategy = init_position_dispatcher(initial_position, model_id)
+        init_strategy = init_position_dispatcher(initial_position, model_name)
     warmup_savename = model_id + "_" + model_name + "_" + "hmc_warmup.pkl"
     warmup_savename = str(Path(save_dir) / warmup_savename)
     nuts = NUTS(model, init_strategy=init_strategy)
