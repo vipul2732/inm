@@ -749,17 +749,25 @@ def ij_from(k, N):
     j = j_from_total(k, total, N)
     return i, j
 
+def k_from_ij(i, j, N):
+    total = -1 
+    for r in range(0, i):
+        total += N - r-1
+    k = total + (j-i) 
+    return k 
+
 def _test(N):
     k=0
     for i in range(N):
         for j in range(i+1, N):
-            print(i,j)
+            #print(i,j)
             a, b = ij_from(k, N)
             assert i == a, f"i{i}, a{a}"
             assert b == j, f"j{j}, b{b}"
+            q = k_from_ij(i, j, N)
+            print(i, j, a, b, q, k)
+            assert q == k, (q, k)
             k+=1
-
-    
 
 class BaitPreyConnectivity(dist.Distribution):
     """
