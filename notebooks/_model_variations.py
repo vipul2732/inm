@@ -693,6 +693,74 @@ def m_from_n_choose2(c, DTYPE=jnp.int32):
     """
     return jnp.ceil(jnp.sqrt(8 * c + 1) // 2 + 0.5).astype(DTYPE) 
 
+def node_lst2edge_lst(node_lst, N):
+    """
+    Given a list of molecular type indices [0, 1, 3, 9] and the total number of nodes N,
+    return the indices of the corresponding all pairs edges in dictionary order
+    e.g, [0, 1, 3], 4 ->  
+
+    
+
+    """
+
+def a_b(N: int, i: int) -> int:
+    """
+    Return the number of elements below and including the ith row. 
+    """
+    w = N - i
+    return (w**2-w) // 2
+
+def a_total(N: int) -> int:
+    """
+    Return the N choose two elements as the area of a triangle
+    excluding the diagonal.
+    """
+    return (N**2 - N) // 2
+
+def u(i: int, j: int, N: int) -> int:
+    """
+    Given indices i and j number of nodes N, return the
+    edge index u
+    """
+    return a_total(N) - a_b(N, i) + j - i -1 
+
+def i_from_u(u, N):
+    """
+    An iterative algorithm to find, given the value of the edge index
+    u and the number of nodes N, find i.
+    """
+
+def i_from_k(k, N):
+    """
+    Given the kth element of N choose 2, return the row index i
+    """
+    total = -1 
+    i = 0
+    while total < k:
+        total += N-i-1
+        i += 1    
+    return i-1, total
+
+def j_from_total(k, total, N):
+    return N-(total-k)-1 
+
+def ij_from(k, N):
+    i, total = i_from_k(k, N)
+    j = j_from_total(k, total, N)
+    return i, j
+
+def _test(N):
+    k=0
+    for i in range(N):
+        for j in range(i+1, N):
+            print(i,j)
+            a, b = ij_from(k, N)
+            assert i == a, f"i{i}, a{a}"
+            assert b == j, f"j{j}, b{b}"
+            k+=1
+
+    
+
 class BaitPreyConnectivity(dist.Distribution):
     """
 
