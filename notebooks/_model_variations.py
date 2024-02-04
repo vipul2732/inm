@@ -769,15 +769,19 @@ def _test(N):
             assert q == k, (q, k)
             k+=1
 
+def node_list2edge_list(nlist, N):
+    nlist = sorted(nlist)
+    combos = list(combinations(nlist, 2))
+    return [k_from_ij(*edge, N=N) for edge in combos]
+    
+
 class BaitPreyConnectivity(dist.Distribution):
     """
-
     The first index of the composite must be the bait
     Ensures that every prey is connected to the bait either directly or indirectly.
 
     Given an edge_weight_lst, an array of composite indices, and a bait_idx
     calculate D_composite up to N, the all pairs shortest paths distance matrix of composite connectivtiy.
-
     Score the average number of connected prey
 
     1. Given a list of nodes particle_idxs in the composite
@@ -791,8 +795,6 @@ class BaitPreyConnectivity(dist.Distribution):
 
     M = N * (N-1) // 2 = 1/2 N **2 - 1/2 N
     2 M = N**2 - N
-    
-
     """
     def __init__(self,
         edge_idxs,
