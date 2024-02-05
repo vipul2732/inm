@@ -18,5 +18,5 @@ d3_uids = set(d[3]["#"].values[2:])
 all_uids = d0_uids.union(d1_uids).union(d2_uids).union(d3_uids)
 
 dall = pd.DataFrame({"jaeger_all_uid": list(all_uids)}) 
-dall.to_csv("jaeger_all_uids.tsv", sep="\t")
+dall.to_csv("jaeger_all_uids.tsv", sep="\t", index=False)
 
