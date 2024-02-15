@@ -631,25 +631,76 @@ plt.show()
 model14_data = mv.model14_data_getter()
 print(model14_data.keys())
 
-# +
-data = {"N": 4,
-        "lower_edge_prob_bound": 0.,
-        "upper_edge_prob_bound": 0.501,
-        "z2edge_slope": 1000,
-        "composites": [mv.BaitPreyInfo(np.array([0, 1, 2]), 3, 8, 1.0),
-                       mv.BaitPreyInfo(np.array([0, 1, 2, 3, 4, 5]), 4, 8, 1.0)],
-        "flattened_apms_similarity_scores": model14_data['flattened_apms_similarity_scores'][0:6],
-        "flattened_apms_shuffled_similarity_scores": model14_data['flattened_apms_shuffled_similarity_scores'],
-        "BAIT_PREY_SLOPE": 10,}
 
-importlib.reload(mv)
-num_samples = 10_000
-key = jax.random.PRNGKey(13)
-nuts = NUTS(mv.model22_ll_lp)
-mcmc = MCMC(nuts,num_warmup=1000, num_samples=num_samples)
-mcmc.run(key, data, extra_fields=('potential_energy',))
-samples = mcmc.get_samples()
+def experiment_sample_and_savefig(
+    lower_bound = 0,
+    upper_bound = 0.5,
+    pc0 = 0,
+    pc1 = 0,
+    plot_and_save=True):
+
+    data = {"N": 4,
+            "lower_edge_prob_bound": lower_bound,
+            "upper_edge_prob_bound": upper_bound,
+            "z2edge_slope": 1000,
+            "composites": [mv.BaitPreyInfo(np.array([0, 1, 2]), 3, 8, pc0),
+                           mv.BaitPreyInfo(np.array([0, 1, 2, 3, 4, 5]), 4, 8, pc1)],
+            "flattened_apms_similarity_scores": model14_data['flattened_apms_similarity_scores'][0:6],
+            "flattened_apms_shuffled_similarity_scores": model14_data['flattened_apms_shuffled_similarity_scores'],
+            "BAIT_PREY_SLOPE": 20,}
+
+    importlib.reload(mv)
+    num_samples = 10_000
+    key = jax.random.PRNGKey(13)
+    nuts = NUTS(mv.model22_ll_lp)
+    mcmc = MCMC(nuts,num_warmup=1000, num_samples=num_samples)
+    mcmc.run(key, data, extra_fields=('potential_energy',))
+    samples = mcmc.get_samples()
+    
+    edges = jax.nn.sigmoid((samples['z']-0.5)*data['z2edge_slope'])
+    if plot_and_save:
+        plt.hist(np.sum(edges, axis=1), color='k', bins=200, alpha=0.5)
+        y = np.array([1, 6, 15, 20, 15, 6, 1])
+        y = y / np.sum(y)
+        y = y * num_samples
+        x = np.arange(7)
+        plt.plot(x, y, 'b^', label="Pascal expectation")
+        plt.title(f"V={0, 1, 2, 3}; C0={0,1,2}({pc0}) C1={0,1,2,3}({pc1}) BR {lower_bound}-{upper_bound}")
+        plt.xlabel("Sum of edges in microstate i")
+        plt.ylabel("Frequency")
+        plt.ylim(0, 7000)
+        plt.xlim(-0.5, 6.5)
+        plt.legend()
+        plt.savefig(f"ExampleCompositeConnectivity_V4_C0({pc0})C1{pc1}_BR({lower_bound}_{upper_bound}).png", dpi=300)
+        plt.show()
+        print("Losing solutions in the tails")
+    return samples
+
+
+# +
+    
+pc0 = [0, 0.5, 1.]
+pc1 = [0, 0.5, 1.]
+
+lower_bound = [0, 0.5]
+upper_bound = [0.1, 0.51, 1.0]
+
+for p0 in pc0:
+    for p1 in pc1:
+        for lb in lower_bound:
+            for ub in upper_bound:
+                if lb < ub:
+                    experiment_sample_and_savefig(
+                        lower_bound=lb,
+                        upper_bound=ub,
+                        pc0=p0,
+                        pc1=p1)
+
+
+    
 # -
+
+samples = experiment_sample_and_savefig(0.5, 0.51, 1, 0, plot_and_save=False)
 
 fig, ax = plt.subplots(6, 1, sharex=True)
 for i in range(6):
@@ -678,19 +729,49 @@ plt.ylabel("Frequency")
 plt.xlabel("Mu")
 plt.show()
 
+# Plot distance to Bait
+edges = jax.nn.sigmoid((samples['z']-0.5)*20)
+# Over all solutions count the distance to the prey
+r = mv.BaitPreyConnectivity(np.array([0, 1, 2]), 3, maximal_shortest_path_to_calculate=8,
+                           bait_prey_slope=20)
+distances_of_cc0 = []
+#distances_of_all
+for Alist in edges:
+    A = r.get_dense_matrix_from_edge_weight_lst(Alist[0:3])
+    A = r.weight2binary(A)
+    D = r.apsp_up_to_dmax(A)
+    Distance2bait = D[0, :]
+    Distance2bait = Distance2bait.at[0].set(0)
+    d = Distance2bait.tolist()
+    distances = distances + d
+
+distances
+
+Distance2bait
+
+Alist[0:3]
+
+
+
+# +
 plt.hist(np.sum(edges, axis=1), color='k', bins=200, alpha=0.5)
+
+
 y = np.array([1, 6, 15, 20, 15, 6, 1])
 y = y / np.sum(y)
 y = y * num_samples
 x = np.arange(7)
 plt.plot(x, y, 'b^', label="Pascal expectation")
-plt.title("V={0, 1, 2, 3}; C0={0, 1, 2}(1); C1={0,1,2,3}(1))")
+plt.title(f"V={0, 1, 2, 3}; C0={0,1,2}({pc0}) C1={0,1,2,3}({pc1}) BR {lower_bound}-{upper_bound}")
 plt.xlabel("Sum of edges in microstate i")
 plt.ylabel("Frequency")
+plt.ylim(0, 7000)
+plt.xlim(-0.5, 6.5)
 plt.legend()
-plt.savefig("ExampleCompositeConnectivity_V4_C0(1)_C1(1).png", dpi=300)
+plt.savefig(f"ExampleCompositeConnectivity_V4_C0({pc0})C1{pc1}_BR({lower_bound}_{upper_bound}).png", dpi=300)
 plt.show()
 print("Losing solutions in the tails")
+# -
 
 plt.hist(np.array(samples['lp_score']), bins=100)
 plt.show()
