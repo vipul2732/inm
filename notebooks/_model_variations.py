@@ -57,6 +57,9 @@ import time
 import math
 import sys
 import xarray as xr
+from typing import Any, NamedTuple
+
+Array = Any
 
 def eprint(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs) 
@@ -677,7 +680,16 @@ def simple_bait_prey_score_fn(d, k=8, slope=1.0):
     """
     return jnp.mean(d < k) * slope
 
-def sigmoid_bait_prey_score_fn(d, N, k=8, slope=10, yscale=2.0):
+def simple_bait_prey_score_fn_dispatcher(
+        edge_idxs,
+        Ndense,
+        maximal_shortest_path_to_calculate,
+        binary_ppi_threshold,
+        pc,
+        bait_prey_slope):
+    return Partial(simple_bait_prey_score_fn, k=maximal_shortest_path_to_calculate, slope=bait_prey_slope)
+
+def sigmoid_bait_prey_score_fn(d, N, k=8, slope=10):
     """
     d : The bait prey distance vector (including the bait)
     N : the number of molecular types in the composite
@@ -685,7 +697,7 @@ def sigmoid_bait_prey_score_fn(d, N, k=8, slope=10, yscale=2.0):
     x = jnp.sum(d < k) - N
     x = x + 0.5
     x = x * slope
-    return (jax.nn.sigmoid(x) - 0.5) * yscale
+    return (jax.nn.sigmoid(x) - 0.5) 
 
 def m_from_n_choose2(c, DTYPE=jnp.int32):
     """
@@ -769,17 +781,56 @@ def weight2edge(x, slope=1000):
     Map a weight in (0, 1) to a number peaked towards 0 and 1
     """
     return jax.nn.sigmoid((x-0.5)*slope)
-    
+
+def z2edge(z, slope=1000):
+    return jax.nn.sigmoid((z)*slope)
+
+class BaitPreyInfo(NamedTuple):
+    edge_idxs : Array 
+    Ndense : int 
+    max_paths : int
+    pc : float
+   
+class BaitPreyConnectivitySet(dist.Distribution):
+    """
+    Given a composite_pytree whose elements are
+    - (edge_idxs, Ndense, maximal_paths, pc)  
+    """
+    def __init__(self, composite_pytree, dist_score_fn_dispatcher=simple_bait_prey_score_fn_dispatcher, bait_prey_slope=1.,
+                 validate_args = None,):
+        restraint_lst = []
+        for composite in composite_pytree:
+            edge_idxs, Ndense, mp, pc = composite
+            restraint = BaitPreyConnectivity(
+                    edge_idxs, Ndense, dist_score_fn_dispatcher=dist_score_fn_dispatcher,
+                    maximal_shortest_path_to_calculate=mp,
+                    pc=pc,
+                    bait_prey_slope=bait_prey_slope)
+            restraint_lst.append(restraint)
+        self.restraint_lst = restraint_lst
+        super(BaitPreyConnectivitySet, self).__init__(batch_shape=(), 
+              event_shape=(), validate_args=validate_args)
+    def log_prob(self, edge_weights):
+        value = 0
+        for f in self.restraint_lst:
+            value += f.log_prob(edge_weights)
+        return value
+
+def _example():
+    # Don't nest the edge lists
+    c1 = BaitPreyInfo(jnp.array([0, 1, 2]), 3, 8, 0.5)
+    c2 = BaitPreyInfo(jnp.array([1, 2, 4]), 4, 8, 0.5) 
+    composite_pytree = [c1, c2]
+    return composite_pytree
+
 
 class BaitPreyConnectivity(dist.Distribution):
     """
     The first index of the composite must be the bait
     Ensures that every prey is connected to the bait either directly or indirectly.
-
     Given an edge_weight_lst, an array of composite indices, and a bait_idx
     calculate D_composite up to N, the all pairs shortest paths distance matrix of composite connectivtiy.
     Score the average number of connected prey
-
     1. Given a list of nodes particle_idxs in the composite
     2. Get the edge weights at the list_values
     3. Create the dense matrix representation of the edge weights
@@ -788,21 +839,37 @@ class BaitPreyConnectivity(dist.Distribution):
     6. Get the list of shortests paths to the bait
     7. Count the number of paths with a distance less the d_max
     8. Score the number of connected prey
-
     M = N * (N-1) // 2 = 1/2 N **2 - 1/2 N
     2 M = N**2 - N
+    Params:
+      edge_idxs : an array of edge idxs
+      Ndense    : the number of nodes in the composite (including bait)
+      dist_score_fn : given a vector of distances to the bait, return a score
+      maximal_shortest_paths_to_calculate :
+        the maximal distance to calculate during Warshal Algorithm
+      pc : prior probabiltiy of a composite
+      binary_ppi_threshold : The descision boundrary for PPI such that
+        a PPI is >= threshold.
     """
     def __init__(self,
         edge_idxs,
         Ndense,
-        dist_score_fn=simple_bait_prey_score_fn,
+        dist_score_fn_dispatcher=simple_bait_prey_score_fn_dispatcher,
         maximal_shortest_path_to_calculate=10,
-        binary_ppi_threshold=0.5, validate_args=None):
-
+        binary_ppi_threshold=0.5,
+        pc = 1.0,
+        bait_prey_slope=1.,
+        validate_args=None):
+        dist_score_fn = simple_bait_prey_score_fn_dispatcher(
+                edge_idxs,
+                Ndense,
+                maximal_shortest_path_to_calculate,
+                binary_ppi_threshold,
+                pc,
+                bait_prey_slope,)
         # Only one of edge ids or node ids should be set
         #if (node_idxs is None) ^ (edge_idxs is None):
         #    raise ValueError
-        
         #N = m_from_n_choose2(M) 
         M = edge_idxs.shape[0]
         self.edge_idxs = edge_idxs 
@@ -813,8 +880,12 @@ class BaitPreyConnectivity(dist.Distribution):
         self.maximal_shortest_path_to_calculate = maximal_shortest_path_to_calculate
         self.binary_ppi_threshold = binary_ppi_threshold
         self.dist_score_fn = dist_score_fn
+        self.pc = pc
         super(BaitPreyConnectivity, self).__init__(batch_shape=(), 
               event_shape=(), validate_args=validate_args)
+        """
+        Note : pc not implemented
+        """
     
     def get_dense_matrix_from_edge_weight_lst(self, edge_weights):
         composite_edges = edge_weights[self.edge_idxs]
@@ -841,8 +912,7 @@ class BaitPreyConnectivity(dist.Distribution):
         distance2bait = D[self.bait_idx_dense, :] #(N,)
         # Set the distance of a bait to itself as 0, bait must satisfy the restraint
         distance2bait = distance2bait.at[self.bait_idx_dense].set(0) #(N, )
-        return self.dist_score_fn(distance2bait)
-
+        return self.dist_score_fn(distance2bait) * self.pc
 
 class Histogram(dist.Distribution):
     def __init__(self, a, bins, density=True, validate_args=None):
@@ -1257,8 +1327,9 @@ def model20_test4():
     e = jax.nn.sigmoid((z-0.5) * 100)
     numpyro.deterministic('e', e)
     # composite1
-    c4 = jnp.array([0, 1])
-    bp4 = BaitPreyConnectivity(c4)
+    c4 = [0, 1]
+    e4 = jnp.array(node_list2edge_list(c4, N))
+    bp4 = BaitPreyConnectivity(e4, 2)
     s4 = bp4.log_prob(e)
     numpyro.factor('bp4', s4)
 
@@ -1395,6 +1466,9 @@ def model20_test6f_null(N, Cm, slope=8.,):
 
 
 def model20_test6e_1a(slope, yscale):
+    """
+    Prior with equal edge frequency
+    """
     # V={0,1,2, 3}
     # Cm={0, 1, 2}
     # 0 : (0, 1)
@@ -1429,11 +1503,11 @@ def model20_test6e_1b():
     # 3 : (1, 2)
     # 4 : (1, 3)
     # 5 : (2, 3)
-    N = 3 
+    N = 4 
     Ndense=3
     yscale=20.
     slope=10.
-    score_fn = Partial(sigmoid_bait_prey_score_fn, slope=slope, Ndense=Ndense, yscale=yscale)
+    score_fn = Partial(sigmoid_bait_prey_score_fn, slope=slope, N=Ndense, yscale=yscale)
     # (20, 20) graph
     M = N * (N-1) // 2
     #z = numpyro.sample('z', dist.Beta(0.01, 0.04).expand([M,]))
@@ -1469,40 +1543,88 @@ def model21_test():
     numpyro.factor('bp4', s4)
     #numpyro.factor('bp1', s1)
 
-def model22_lp(N, data):
+def model22_lp(data):
     ...
 
-def model22_ll(N, data):
+def model22_ll(data):
     ...
 
-def model22_ll_lp(N, data):
-    M = N * (N-1)//2
-    lower_edge_prob = data['lower_edge_prob_bound']
-    pN = numpyro.sample('pN', dist.Uniform(low=lower_edge_prob, high=0.5))
-    mu = edge_prob2mu(pN)
-    z = numpyro.sample('z', dist.Normal(mu).expand([M,]))
-
-
-
-
-    score_fn = Partial(simple_bait_prey_score_fn, slope=slope)
-    M = N * (N-1) // 2
-    z = numpyro.sample('z', dist.Normal(loc=0.5).expand([M,]))
-    e = weight2edge(z)
-    # Define composite priors
+def model22_ll_lp(data):
+    """
+    """
+    # Unpack input information
+    N = data["N"]
+    z2edge_slope = data['z2edge_slope']
     composites = data['composites'] 
-    for composite in composites:
-        Ndense = len(composite.identities)
-        edge_idxs = np.array(node_list2edge_list(composite.identities, N))
-        restraint = BaitPreyConnectivity(edge_idxs, Ndense,
-            dist_score_fn = score_fn)
-    # Define likelihoods
+    lower_edge_prob = data['lower_edge_prob_bound']
+    upper_edge_prob = data['upper_edge_prob_bound']
+    bait_prey_slope = data['BAIT_PREY_SLOPE']
+    flattened_apms_similarity_scores = data["flattened_apms_similarity_scores"]
+    flattened_apms_similarity_scores = jnp.array(
+            flattened_apms_similarity_scores, dtype=jnp.float32)
+    shuffled = data["flattened_apms_shuffled_similarity_scores"]
+    # Define Model Globals 
+    #score_fn = Partial(simple_bait_prey_score_fn, slope=bait_prey_slope)
+    M = N * (N-1)//2
+    bait_prey_connectivity_set = BaitPreyConnectivitySet(composites, bait_prey_slope=bait_prey_slope)
+    causal_dist = dist.Normal(0.23, 0.22).expand([M,]) 
+    null_dist = Histogram(shuffled, bins=1000).expand([M,]) # ToDo Improve Null Dist
+    # Scoring 
+    pN = numpyro.sample('pN', dist.Uniform(low=lower_edge_prob, high=upper_edge_prob)) # (1,) # Base Rate
+    mu = edge_prob2mu(pN)  
+    numpyro.deterministic('mu', mu)
+    z = numpyro.sample('z', dist.Normal(mu+0.5).expand([M,])) #(M, ) shifted normal, sigma must be 1
+    # Edges
+    aij = jax.nn.sigmoid((z-0.5)*z2edge_slope)
+    # Prior
+    bps_lp = bait_prey_connectivity_set.log_prob(aij)
+    numpyro.factor("bps_lp", bps_lp)
+    numpyro.deterministic("lp_score", bps_lp)
+    mixture_probs = jnp.array([aij, 1-aij]).T
+    # Profile similarity likelihood
+    mixtures = dist.MixtureGeneral(
+            dist.Categorical(probs=mixture_probs),
+            [causal_dist, null_dist])
+    #numpyro.sample("obs", mixtures, obs=flattened_apms_similarity_scores)
+     
+
+def _note():
+    """
+    We need to create a restraint for Composites.
+
+    1. Singlet function f(A)
+    """
+
+def call_and_prod(z):
+    val = 1
+    for i in z:
+        val *= i()
+    return val
+
+def call_and_sum(x, z):
+    val = 1
+    for i in z:
+        val += i(x)
+    return val
+
+def call_and_sum2(x, z, len_z):
+    def body(i, v):
+        x, val, z = v
+        f = z[i]
+        val += f(x)
+        v = x, val, z
+        return v
+    return jax.lax.fori_loop(0, len_z, body, (x, 0, z))
 
 def edge_prob2mu(edge_prob):
     """
     Given an independant edge probababilty, return
     the mean of a normal distribution with standard deviation 1.
     Such that the area from 0.5 to inf equals the edge probability.
+    $$ a = 1 - F_x(0) $$
+    $$ 2 \times (1 - a)-1 = erf(\frac_{-\mu}{\sigma \sqrt{2}}) $$
+    $$ t = erf^{-1} (2 \times (1-a) -1) $$
+    $$ mu = - \sqrt(2) t $$
     """
     s = 2 * (1-edge_prob) - 1
     t = jsp.special.erfinv(s) 
