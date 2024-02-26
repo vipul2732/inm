@@ -28,7 +28,7 @@ _raw_data_paths = {
     "dub" : "../data/dub/41592_2011_BFnmeth1541_MOESM593_ESM.xls",
     "cullin" : "../data/cullin/1-s2.0-S1931312819302537-mmc2.xlsx",
     "tip49" : "../data/tip49/NIHMS252278-supplement-2.xls",
-    "sars2" : "../data/gordon_sars_cov_2",
+    "sars2" : "../data/gordon_sars_cov_2/41586_2020_2286_MOESM5_ESM.xlsx",
         }
 
 _raw_reference_paths = {
@@ -151,9 +151,15 @@ def preprocess_tip49():
     composites.to_csv("../data/processed/tip49/composite_table.tsv", sep="\t", index=False)
     spec_table.to_csv("../data/processed/tip49/spec_table.tsv", sep="\t", index=True, header=False)
 
-
 def preprocess_sars2():
-    ...
+    spec_table, composites = get_spec_table_and_composites(_raw_data_paths["sars2"], 1,
+                                                           prey_colname="Preys",
+                                                           ctrl_col="CtrlCounts",
+                                                           header=0,
+                                                           ms_score_colname="SaintScore")
+    composites.to_csv("../data/processed/gordon_sars_cov_2/composite_table.tsv", sep="\t", index=False)
+    spec_table.to_csv("../data/processed/gordon_sars_cov_2/spec_table.tsv", sep="\t", index=True, header=False)
+
 
 #References 
 
