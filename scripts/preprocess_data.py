@@ -10,14 +10,26 @@ from collections import defaultdict
 from pathlib import Path
 import numpy as np
 import pandas as pd
+import logging
+import shutil
 
 
 
 @click.command()
 @click.option("--ds-name")
-def main(ds_name):
+@click.option("--dont-remap", is_flag=True, default=False)
+def main(ds_name, dont_remap):
+    out_path = "../data/processed/" + ds_name
+    log_path = out_path + "/preprocess_data.log"
+    print(log_path)
+    logging.basicConfig(
+        filename=log_path,
+        encoding="utf-8",
+        filemode='w',
+        level=logging.DEBUG)
+    do_remap = not dont_remap 
     if ds_name in _raw_data_paths:
-        preprocess_data(ds_name)
+        preprocess_data(ds_name, enforce_bait_remapping=do_remap)
     elif ds_name in _raw_reference_paths:
         preprocess_reference(ds_name)
     else:
@@ -54,11 +66,26 @@ def handle_controls(strat, prey_condition_dict, prey, condition, found_controls,
         raise ValueError
 
 def prey_parser(prey_name, strat):
+    assert isinstance(prey_name, str), prey_name
     if strat == "general":
         prey_name = prey_name.removesuffix("_HUMAN")
         return prey_name
     else:
         raise ValueError
+
+def get_mapping_dict(xlsx_path):
+    fpath = Path(xlsx_path).parent / "bait_remapping" 
+    keyword = fpath.parent.stem 
+    to_path = Path("../data/processed") / keyword
+    to_path = to_path / "bait_remapping"
+    to_path = str(to_path)
+    fpath = str(fpath)
+    df = pd.read_csv(fpath, names=['b', 'p'])
+    d = {r['b']:r['p'] for i, r in df.iterrows()}
+    shutil.copy(fpath, to_path)
+    return d
+        
+
  
 def get_spec_table_and_composites(xlsx_path, sheet_nums,
                                   header=0,
@@ -71,8 +98,24 @@ def get_spec_table_and_composites(xlsx_path, sheet_nums,
                                   bait_parser_strat="first_four",
                                   control_handle_strat="all",
                                   prey_parser_strat="general",
+                                  enforce_bait_remapping=True,
                                   ):
     # Make the composite table
+    logging.info(f"PARAMS")
+    logging.info(f"    In path: {xlsx_path}")
+    logging.info(f"    sheet_nums {sheet_nums}")
+    logging.info(f"    bait_col_name {bait_col_name}")
+    logging.info(f"    prey_colname: {prey_colname}")
+    logging.info(f"    ms_score_colname : {ms_score_colname}")
+    logging.info(f"    ctrl_col: {ctrl_col}")
+    logging.info(f"    spec_colname: {spec_colname}")
+    logging.info(f"    spec_count_sep: {spec_count_sep}")
+    logging.info(f"    bait_parser_strat: {bait_parser_strat}")
+    logging.info(f"    control_handle_strat: {control_handle_strat}")
+    logging.info(f"    prey_parser_strat: {prey_parser_strat}")
+    logging.info(f"    enforce_bait_rempapping: {enforce_bait_remapping}")
+    if enforce_bait_remapping:
+        bait_mapping_dict = get_mapping_dict(xlsx_path)
     sid = []
     cb = []
     cp = []
@@ -81,7 +124,23 @@ def get_spec_table_and_composites(xlsx_path, sheet_nums,
     k = 0
     prey_condition_dict = {}
     for sheet_num in range(sheet_nums): 
-        df = pd.read_excel(xlsx_path, sheet_name=sheet_num, header=header)
+        logging.info(f"sheet {sheet_num}")
+        df = pd.read_excel(xlsx_path, sheet_name=sheet_num, header=header) 
+        logging.info(f"DF SHAPE : {df.shape}")
+        # Sometimes excel corrupts identifers to dates - we remove these without correction
+        sel = []
+        for i, r in df.iterrows():
+            val = isinstance(r[bait_col_name], str) and isinstance(r[prey_colname], str)
+            sel.append(val)
+        sel = np.array(sel)
+        n_corrupt = np.sum(~sel)
+        if n_corrupt > 0:
+            logging.warning(f"N corrupt lines : {n_corrupt}")
+            for i, r in df.loc[~sel, :].iterrows():
+                logging.warning(f"corrupt line {i} : {r[bait_col_name], r[prey_colname], r[ms_score_colname]}")
+        df = df[sel] 
+        logging.info(f"DF SHAPE : {df.shape}")
+        assert isinstance(df, pd.DataFrame)
         for i, r in df.iterrows():
             bait_name = r[bait_col_name]
             assert isinstance(bait_name, str)
@@ -90,9 +149,13 @@ def get_spec_table_and_composites(xlsx_path, sheet_nums,
                 k += 1
             SID = sid_dict[bait_name]
             bait = bait_parser(bait_name, bait_parser_strat)  
+            if enforce_bait_remapping and bait in bait_mapping_dict:
+                bait = bait_mapping_dict[bait]
+            assert isinstance(bait, str), bait
             sid.append(SID)
             cb.append(bait)
             prey_name = r[prey_colname]
+            assert isinstance(prey_name, str), (i, prey_name, r)
             prey = prey_parser(prey_name, prey_parser_strat) 
             cp.append(prey)
             saint = r[ms_score_colname]
@@ -152,39 +215,58 @@ def get_spec_table_and_composites(xlsx_path, sheet_nums,
     spec_table = pd.DataFrame(spec_table, index = index) 
     return spec_table, composites
 
-def preprocess_cullin(prey_colname="PreyGene"):
-    spec_table, composites = get_spec_table_and_composites(_raw_data_paths["cullin"], 3, prey_colname=prey_colname) 
+def log_unmapped_bait(d):
+    bait = set(d['Bait'])
+    prey = set(d['Prey'])
+    u = bait - prey
+    logging.info(f"N Bait {len(bait)}")
+    if len(u) > 0:
+        logging.warning(f"{len(u)} bait not found in prey")
+        logging.warning(f"unfound bait {u}")
+
+def preprocess_cullin(prey_colname="PreyGene", enforce_bait_remapping=False):
+    spec_table, composites = get_spec_table_and_composites(
+            _raw_data_paths["cullin"],
+            3,
+            prey_colname=prey_colname,
+            enforce_bait_remapping=enforce_bait_remapping) 
+    log_unmapped_bait(composites)
     composites.to_csv("../data/processed/cullin/composite_table.tsv", sep="\t", index=False)
     spec_table.to_csv("../data/processed/cullin/spec_table.tsv", sep="\t", index=True, header=False)
-    return df
 
-def preprocess_dub(prey_colname="Prey"):
+def preprocess_dub(prey_colname="Prey", enforce_bait_remapping=False):
     spec_table, composites = get_spec_table_and_composites(
             _raw_data_paths["dub"], 1,
             ctrl_col=None,
             header=2,
             ms_score_colname="SAINT",
-            bait_parser_strat="all",)
+            bait_parser_strat="all",
+            enforce_bait_remapping=enforce_bait_remapping)
+    log_unmapped_bait(composites)
     composites.to_csv("../data/processed/dub/composite_table.tsv", sep="\t", index=False)
     spec_table.to_csv("../data/processed/dub/spec_table.tsv", sep="\t", index=True, header=False)
 
-def preprocess_tip49(prey_colname="Prey"):
+def preprocess_tip49(prey_colname="Prey", enforce_bait_remapping=False):
     spec_table, composites = get_spec_table_and_composites(
-            _raw_data_paths["tip49"], 1, 
+            _raw_data_paths["tip49"], sheet_nums=1, 
             header=2, ms_score_colname="SAINT",
             bait_parser_strat="all",
-            prey_colname=prey_colname)
+            prey_colname=prey_colname,
+            enforce_bait_remapping=enforce_bait_remapping)
+    log_unmapped_bait(composites)
     composites.to_csv("../data/processed/tip49/composite_table.tsv", sep="\t", index=False)
     spec_table.to_csv("../data/processed/tip49/spec_table.tsv", sep="\t", index=True, header=False)
 
-def preprocess_sars2(prey_colname="PreyGene"):
+def preprocess_sars2(prey_colname="PreyGene", enforce_bait_remapping=False):
     spec_table, composites = get_spec_table_and_composites(
-            _raw_data_paths["sars2"], 1,
+            _raw_data_paths["gordon_sars_cov_2"], 1,
             prey_colname=prey_colname,
             ctrl_col="CtrlCounts",
             header=0,
             ms_score_colname="SaintScore",
-            bait_parser_strat="all")
+            bait_parser_strat="all",
+            enforce_bait_remapping=enforce_bait_remapping)
+    log_unmapped_bait(composites)
     composites.to_csv("../data/processed/gordon_sars_cov_2/composite_table.tsv", sep="\t", index=False)
     spec_table.to_csv("../data/processed/gordon_sars_cov_2/spec_table.tsv", sep="\t", index=True, header=False)
 
@@ -200,8 +282,8 @@ def preprocess_huri():
 def preprocess_humap2():
     ...
 
-def preprocess_data(ds_name):
-    _preprocess_data[ds_name]()
+def preprocess_data(ds_name, enforce_bait_remapping):
+    _preprocess_data[ds_name](enforce_bait_remapping=enforce_bait_remapping)
 
 def preprocess_reference(ds_name):
     _preprocess_reference[ds_name]()
@@ -210,7 +292,7 @@ _preprocess_data = {
     "dub" : preprocess_dub,
     "cullin" : preprocess_cullin,
     "tip49" : preprocess_tip49,
-    "sars2" : preprocess_sars2,
+    "gordon_sars_cov_2" : preprocess_sars2,
     }
 
 _preprocess_reference = {
@@ -223,7 +305,7 @@ _raw_data_paths = {
     "dub" : "../data/dub/41592_2011_BFnmeth1541_MOESM593_ESM.xls",
     "cullin" : "../data/cullin/1-s2.0-S1931312819302537-mmc2.xlsx",
     "tip49" : "../data/tip49/NIHMS252278-supplement-2.xls",
-    "sars2" : "../data/gordon_sars_cov_2/41586_2020_2286_MOESM5_ESM.xlsx",
+    "gordon_sars_cov_2" : "../data/gordon_sars_cov_2/41586_2020_2286_MOESM5_ESM.xlsx",
         }
 
 _raw_reference_paths = {
