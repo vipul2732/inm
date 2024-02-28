@@ -33,8 +33,6 @@ Composite connectivity
 5. Calculate a network based on composite connectivity
 6. Compare
 """
-
-import jax
 import jax.numpy as jnp
 import jax.scipy as jsp
 from jax.tree_util import Partial
@@ -57,7 +55,9 @@ import time
 import math
 import sys
 import xarray as xr
+import logging
 from typing import Any, NamedTuple
+import pdb
 
 Array = Any
 
@@ -642,6 +642,12 @@ def model13(model_data):
     # What to do about double counting the direct interactions?
     numpyro.sample("COS_SYM", dist.Normal(P < 3, STD), obs=jax_cos_sim_matrix)
 
+def BinomialApproximation(n, p):
+    """
+    The normal approximation to the Binomial distribution
+    """
+    return dist.Normal(n * p, n * p * (1-p))
+
 class CompositeConnectivity(dist.Distribution):
     """
     Given an edge array  and an edge_indexing_arr, place a lower bound on the
@@ -698,6 +704,91 @@ def sigmoid_bait_prey_score_fn(d, N, k=8, slope=10):
     x = x + 0.5
     x = x * slope
     return (jax.nn.sigmoid(x) - 0.5) 
+
+def bait_prey_connectivity_score_fn_dispatcher(
+        edge_idxs,
+        Ndense,
+        maximal_shortest_path_to_calculate,
+        binary_ppi_threshold,
+        pc,
+        bait_prey_slope):
+    return Partial(bait_prey_connectivity_score_fn, k=maximal_shortest_path_to_calculate)
+
+def bait_prey_connectivity_direct_score_fn(
+        aij,
+        composite_edge_ids,
+        Nc,
+        Nmax,
+        k,
+        max_paths,
+        DTYPE=jnp.int32,
+        loc=0,
+        scale=1) -> float:
+    """
+    aij : the flattened edge array 
+    Nc  : the number of proteins in the composite. Can be a random variable
+    Nmax : Cannot be a random variable
+    k   : the maximal bait prey distance at which a path is counted as disconnected
+    max_paths : the maximal number of matrix multiplications to use in the Warshal algorithm
+    DTYPE : don't change - the Adjacency matrix should be integer so that max paths is properly calculated
+    """
+    composite_edges = aij[composite_edge_ids]
+    A = flat2matrix(composite_edges, Nmax)
+    A = jnp.where(A < 0.5, jnp.array([0], dtype=DTYPE), jnp.array([1], dtype=DTYPE))
+    D = shortest_paths_up_to_N(A, max_paths)
+    distance2bait = D[0, :] # (N, )
+    distance2bait = distance2bait.at[0].set(0) # set self distance to 0 
+    n_bait_prey_interactions = jnp.sum(distance2bait < k)
+    x = n_bait_prey_interactions - Nc
+    return jax.lax.cond(x >= 0,
+                        lambda x: jsp.stats.norm.logpdf(0, loc, scale),
+                        lambda x: jsp.stats.norm.logpdf(x, loc, scale),
+                        x)
+
+def bait_prey_score(
+    composite_name,
+    aij,
+    composite_idxs,
+    Ndense,
+    Nmax,
+    k,
+    pc,
+    max_distance = 22):
+    """
+    A component of probablistic model using Numpyro primitives
+    """
+        edge_idxs = jnp.array(mv.node_list2edge_list(composite_idxs, Nmax))
+        n_prey = numpyro.sample(composite_name + "_N", mv.BinomialApproximation(Ndense, pc))
+        score = mv.bait_prey_connectivity_direct_score_fn(aij = aij,
+        composite_edge_ids=edge_idxs,
+        Nc = n_prey,
+        Nmax = Ndense,
+        k = k,
+        max_paths = max_distance)
+        numpyro.factor(composite_name + "_score", score)
+
+
+def bait_prey_connectivity_score_fn(d, N, k=8, loc=0, scale=1):
+    """
+    d : An array of distances to the bait where the first distance (bait 2 bait) is 0
+    N : The number of proteins in the composite including bait
+    k : A distance over which two proteins are considered disconnected
+    pc: The prior probability of a composite
+    Bait Prey connectivity implies that there must be at least N bait prey paths (including bait to itself).
+    
+    pc implies that each protein type has a pc chance of being present in the composite.
+       Therefore, Bait prey connectivity implies there must be at least N * pc bait prey paths to satisfy the restraint.
+    
+    """
+    n_bait_prey_interactions = jnp.sum(d < k)
+    x = n_bait_prey_interactions - N  # Satisfied >= 0
+    return jax.lax.cond(x >= 0,
+                        lambda x: jsp.stats.norm.logpdf(0, loc, scale),
+                        lambda x: jsp.stats.norm.logpdf(x, loc, scale),
+                        x)
+
+vbait_prey_connectivity = jax.vmap(bait_prey_connectivity_score_fn)
+
 
 def m_from_n_choose2(c, DTYPE=jnp.int32):
     """
@@ -1013,8 +1104,6 @@ def flat2matrix(a, n: int, row_major=True):
         raise ValueError
     return M + M.T
 
-
-
 def model14_data_getter(ntest=3005, from_pickle=True):
     if from_pickle:
         with open("model14_data.pkl", "rb") as f:
@@ -1040,6 +1129,10 @@ def model14_data_getter(ntest=3005, from_pickle=True):
     return {"flattened_apms_similarity_scores" : flattened_apms_similarity_scores,
             "flattened_apms_shuffled_similarity_scores" : flattened_shuffled_apms}
             #"null_dist" : null_dist} 
+
+def model22_ll_lp_data_getter(save_dir):
+    with open(str(save_dir) + "data.pkl", "rb") as f:
+        return pkl.load(f)
 
 def preyu2uid_mapping_dict():
     apms_data_path = "../table1.csv"
@@ -1522,6 +1615,61 @@ def model20_test6e_1b():
     s1 = bp1.log_prob(e)
     numpyro.factor('bp1', s1)
 
+def model22data_from_preprocessed_data(data_path, ms_thresholds, sep="\t", rseed=0):
+    if isinstance(data_path, str):
+        spec_path = Path(data_path) / "spec_table.tsv" 
+        composite_path = Path(data_path) / "composite_table.tsv"
+    composite_table = pd.read_csv(composite_path, sep=sep)
+    # Remove prey below threshold
+    min_threshold = np.min(ms_thresholds)
+    assert min_threshold >= 0
+    assert np.all(np.isreal(composite_table['MSscore'].values))
+    assert np.all(composite_table['MSscore'] >= 0)
+    sel = composite_table['MSscore'] >= min_threshold
+    composite_table = composite_table[sel]
+    # Get the composite, threshold pairs 
+    sid_set = set(composite_table['SID'])
+    composites = {}
+    k=0
+    for threshold in ms_thresholds:
+        for sid in sid_set:
+            sel = (composite_table['SID'] == sid) & (composite_table['MSscore'] >= threshold)
+            if np.sum(sel) > 0:
+                d = composite_table[sel]
+                bait_l = list(set(d['Bait']))
+                msscore_l = list(set(d['MSscore']))
+                assert len(bait_l) == 1, bait_l
+                #Ensure bait is first index
+                prey_l = list(set(d['Prey'])) 
+                if bait_l[0] in prey_l:
+                    prey_l.remove(bait_l[0])
+                nodes = bait_l + prey_l
+                msscore = msscore_l[0]
+                composites[k] = {'nodes':nodes, 't': threshold, 'SID': sid}
+                k+=1
+    spec_table = pd.read_csv(spec_path, sep=sep, index_col=0, header=None)
+    # Remove the IDS that don't pass the minimal MSscore threshold
+    prey_set = set(composite_table['Prey'])
+    bait_set = set(composite_table['Bait'])
+    all_ids = list(prey_set.union(bait_set))
+    sel = []
+    for name in spec_table.index: 
+        val = True if name in all_ids else False
+        sel.append(val)
+    spec_table = spec_table[sel]
+    #Calculate shuffled profile similiarties from all the data
+    null_sc = spec_table.copy()
+    key = jax.random.PRNGKey(rseed)
+    shuff = jax.random.permutation(key, null_sc.values, axis=1) #shuffle rows
+    null_sc.loc[:, :] = np.array(shuff) 
+    shuff_corr = np.corrcoef(null_sc.values, rowvar=True)
+    corr = np.corrcoef(spec_table.values, rowvar=True)
+    shuff_corr = pd.DataFrame(shuff_corr, columns=spec_table.index, index=spec_table.index)
+    corr = pd.DataFrame(corr, columns=spec_table.index, index=spec_table.index)
+    return corr, shuff_corr, composites 
+
+def row_mag(A):
+    return np.sqrt(np.sum(np.square(A), axis=1))
 
 def model21_test():
     score_fn = Partial(simple_bait_prey_score_fn, slope=slope)
@@ -1648,7 +1796,7 @@ _model_dispatch = {
     "model_11_path_length": (model_11_path_length, init_to_uniform, lambda x: int(x)),
         }
 
-def model_dispatcher(model_name, model_data):
+def model_dispatcher(model_name, model_data, save_dir):
     if model_name in _model_dispatch:
         model, init_strategy, data_func = _model_dispatch[model_name]
         model_data = data_func(model_data)
@@ -1706,6 +1854,9 @@ def model_dispatcher(model_name, model_data):
         # test line
         model = model15
         init_strategy = init_to_uniform
+    elif model_name == "model22_ll_lp":
+        model_data = model22_ll_lp_data_getter(save_dir)
+        init_strategy = init_to_uniform
     else:
         raise ValueError(f"Invalid {model_name}")
     return model, model_data, init_strategy
@@ -1717,8 +1868,6 @@ def init_position_dispatcher(initial_position_fp, model_name):
         return init_to_value(values=d)
     else:
         raise NotImplementedError 
-
-    
 
 @click.command()
 @click.option("--model-id", type=str, help="identifier is prepended to saved files")
@@ -1799,7 +1948,7 @@ def _main(model_id,
                             # step_size N
                         #"trajectory_length",
         )
-    model, model_data, init_strategy = model_dispatcher(model_name, model_data)
+    model, model_data, init_strategy = model_dispatcher(model_name, model_data, save_dir)
     if include_potential_energy:
         extra_fields = extra_fields + ("potential_energy",)
     if include_mean_accept_prob:
