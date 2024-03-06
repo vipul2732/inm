@@ -99,13 +99,13 @@ def get_pdb_ppi_predict_direct_reference(source="tsv"):
             direct_matrix = ref.reference.matrix
             df = xarray_matrix2edge_list_df(direct_matrix)
     elif source == "tsv":
-        df = pd.read_csv("../data/processed/references/pdb_ppi_prediction/direct_benchmark.tsv")
+        df = pd.read_csv("../data/processed/references/pdb_ppi_prediction/direct_benchmark.tsv", names=["auid", "buid"], sep="\t")
     else:
         raise NotImplementedError
     u = UndirectedEdgeList()
     u.update_from_df(df)
-    reindexer = get_cullin_reindexer()
-    u.reindex(reindexer, enforce_coverage = False)
+    #c.update_from_df(df, a_colname="Bait", b_colname="Prey", edge_value_colname = "MSscore",
+    #                 multi_edge_value_merge_strategy = "max")
     return u 
 
 def get_pdb_ppi_predict_cocomplex_reference(source="tsv"):
@@ -115,13 +115,11 @@ def get_pdb_ppi_predict_cocomplex_reference(source="tsv"):
             xar = ref.reference.matrix
             df = xarray_matrix2edge_list_df(xar)
     elif source == "tsv":
-        df = pd.read_csv("../data/processed/references/pdb_ppi_prediction/cocomplex_benchmark.tsv")
+        df = pd.read_csv("../data/processed/references/pdb_ppi_prediction/cocomplex_benchmark.tsv", names=["auid", "buid"], sep="\t")
     else:
         raise NotImplementedError
     u = UndirectedEdgeList()
     u.update_from_df(df)
-    reindexer = get_cullin_reindexer()
-    u.reindex(reindexer, enforce_coverage = False)
     return u 
 
 def get_intact_all_first_uid_reference():
@@ -191,21 +189,46 @@ def get_dataset_matrix(ds_list, intersection_method):
     return df
 
 def benchmark_cullin_max_saint(ds_dict):
+    acceptable_references = ["biogrid_all", "intact_all_first_uid", "pdb_ppi_direct", "pdb_ppi_cocomplex"]
     results = {} 
     for key, e in ds_dict.items():
-        x = tpr_ppr.PprTprCalculator(pred = ds_dict['cullin_max_saint'], ref = e)
-        r = x.crunch()
-        results[key] = (r.auc, r.shuff_auc)
+        if key in acceptable_references: 
+            x = tpr_ppr.PprTprCalculator(pred = ds_dict['cullin_max_saint'], ref = e)
+            r = x.crunch()
+            results[key] = r
     return results
-
-
-
 
 get_edge_intersection_matrix = partial(get_dataset_matrix, intersection_method = "edge")
 get_node_intersection_matrix = partial(get_dataset_matrix, intersection_method = "node")
 
 def main():
     outdir = "../results/generate_benchmark_figures/"
-    ...
+    ds_dict = get_all_intersection_datasets()
+    de = get_edge_intersection_matrix(ds_dict)
+    dn = get_node_intersection_matrix(ds_dict)
+    # Save the matrices
+    de.to_csv(outdir + "edge_intersections.tsv", sep="\t")
+    dn.to_csv(outdir + "node_intersections.tsv", sep="\t")
+
+    # Do Saint Benchmarking with cullin
+    cullin_saint_benchmark_results = benchmark_cullin_max_saint(ds_dict)
+    # Save figures
+    auc = []
+    shuff_auc = []
+    delta_auc = []
+    names = []
+    plotter = tpr_ppr.PprTprPlotter()
+    for key, r in cullin_saint_benchmark_results.items():
+        name = f"cullin_saint_max__{key}" 
+        save_path = outdir + name 
+        plotter.plot(save_path, r) 
+        auc.append(r.auc)
+        shuff_auc.append(r.shuff_auc)
+        delta_auc.append(r.delta_auc)
+        names.append(name)
+    # Create a SAINT Auc Table
+    df = pd.DataFrame({"auc" : auc, "shuff_auc" : shuff_auc, "detla_auc" : delta_auc}, index=names)
+    df.to_csv(outdir + "cullin_saint_max_summary_table.tsv", sep="\t")
+
 if __name__ == "__main__":
     main()
