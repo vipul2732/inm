@@ -92,7 +92,7 @@ def _main(o, i):
 
     # Mean Variance correlation plot
     fig, ax = plt.subplots()
-    ax.plot(mean, var, 'k.', alpha=0.8)
+    ax.plot(mean, var, 'k.', alpha=0.2)
     ax.set_xlabel("Edge mean")
     ax.set_ylabel("Edge var")
     save("mean_var_scatter")
