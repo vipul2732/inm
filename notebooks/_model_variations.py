@@ -2097,6 +2097,12 @@ def model23_ll_lp(model_data):
     composite_dict_p_is_1 = d['new_composite_dict_p_is_1']  # Can use N directl
     composite_dict_norm_approx = d['new_composite_dict_norm_approx'] # Can use the Binomial approximation 
     R = d['apms_corr_flat']
+    # Note - here we clip the data for negative correlations
+    # How to handle statistically significant negative correlations? What do they mean?
+    # Likey don't enrich for PPI's
+    # What does a statistically significant negative correlation mean? 
+    R = np.clip(R, 0, 1.0)
+
     n_composites = d['n_composites']
     #N_per_composite = d['N_per_composite'] # (n_composites,)
     #p_per_composite = d['p_per_composite'] # (n_composites,)
