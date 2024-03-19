@@ -39,6 +39,15 @@ def _main(o, i):
     ax.set_ylabel("Frequency")
     save("energy")
 
+    x_cater = np.arange(len(ef['energy'])) 
+
+    # Energy Caterpillar
+    fig, ax = plt.subplots()
+    ax.plot(x_cater, np.array(ef['energy']), alpha=0.2)
+    ax.set_xlabel("Post warmup step")
+    ax.set_ylabel("Energy")
+    save("energy_caterpill")
+
     # Mean acceptance histogram
     fig, ax = plt.subplots()
     ax.hist(np.array(ef['mean_accept_prob']))
@@ -52,6 +61,13 @@ def _main(o, i):
     ax.set_xlabel("potential_energy")
     ax.set_ylabel("Frequency")
     save("potential_energy")
+
+    # potential 
+    fig, ax = plt.subplots()
+    ax.plot(x_cater, np.array(ef['potential_energy']), alpha=0.2)
+    ax.set_xlabel("Post warmup step")
+    ax.set_ylabel("potential_energy")
+    save("potential_energy_caterpill")
 
     # diverging 
     fig, ax = plt.subplots()
@@ -96,7 +112,6 @@ def _main(o, i):
     ax.set_xlabel("Edge mean")
     ax.set_ylabel("Edge var")
     save("mean_var_scatter")
-
 
     # Plot a table of the average value of every composite N
     Ns = []
