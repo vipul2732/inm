@@ -415,12 +415,43 @@ def adjacency2edgelist_df(A, node_idx2name):
             b.append(node_idx2name[j])
     return pd.DataFrame({"a" : a, "b" : b, "w": w})
                         
-def model23_results2edge_list():
+def model23_results2edge_list(modeling_output_dirpath):
     """
     1. Path to modeling results
     2. Get an edge score as average across all modeling runs
     """
-    ...
+    fname = "0_model23_ll_lp_13.pkl"
+    with open(modeling_output_dirpath / fname, "rb") as f:
+        d = pkl.load(f)
+    with open(modeling_output_dirpath / "0_model23_ll_lp_13_model_data.pkl", "rb") as f:
+        model_data = pkl.load(f)
+    # Plot the average adjacency matrix  
+    samples = d['samples']
+    nsamples, M = samples['z'].shape
+    N = model_data['N']
+    a = jax.nn.sigmoid((samples['z']-0.5)*1_000)
+    mean = np.mean(a, axis=0) 
+    A = mv.flat2matrix(mean, N)
+    a = []
+    b = []
+    w = []
+    for i in range(N):
+        for j in range(0, i):
+            a_name = model_data['node_idx2name'][i]
+            b_name = model_data['node_idx2name'][j]
+            assert a_name != b_name
+            weight = float(A[i, j])
+            a.append(a_name)
+            b.append(b_name)
+            w.append(weight)
+    df = pd.DataFrame({'auid': a, 'buid': b, 'w': w})        
+    u = UndirectedEdgeList()
+    u.update_from_df(df, edge_value_colname="w", multi_edge_value_merge_strategy="max")
+    reindexer = get_cullin_reindexer()
+    u.reindex(reindexer, enforce_coverage = False)
+    return u
+    
+    
 
 get_edge_intersection_matrix = partial(get_dataset_matrix, intersection_method = "edge")
 get_node_intersection_matrix = partial(get_dataset_matrix, intersection_method = "node")
@@ -434,6 +465,68 @@ def any_id_id_mapping_strategy():
 
     # 
     ...
+
+
+def do_benchmark(pred, ref):
+    x = tpr_ppr.PprTprCalculator(pred = pred, ref = ref)
+    results = x.crunch()
+    return results
+
+
+def compare_and_save():
+    x = tpr_ppr.PprTprCalculator(pred = pred, ref = ref)
+    results = x.crunch()
+
+    ...
+
+def cullin_standard(model_output_dirpath):
+    references = dict( 
+        humap2_high = get_humap_high_reference(),
+        humap2_medium = get_humap_medium_reference(),
+        pre_ppi = get_pre_ppi_af_hc(),
+        huri = get_huri_reference(),
+        pdb_direct = get_pdb_ppi_predict_direct_reference(),
+        pdb_cocomplex = get_pdb_ppi_predict_cocomplex_reference(),
+    )
+    
+    predictions = dict(
+        average_edge = model23_results2edge_list(model_output_dirpath),
+        cullin_max_saint = get_cullin_saint_scores_edgelist()
+    )
+
+    plotter = tpr_ppr.PprTprPlotter()
+    # Summary Table
+    ref_name_lst = []
+    pred_name_lst = []
+    auc = []   
+    shuff_auc = []
+
+    for pred_name, prediction in predictions.items():
+        for ref_name, reference in references.items():
+            comparison_name = f"{pred_name}_v_{ref_name}"
+            compare_results = do_benchmark(prediction, reference)
+            outpath = str(model_output_dirpath /  comparison_name) 
+            plotter.plot(outpath, comparison_name, compare_results)
+            pred_name_lst.append(pred_name)
+            ref_name_lst.append(ref_name)
+            auc.append(compare_results.auc)
+            shuff_auc.append(compare_results.shuff_auc)
+            
+    df = pd.DataFrame({"prediction" : pred_name_lst,
+                       "reference" : ref_name_lst,
+                       "auc" : auc,
+                       "shuff_auc" : shuff_auc,}) 
+    df.to_csv(str(model_output_dirpath / "benchmark.tsv"), sep="\t")
+    # Write the model prediction table
+    reindexer = get_cullin_reindexer()
+    inv_reindexer = {val : key for key, val in reindexer.items()}
+    u = predictions['average_edge']
+    df = pd.DataFrame({"auid" : u.a_nodes,
+                       "buid" : u.b_nodes,
+                       "a_gene" : [inv_reindexer[k] for k in u.a_nodes],
+                       "b_gene" : [inv_reindexer[k] for k in u.b_nodes],
+                       "w" : u.edge_values})
+    df.to_csv("average_predicted_edge_scores.tsv", sep="\t", index=None)
 
 def main():
     outdir = "../results/generate_benchmark_figures/"
@@ -463,6 +556,8 @@ def main():
     # Create a SAINT Auc Table
     df = pd.DataFrame({"auc" : auc, "shuff_auc" : shuff_auc, "detla_auc" : delta_auc}, index=names)
     df.to_csv(outdir + "cullin_saint_max_summary_table.tsv", sep="\t")
+
+
 
 if __name__ == "__main__":
     main()
