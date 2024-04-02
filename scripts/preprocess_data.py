@@ -41,77 +41,164 @@ def bait_parser(x, strat):
     else:
         raise ValueError(f"unkonwn strategy {strat}")
 
+def remove_corrupt_rows(df, bait_colname, prey_colname, spoke_score_colname,):
+   """Sometimes excel corrupts identifers to dates - we remove these without correction
+   eg SEPT7"""
 
-def get_spec_table_and_composites_TODO():
+   sel = []
+   for i, r in df.iterrows():
+       val = isinstance(r[bait_colname], str) and isinstance(r[prey_colname], str)
+       sel.append(val)
+   sel = np.array(sel)
+   n_corrupt = np.sum(~sel)
+   if n_corrupt > 0:
+       logging.warning(f"N corrupt lines : {n_corrupt}")
+       for i, r in df.loc[~sel, :].iterrows():
+           logging.warning(f"corrupt line {i} : {r[bait_col_name], r[prey_colname], r[spoke_score_colname]}. Removing.")
+   df = df[sel] 
+   logging.info(f"DF SHAPE : {df.shape}")
+   assert isinstance(df, pd.DataFrame)
+   return df
+
+def get_empty_spec_table(xlsx_path,
+                         sheet_nums,
+                         header,
+                         bait_colname,
+                         prey_colname,
+                         spoke_score_colname,
+                         n_spec_replicates,
+                         n_ctrl_replicates):
+    colnames = []
+    prey_names = []
+    for sheet_number in range(sheet_nums):
+        df = pd.read_excel(xlsx_path, sheet_name=sheet_number, header=header)
+        df = remove_corrupt_rows(
+                df,
+                bait_colname = bait_colname,
+                prey_colname = prey_colname,
+                spoke_score_colname = spoke_score_colname)
+        for bait in set(df[bait_colname].values):
+            bait_name = bait.removesuffix("_MG132")
+            for i in range(n_spec_replicates):
+                colnames.append(bait_name + f"_r{i}")
+            for i in range(n_ctrl_replicates):
+                colnames.append(bait_name + f"_c{i}")
+            sel = df[bait_colname] == bait
+            for i, r in df[sel].iterrows():
+                prey_names.append(r[prey_colname].removesuffix("_HUMAN"))
+            prey_names = list(set(prey_names))
     
-colnames = []
-prey_names = []
+    n = len(prey_names)
+    m = len(colnames)
+    spec_table = pd.DataFrame(np.zeros((n, m)), columns=colnames, index=prey_names)      
+    return spec_table
 
-from collections import defaultdict
+def get_spec_table(
+        xlsx_path,
+        sheet_nums,
+        header = 0,
+        bait_colname = "Bait",
+        prey_colname = "Prey",
+        spoke_score_colname = "SaintScore",
+        ctrl_colname = "ctrlCounts",
+        spec_colname = "Spec",
+        spec_count_sep = "|",
+        enforce_bait_remapping = True,
+        n_spec_replicates = 4,
+        n_ctrl_replicates = 12,):
 
+    logging.info(f"PARAMS")
+    logging.info(f"    In path: {xlsx_path}")
+    logging.info(f"    sheet_nums {sheet_nums}")
+    logging.info(f"    bait_col_name {bait_colname}")
+    logging.info(f"    prey_colname: {prey_colname}")
+    logging.info(f"    spoke_score_colname : {spoke_score_colname}")
+    logging.info(f"    ctrl_col: {ctrl_colname}")
+    logging.info(f"    spec_colname: {spec_colname}")
+    logging.info(f"    spec_count_sep: {spec_count_sep}")
 
-seen_control_tables = []
-keep_controls = []
-keep_experiments = []
-for sheet_number in range(3):
-    df = pd.read_excel("../../data/cullin/1-s2.0-S1931312819302537-mmc2.xlsx", sheet_name=sheet_number, header=0)
-    for bait in set(df['Bait'].values):
-        bait_name = bait.removesuffix("_MG132")
-        for i in range(4):
-            colnames.append(bait_name + f"_r{i}")
-        for i in range(12):
-            colnames.append(bait_name + f"_c{i}")
-        sel = df['Bait'] == bait
-        for i, r in df[sel].iterrows():
-            prey_name = r['PreyGene'].removesuffix("_HUMAN")
-            e_colname = bait_name + f"_r"
-            c_colname = bait_name + f"_c"
-            evals = [int(k) for k in r['Spec'].split("|")]
-            cvals = [int(k) for k in r['ctrlCounts'].split("|")]
+    spec_table = get_empty_spec_table(
+            xlsx_path = xlsx_path,
+            sheet_nums = sheet_nums,
+            header = header,
+            bait_colname = bait_colname,
+            prey_colname = prey_colname,
+            spoke_score_colname = spoke_score_colname,
+            n_spec_replicates = n_spec_replicates,
+            n_ctrl_replicates = n_ctrl_replicates)
 
-            # What controls to keep?
-            experiment_columns = [e_colname + str(i) for i in range(4)]
-            outdf.loc[prey_name, experiment_columns] = evals
-            control_columns = [c_colname + str(i) for i in range(12)]
-            outdf.loc[prey_name, control_columns] = cvals
-        control_table = df.loc[sel, ["PreyGene", "ctrlCounts"]]
-        keep_experiments += experiment_columns
-        if len(seen_control_tables) == 0:
-            # Keep the controls
-            keep_controls += control_columns
-            seen_control_tables.append(control_table)
-        else:
-            for seen_table in seen_control_tables:
-                temp = None
-                # Check the table against seen tables at the prey intersections
-                shared_prey = set(control_table['PreyGene'].values).intersection(
-                    set(seen_table['PreyGene'].values))
-                shared_prey = list(shared_prey)
-                # If the control tables are equal don't keep
-                sel1 = [k in shared_prey for k in control_table['PreyGene'].values]
-                sel2 = [k in shared_prey for k in seen_table['PreyGene'].values]
+    if enforce_bait_remapping:
+        bait_mapping_dict = get_mapping_dict(xlsx_path)
+    colnames = []
+    prey_names = []
+    seen_control_tables = []
+    keep_controls = []
+    keep_experiments = []
 
-                t1 = control_table[sel1].copy()
-                t2 = seen_table[sel2].copy()
+    # Populate the table
 
-                # Sort both tables the same way
-                t1 = t1.sort_values("PreyGene")
-                t2 = t2.sort_values("PreyGene")
+    for sheet_number in range(sheet_nums):
+        df = pd.read_excel(xlsx_path, sheet_name=sheet_number, header = header)
+        df = remove_corrupt_rows(df, bait_colname, prey_colname, spoke_score_colname)
+        unique_baits = set(df[bait_colname].values)
 
-                assert np.alltrue(t1['PreyGene'].values == t2['PreyGene'].values)
-                if np.alltrue(t1['ctrlCounts'].values == t2['ctrlCounts'].values):
-                    # Do not keep the control columns
-                    break
-                else:
-                    temp = control_table
-            # if temp is set then add to the seen tables
-            if temp is not None:
+        for bait in unique_baits:
+            bait_name = bait.removesuffix("_MG132")
+            for i in range(n_spec_replicates):
+                colnames.append(bait_name + f"_r{i}")
+            for i in range(n_ctrl_replicates):
+                colnames.append(bait_name + f"_c{i}")
+            sel = df[bait_colname] == bait
+            for i, r in df[sel].iterrows():
+                prey_name = r[prey_colname].removesuffix("_HUMAN")
+                e_colname = bait_name + f"_r"
+                c_colname = bait_name + f"_c"
+                evals = [int(k) for k in r['Spec'].split("|")]
+                cvals = [int(k) for k in r['ctrlCounts'].split("|")]
+    
+                # What controls to keep?
+                experiment_columns = [e_colname + str(i) for i in range(n_spec_replicates)]
+                spec_table.loc[prey_name, experiment_columns] = evals
+                control_columns = [c_colname + str(i) for i in range(n_ctrl_replicates)]
+                spec_table.loc[prey_name, control_columns] = cvals
+            control_table = df.loc[sel, [prey_colname, ctrl_colname]]
+            keep_experiments += experiment_columns
+            if len(seen_control_tables) == 0:
+                # Keep the controls
+                keep_controls += control_columns
                 seen_control_tables.append(control_table)
-                keep_controls += control_columns            
-
-# Check each bait and get 
-all_columns_to_keep = keep_experiments + keep_controls
-outdf = outdf.loc[:, all_columns_to_keep]
+            else:
+                for seen_table in seen_control_tables:
+                    temp = None
+                    # Check the table against seen tables at the prey intersections
+                    shared_prey = set(control_table[prey_colname].values).intersection(
+                        set(seen_table[prey_colname].values))
+                    shared_prey = list(shared_prey)
+                    # If the control tables are equal don't keep
+                    sel1 = [k in shared_prey for k in control_table[prey_colname].values]
+                    sel2 = [k in shared_prey for k in seen_table[prey_colname].values]
+    
+                    t1 = control_table[sel1].copy()
+                    t2 = seen_table[sel2].copy()
+    
+                    # Sort both tables the same way
+                    t1 = t1.sort_values(prey_colname)
+                    t2 = t2.sort_values(prey_colname)
+    
+                    assert np.alltrue(t1[prey_colname].values == t2[prey_colname].values)
+                    if np.alltrue(t1[ctrl_colname].values == t2[ctrl_colname].values):
+                        # Do not keep the control columns
+                        break
+                    else:
+                        temp = control_table
+                # if temp is set then add to the seen tables
+                if temp is not None:
+                    seen_control_tables.append(control_table)
+                    keep_controls += control_columns            
+    # Check each bait and get 
+    all_columns_to_keep = keep_experiments + keep_controls
+    spec_table = spec_table.loc[:, all_columns_to_keep]
+    return spec_table 
 
 def handle_controls(strat, prey_condition_dict, prey, condition, found_controls, sim_dict, spec):
     if strat == "every_four":
@@ -157,7 +244,8 @@ def get_mapping_dict(xlsx_path):
         
 
  
-def get_spec_table_and_composites(xlsx_path, sheet_nums,
+def get_spec_table_and_composites(xlsx_path,
+                                  sheet_nums,
                                   header=0,
                                   bait_col_name="Bait",
                                   prey_colname="Prey",
@@ -307,6 +395,20 @@ def preprocess_cullin(prey_colname="PreyGene", enforce_bait_remapping=False):
     log_unmapped_bait(composites)
     composites.to_csv("../data/processed/cullin/composite_table.tsv", sep="\t", index=False)
     spec_table.to_csv("../data/processed/cullin/spec_table.tsv", sep="\t", index=True, header=False)
+
+def preprocess_spec_table(input_path, output_dir, sheet_nums, prey_colname, enforce_bait_remapping = False):
+    spec_table, composites = get_spec_table_and_composites(
+            input_path,
+            sheet_nums,
+            prey_colname=prey_colname,
+            enforce_bait_remapping=enforce_bait_remapping) 
+
+    spec_table = get_spec_table(xlsx_path = input_path,
+                                sheet_nums = sheet_nums,)
+    log_unmapped_bait(composites)
+    composites.to_csv(output_dir / "composite_table.tsv", sep="\t", index=False)
+    spec_table.to_csv(output_dir / "spec_table.tsv", sep="\t", index=True, header=False)
+
 
 def preprocess_dub(prey_colname="Prey", enforce_bait_remapping=False):
     spec_table, composites = get_spec_table_and_composites(
