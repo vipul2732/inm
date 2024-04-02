@@ -775,11 +775,11 @@ def bait_prey_score_norm_approx(
     edge_idxs = jnp.array(node_list2edge_list(composite_idxs, Nmax))
     n_prey = numpyro.sample(composite_name + "_N", BinomialApproximation(Ndense, pc))
     score = bait_prey_connectivity_direct_score_fn(aij = aij,
-    composite_edge_ids=edge_idxs,
-    Nc = n_prey,
-    Nmax = Ndense,
-    k = k,
-    max_paths = max_distance)
+       composite_edge_ids=edge_idxs,
+       Nc = n_prey,
+       Nmax = Ndense,
+       k = k,
+       max_paths = max_distance)
     numpyro.factor(composite_name + "_score", score)
 
 def bait_prey_score_p_1(
@@ -798,11 +798,11 @@ def bait_prey_score_p_1(
     #n_prey = numpyro.sample(composite_name + "_N", BinomialApproximation(Ndense, pc))
     n_prey = Ndense 
     score = bait_prey_connectivity_direct_score_fn(aij = aij,
-    composite_edge_ids=edge_idxs,
-    Nc = n_prey,
-    Nmax = Ndense,
-    k = k,
-    max_paths = max_distance)
+        composite_edge_ids=edge_idxs,
+        Nc = n_prey,
+        Nmax = Ndense,
+        k = k,
+        max_paths = max_distance)
     numpyro.factor(composite_name + "_score", score)
 
 def kth_bait_prey_score_p_is_1(
@@ -1347,7 +1347,7 @@ def model23_ll_lp_data_getter(save_dir):
     with open(str(save_dir / "modeler_vars.json"), 'r') as f:
         modeler_vars = json.load(f)
     dd = data_from_spec_table_and_composite_table(str(save_dir), modeler_vars['thresholds'])
-    with open("shuffled_apms_correlation_matrix.pkl", "rb") as f:
+    with open(save_dir / "shuffled_apms_correlation_matrix.pkl", "rb") as f:
         shuffled_apms_correlation_matrix = pkl.load(f)
     assert len(set(dd.keys()).intersection(modeler_vars.keys())) == 0
     dd = dd | modeler_vars
@@ -2115,7 +2115,6 @@ def model23_ll_lp(model_data):
     aij = jax.nn.sigmoid((z-0.5)*z2edge_slope)
     # Define things per composite
     #bait_prey_score("test", aij, c22_nodes, c22_N, N, 8, c22_t) 
-    """
     for k in range(0, 20):
         kth_bait_prey_score_norm_approx(aij, k, composite_dict_norm_approx, N)
     for k in range(21, 26):
@@ -2143,21 +2142,20 @@ def model23_ll_lp(model_data):
     kth_bait_prey_score_p_is_1(aij, 57, composite_dict_p_is_1, N)
     kth_bait_prey_score_p_is_1(aij, 58, composite_dict_p_is_1, N)
     kth_bait_prey_score_p_is_1(aij, 59, composite_dict_p_is_1, N)
-    """
 
     # Data Likelihood
-    R0 = d['apms_shuff_corr_all_flat']  # Use all the AP-MS data
-    null_dist = Histogram(R0, bins=100).expand([M,]) # Normalized
-    null_log_like = null_dist.log_prob(R)
-    INFINITY_FACTOR = 10 
+    #R0 = d['apms_shuff_corr_all_flat']  # Use all the AP-MS data
+    #null_dist = Histogram(R0, bins=100).expand([M,]) # Normalized
+    #null_log_like = null_dist.log_prob(R)
+    #INFINITY_FACTOR = 10 
     #causal_dist = dist.Normal(0.23, 0.22).expand([M,]) 
     # Null Hypothesis Test
     #ll_0 = null_dist.log_prob(aij)
     #ll_1 = causal_dist.log_prob(aij)
 
     # Score approximates log[(1-a) * p(R | H0)]
-    score = (1-aij)*null_log_like # Addition on the log scale
-    numpyro.factor("R", score)
+    #score = (1-aij)*null_log_like # Addition on the log scale
+    #numpyro.factor("R", score)
 
     #mixture_probs = jnp.array([aij, 1-aij]).T
     # Profile similarity likelihood
@@ -2406,6 +2404,9 @@ def _main(model_id,
         extra_fields = extra_fields + ("mean_accept_prob",)
 
     # Check if we should initalize to a certain value
+    model_id = str(model_id)
+    model_name = str(model_name)
+
     if initial_position:
         init_strategy = init_position_dispatcher(initial_position, model_name)
     warmup_savename = model_id + "_" + model_name + "_" + "hmc_warmup.pkl"
