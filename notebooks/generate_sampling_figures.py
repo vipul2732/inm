@@ -10,6 +10,10 @@ import numpy as np
 import pandas as pd
 import jax
 import jax.numpy as jnp
+import matplotlib.animation as animation
+
+# Globals
+hist_range = (-1, 1)
 
 @click.command()
 @click.option("--o", type=str, help="output directory")
@@ -86,12 +90,19 @@ def _main(o, i):
     # Get the model data
     with open(str(i.parent / i.stem) + "_model_data.pkl", "rb") as f:
         model_data = pkl.load(f)
+    i_ = i
 
     # Plot the average adjacency matrix  
     nsamples, M = samples['z'].shape
     N = model_data['N']
     a = jax.nn.sigmoid((samples['z']-0.5)*1_000)
     mean = np.mean(a, axis=0) 
+    # Plot a histogram of edges
+    fig, ax = plt.subplots()
+    plt.hist(mean, bins=100, range=(0, 1))
+    plt.xlabel("Mean Edge Value")
+    plt.ylabel("Frequency") 
+    save("edge_score_hist")
     var = np.var(a, axis=0) 
     A = mv.flat2matrix(mean, N)
     V = mv.flat2matrix(var, N)
@@ -99,7 +110,30 @@ def _main(o, i):
     plt.matshow(np.array(A))
     plt.colorbar()
     save("mean_adjacency")
+
+    # Plot the hist
+    """
+    # Animation 
+    fig, ax = plt.subplots()
+    mat = ax.matshow(np.zeros((N, N)))
     
+    def animate(i):
+        a_i = mv.flat2matrix(a[i, :], N)
+        mat = ax.matshow(np.array(a_i))
+        return mat,
+
+    nsamples, nedges = samples['z'].shape 
+    ani = animation.FuncAnimation(fig, animate, repeat=True,
+       frames=nsamples, interval=50)
+
+    # To save the animation using Pillow as a gif
+    writer = animation.PillowWriter(fps=15,
+                                     metadata=dict(artist='Me'),
+                                     bitrate=1800)
+
+    ani.save('edge_matrix.gif', writer=writer)
+    """
+
     # plot variance
     fig, ax = plt.subplots()
     plt.matshow(np.array(V))
@@ -112,6 +146,35 @@ def _main(o, i):
     ax.set_xlabel("Edge mean")
     ax.set_ylabel("Edge var")
     save("mean_var_scatter")
+
+    # Plot the Profile similarity matrix of input information 
+    data_path = str(i.parent)
+    model_data = mv.model23_ll_lp_data_getter(data_path) 
+    model_data = mv.model23_data_transformer(model_data)
+
+    R = model_data['apms_corr_flat']
+    # Histogram of Model Inputs 
+    fig, ax = plt.subplots()
+    plt.hist(R, bins=100, range=hist_range)
+    ax.set_xlabel("$R_{ij}$")
+    ax.set_ylabel("Frequency")
+    save("Rhist")
+
+    N = model_data['N']
+    R = mv.flat2matrix(R, N)
+    R = np.array(R)
+
+    # Mean Variance correlation plot
+    fig, ax = plt.subplots()
+    plt.matshow(R)
+    plt.colorbar()
+    save("PearsonR")
+
+    fig, ax = plt.subplots()
+    plt.hist(model_data['apms_shuff_corr_all_flat'], bins=100, range=hist_range)
+    ax.set_xlabel("$R_{ij}^{0}$")
+    ax.set_ylabel("Frequency")
+    save("Rhist_null")
 
     # Plot a table of the average value of every composite N
     Ns = []
@@ -129,6 +192,33 @@ def _main(o, i):
     df = pd.DataFrame({"Nmax" : nmax, "av" : means, "std" : stds}, index=Ns) 
     outpath = str(o / "composite_N.tsv")
     df.to_csv(outpath, sep="\t")
+    # Plot a graph of composite data satisfaction
+
+    # Write an edge list table of scores
+    w = []
+    a = []
+    b = []
+    node_idx2name = model_data['node_idx2name']
+
+    viral_proteins = ["vifprotein", "tatprotein", "nefprotein", "gagprotein",
+                      "polpolyprotein"]
+
+    for i in range(N):
+        for j in range(0, i):
+            w.append(A[i, j])
+            a.append(node_idx2name[i])
+            b.append(node_idx2name[j])
+    
+    df = pd.DataFrame({'a': a, 'b': b, 'w': w})
+    base_name = str(o / i_.stem)
+    df.to_csv(base_name + "edge_score_table.tsv", sep="\t", index=None)
+
+    # Analysis
+
+    # Count the number of Viral-Viral interactions 
+    
+    
+    
 
     return samples
 

@@ -2096,12 +2096,10 @@ def model23_ll_lp(model_data):
     beta = d['upper_edge_prob']
     composite_dict_p_is_1 = d['new_composite_dict_p_is_1']  # Can use N directl
     composite_dict_norm_approx = d['new_composite_dict_norm_approx'] # Can use the Binomial approximation 
-    R = d['apms_corr_flat']
     # Note - here we clip the data for negative correlations
     # How to handle statistically significant negative correlations? What do they mean?
     # Likey don't enrich for PPI's
     # What does a statistically significant negative correlation mean? 
-    R = np.clip(R, 0, 1.0)
 
     n_composites = d['n_composites']
     #N_per_composite = d['N_per_composite'] # (n_composites,)
@@ -2115,6 +2113,7 @@ def model23_ll_lp(model_data):
     aij = jax.nn.sigmoid((z-0.5)*z2edge_slope)
     # Define things per composite
     #bait_prey_score("test", aij, c22_nodes, c22_N, N, 8, c22_t) 
+    """
     for k in range(0, 20):
         kth_bait_prey_score_norm_approx(aij, k, composite_dict_norm_approx, N)
     for k in range(21, 26):
@@ -2142,11 +2141,15 @@ def model23_ll_lp(model_data):
     kth_bait_prey_score_p_is_1(aij, 57, composite_dict_p_is_1, N)
     kth_bait_prey_score_p_is_1(aij, 58, composite_dict_p_is_1, N)
     kth_bait_prey_score_p_is_1(aij, 59, composite_dict_p_is_1, N)
+    """
 
-    # Data Likelihood
-    #R0 = d['apms_shuff_corr_all_flat']  # Use all the AP-MS data
-    #null_dist = Histogram(R0, bins=100).expand([M,]) # Normalized
-    #null_log_like = null_dist.log_prob(R)
+    #Data Likelihood
+    R = d['apms_corr_flat']
+    # Score negative correlations as if they were null
+    R = np.clip(R, 0, 1.0)
+    R0 = d['apms_shuff_corr_all_flat']  # Use all the AP-MS data
+    null_dist = Histogram(R0, bins=100).expand([M,]) # Normalized
+    null_log_like = null_dist.log_prob(R)
     #INFINITY_FACTOR = 10 
     #causal_dist = dist.Normal(0.23, 0.22).expand([M,]) 
     # Null Hypothesis Test
@@ -2154,8 +2157,8 @@ def model23_ll_lp(model_data):
     #ll_1 = causal_dist.log_prob(aij)
 
     # Score approximates log[(1-a) * p(R | H0)]
-    #score = (1-aij)*null_log_like # Addition on the log scale
-    #numpyro.factor("R", score)
+    score = (1-aij)*null_log_like # Addition on the log scale
+    numpyro.factor("R", score)
 
     #mixture_probs = jnp.array([aij, 1-aij]).T
     # Profile similarity likelihood
@@ -2450,7 +2453,7 @@ def _main(model_id,
         pkl.dump(out, file) 
     if model_name == "model23_ll_lp":
         data_savename = model_id + "_" + model_name + "_" + str(rseed) + "_model_data.pkl"
-        with open(data_savename, "wb") as file:
+        with open(Path(save_dir) / data_savename, "wb") as file:
             pkl.dump(model_data, file)
 if __name__ == "__main__":
     main()
