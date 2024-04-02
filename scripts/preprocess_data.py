@@ -13,8 +13,6 @@ import pandas as pd
 import logging
 import shutil
 
-
-
 @click.command()
 @click.option("--ds-name")
 @click.option("--dont-remap", is_flag=True, default=False)
@@ -42,6 +40,78 @@ def bait_parser(x, strat):
         return x
     else:
         raise ValueError(f"unkonwn strategy {strat}")
+
+
+def get_spec_table_and_composites_TODO():
+    
+colnames = []
+prey_names = []
+
+from collections import defaultdict
+
+
+seen_control_tables = []
+keep_controls = []
+keep_experiments = []
+for sheet_number in range(3):
+    df = pd.read_excel("../../data/cullin/1-s2.0-S1931312819302537-mmc2.xlsx", sheet_name=sheet_number, header=0)
+    for bait in set(df['Bait'].values):
+        bait_name = bait.removesuffix("_MG132")
+        for i in range(4):
+            colnames.append(bait_name + f"_r{i}")
+        for i in range(12):
+            colnames.append(bait_name + f"_c{i}")
+        sel = df['Bait'] == bait
+        for i, r in df[sel].iterrows():
+            prey_name = r['PreyGene'].removesuffix("_HUMAN")
+            e_colname = bait_name + f"_r"
+            c_colname = bait_name + f"_c"
+            evals = [int(k) for k in r['Spec'].split("|")]
+            cvals = [int(k) for k in r['ctrlCounts'].split("|")]
+
+            # What controls to keep?
+            experiment_columns = [e_colname + str(i) for i in range(4)]
+            outdf.loc[prey_name, experiment_columns] = evals
+            control_columns = [c_colname + str(i) for i in range(12)]
+            outdf.loc[prey_name, control_columns] = cvals
+        control_table = df.loc[sel, ["PreyGene", "ctrlCounts"]]
+        keep_experiments += experiment_columns
+        if len(seen_control_tables) == 0:
+            # Keep the controls
+            keep_controls += control_columns
+            seen_control_tables.append(control_table)
+        else:
+            for seen_table in seen_control_tables:
+                temp = None
+                # Check the table against seen tables at the prey intersections
+                shared_prey = set(control_table['PreyGene'].values).intersection(
+                    set(seen_table['PreyGene'].values))
+                shared_prey = list(shared_prey)
+                # If the control tables are equal don't keep
+                sel1 = [k in shared_prey for k in control_table['PreyGene'].values]
+                sel2 = [k in shared_prey for k in seen_table['PreyGene'].values]
+
+                t1 = control_table[sel1].copy()
+                t2 = seen_table[sel2].copy()
+
+                # Sort both tables the same way
+                t1 = t1.sort_values("PreyGene")
+                t2 = t2.sort_values("PreyGene")
+
+                assert np.alltrue(t1['PreyGene'].values == t2['PreyGene'].values)
+                if np.alltrue(t1['ctrlCounts'].values == t2['ctrlCounts'].values):
+                    # Do not keep the control columns
+                    break
+                else:
+                    temp = control_table
+            # if temp is set then add to the seen tables
+            if temp is not None:
+                seen_control_tables.append(control_table)
+                keep_controls += control_columns            
+
+# Check each bait and get 
+all_columns_to_keep = keep_experiments + keep_controls
+outdf = outdf.loc[:, all_columns_to_keep]
 
 def handle_controls(strat, prey_condition_dict, prey, condition, found_controls, sim_dict, spec):
     if strat == "every_four":
@@ -99,6 +169,7 @@ def get_spec_table_and_composites(xlsx_path, sheet_nums,
                                   control_handle_strat="all",
                                   prey_parser_strat="general",
                                   enforce_bait_remapping=True,
+                                  return_many = False
                                   ):
     # Make the composite table
     logging.info(f"PARAMS")
@@ -213,7 +284,10 @@ def get_spec_table_and_composites(xlsx_path, sheet_nums,
         assert np.alltrue(conditions >= 0)
         spec_table[z, 0:len(conditions)] = conditions 
     spec_table = pd.DataFrame(spec_table, index = index) 
-    return spec_table, composites
+    if return_many:
+        return spec_table, composites, prey_condition_dict, sid_dict, sim_dict
+    else:
+        return spec_table, composites
 
 def log_unmapped_bait(d):
     bait = set(d['Bait'])
@@ -287,6 +361,7 @@ def preprocess_data(ds_name, enforce_bait_remapping):
 
 def preprocess_reference(ds_name):
     _preprocess_reference[ds_name]()
+
 
 _preprocess_data = {
     "dub" : preprocess_dub,
