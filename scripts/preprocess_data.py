@@ -404,7 +404,9 @@ def preprocess_spec_table(input_path, output_dir, sheet_nums, prey_colname, enfo
             enforce_bait_remapping=enforce_bait_remapping) 
 
     spec_table = get_spec_table(xlsx_path = input_path,
-                                sheet_nums = sheet_nums,)
+                                sheet_nums = sheet_nums,
+                                prey_colname = prey_colname,
+                                enforce_bait_remapping = enforce_bait_remapping)
     log_unmapped_bait(composites)
     composites.to_csv(output_dir / "composite_table.tsv", sep="\t", index=False)
     spec_table.to_csv(output_dir / "spec_table.tsv", sep="\t", index=True, header=False)
