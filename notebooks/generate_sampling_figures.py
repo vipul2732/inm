@@ -152,13 +152,40 @@ def _main(o, i):
     model_data = mv.model23_ll_lp_data_getter(data_path) 
     model_data = mv.model23_data_transformer(model_data)
 
-    R = model_data['apms_corr_flat']
     # Histogram of Model Inputs 
+    R = model_data['apms_corr_flat']
     fig, ax = plt.subplots()
     plt.hist(R, bins=100, range=hist_range)
     ax.set_xlabel("$R_{ij}$")
     ax.set_ylabel("Frequency")
     save("Rhist")
+    
+    # Histogram of Null all
+    R0 = model_data['apms_shuff_corr_all_flat']
+    fig, ax = plt.subplots()
+    plt.hist(R0, bins=100, range=hist_range)
+    ax.set_xlabel("$R_{ij}^{0}$")
+    ax.set_ylabel("Frequency")
+    save("Rhist_null")
+
+    # Histogram of Null 
+    R0 = model_data['apms_shuff_corr_all_flat']
+    fig, ax = plt.subplots()
+    plt.hist(R0, bins=100, range=hist_range)
+    ax.set_xlabel("$R_{ij}^{0}$")
+    ax.set_ylabel("Frequency")
+    save("Rhist_null")
+
+    # Matrix plot of shuffled spec table
+    shuff_spec_table = model_data['shuff_spec_table']
+    fig, ax = plt.subplots()
+    plt.matshow(np.array(shuff_spec_table))
+    ax.set_xlabel("$Conditions$")
+    ax.set_ylabel("Node")
+    save("ShuffledSpecTable")
+
+    
+
 
     N = model_data['N']
     R = mv.flat2matrix(R, N)
@@ -170,11 +197,6 @@ def _main(o, i):
     plt.colorbar()
     save("PearsonR")
 
-    fig, ax = plt.subplots()
-    plt.hist(model_data['apms_shuff_corr_all_flat'], bins=100, range=hist_range)
-    ax.set_xlabel("$R_{ij}^{0}$")
-    ax.set_ylabel("Frequency")
-    save("Rhist_null")
 
     # Plot a table of the average value of every composite N
     Ns = []
