@@ -1940,7 +1940,7 @@ def data_from_spec_table_and_composite_table(data_path, ms_thresholds, sep="\t",
     corr = np.corrcoef(spec_table.values, rowvar=True)
     shuff_corr = pd.DataFrame(shuff_corr, columns=spec_table.index, index=spec_table.index)
     corr = pd.DataFrame(corr, columns=spec_table.index, index=spec_table.index)
-    return {"corr" : corr, "shuff_corr" : shuff_corr, "composite_dict" : composites} 
+    return {"corr" : corr, "shuff_corr" : shuff_corr, "composite_dict" : composites, "shuff_spec_table" : shuff} 
 
 def row_mag(A):
     return np.sqrt(np.sum(np.square(A), axis=1))
@@ -2205,14 +2205,13 @@ def model23_se_sr(model_data):
     M = N * (N-1) // 2
     alpha = d['lower_edge_prob']
     beta = d['upper_edge_prob']
-    composite_dict_p_is_1 = d['new_composite_dict_p_is_1']  # Can use N directl
-    composite_dict_norm_approx = d['new_composite_dict_norm_approx'] # Can use the Binomial approximation 
+    #composite_dict_p_is_1 = d['new_composite_dict_p_is_1']  # Can use N directl
+    #composite_dict_norm_approx = d['new_composite_dict_norm_approx'] # Can use the Binomial approximation 
     # Note - here we clip the data for negative correlations
     # How to handle statistically significant negative correlations? What do they mean?
     # Likey don't enrich for PPI's
     # What does a statistically significant negative correlation mean? 
-
-    n_composites = d['n_composites']
+    #n_composites = d['n_composites']
     #N_per_composite = d['N_per_composite'] # (n_composites,)
     #p_per_composite = d['p_per_composite'] # (n_composites,)
     z2edge_slope = 1_000
@@ -2234,7 +2233,6 @@ def model23_se_sr(model_data):
     # Null Hypothesis Test
     #ll_0 = null_dist.log_prob(aij)
     #ll_1 = causal_dist.log_prob(aij)
-
     # Score approximates log[(1-a) * p(R | H0)]
     score = (1-aij)*null_log_like # Addition on the log scale
     numpyro.factor("R", score)
@@ -2247,8 +2245,6 @@ def model23_se_sr(model_data):
     #R_ll = mixture_model.log_prob(R)
     #numpyro.factor("R_ll", R_ll)
     ##numpyro.sample("obs", mixtures, obs=R)
-
-    ...
 
 def model23_se_sc(model_data):
     """
@@ -2674,7 +2670,7 @@ def _main(model_id,
            }
     with open(savename, "wb") as file:
         pkl.dump(out, file) 
-    if model_name == "model23_ll_lp":
+    if "model23" in model_name: 
         data_savename = model_id + "_" + model_name + "_" + str(rseed) + "_model_data.pkl"
         with open(Path(save_dir) / data_savename, "wb") as file:
             pkl.dump(model_data, file)
