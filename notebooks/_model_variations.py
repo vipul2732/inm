@@ -1354,58 +1354,77 @@ def model23_ll_lp_data_getter(save_dir):
     dd['shuff_corr_all'] = shuffled_apms_correlation_matrix
     return dd
 
+
+
 def model23_data_transformer(data_dict):
     """
     Transforms input data to be ready for modeling. Performs some checks.
     """
-    dd = data_dict.copy()
-    # Check inputs
-    assert len(dd['corr'].index) == len(set(dd['corr'].index)) # Check all rows are uniquely indexed
-    assert len(dd['corr'].index) > 2 # No point in modeling small networks
-    assert dd['corr'].shape == dd['shuff_corr'].shape
-    assert dd['corr'].ndim == 2
-    r, c = dd['corr'].shape
-    assert r == c
-    dd = dd | {"N" : len(dd['corr'].index)}
-    dd['M'] = dd['N'] * (dd['N'] - 1) // 2
-    # map node names to integer identifiers 
-    name2node_idx = {name : i for i, name in enumerate(dd['corr'].index)}
-    node_idx2name = {i: name for name, i in name2node_idx.items()}
-    dd['name2node_idx'] = name2node_idx
-    dd['node_idx2name'] = node_idx2name
-    #Remap names within composites to node_idxs 
-    new_composite_dict_norm_approx = {}
-    new_composite_dict_p_is_1 = {}
-    for cid, c  in dd['composite_dict'].items():
-        # Check the n, p criterion for valid binomial approximation
-        n = len(c['nodes'])
-        p = c['t']
-        temp = [] 
-        for name in c['nodes']:
-            temp.append(name2node_idx[name])
-        n_pairs = math.comb(len(temp), 2)
-        temp_composite = {'nodes' : temp, 't' : p, 'SID' : c['SID'], 'N': len(temp), "n_pairs": n_pairs,'maximal_shortest_path_to_calculate': min(22, n_pairs)}
- 
-        if p == 1:
-            new_composite_dict_p_is_1[cid] = temp_composite
-        elif (p * n >= 5) and (n * (1-p) >= 5):
-            new_composite_dict_norm_approx[cid] = temp_composite 
-        else:
-            logging.warning(f"Excluding Composite {cid}. Invalid Binomial Approximation. n: {n} p {p} np : {n * p}) n(1-p) : {n * (1 - p)}")
-    dd['new_composite_dict_norm_approx'] = new_composite_dict_norm_approx 
-    dd['new_composite_dict_p_is_1'] = new_composite_dict_p_is_1
-    assert np.all(dd['corr'].index == dd['shuff_corr'].index) 
-    # Flatten corr and shuff corr to jax arrays
-    dd['apms_corr_flat'] = matrix2flat(jnp.array(dd['corr'].values, dtype=jnp.float32))
-    #dd['apms_shuff_corr_flat'] = matrix2flat(jnp.array(dd['shuff_corr'].values, dtype=jnp.float32))
-    dd['apms_shuff_corr_all_flat'] = matrix2flat(jnp.array(dd['shuff_corr_all'], dtype=jnp.float32))
-    dd['n_composites'] = len(dd['composite_dict'])
-    logging.info(f"N composites {dd['n_composites']}")
-    dd.pop("composite_dict")
+    def do_checks(dd, r, c):
+        # Check inputs
+        assert len(dd['corr'].index) == len(set(dd['corr'].index)) # Check all rows are uniquely indexed
+        assert len(dd['corr'].index) > 2 # No point in modeling small networks
+        assert dd['corr'].shape == dd['shuff_corr'].shape
+        assert dd['corr'].ndim == 2
+        assert r == c
+    def update_name2node_idx(dd):
+        name2node_idx = {name : i for i, name in enumerate(dd['corr'].index)}
+        node_idx2name = {i: name for name, i in name2node_idx.items()}
+        dd['name2node_idx'] = name2node_idx
+        dd['node_idx2name'] = node_idx2name
+        return dd
+    def update_maximal_nodes_edges(dd):
+        dd = dd | {"N" : len(dd['corr'].index)}
+        dd['M'] = dd['N'] * (dd['N'] - 1) // 2
+        return dd
+    def update_composites(dd):
+        new_composite_dict_norm_approx = {}
+        new_composite_dict_p_is_1 = {}
+        for cid, c  in dd['composite_dict'].items():
+            # Check the n, p criterion for valid binomial approximation
+            n = len(c['nodes'])
+            p = c['t']
+            temp = [] 
+            for name in c['nodes']:
+                temp.append(name2node_idx[name])
+            n_pairs = math.comb(len(temp), 2)
+            temp_composite = {'nodes' : temp,
+                              't' : p,
+                              'SID' : c['SID'],
+                              'N': len(temp),
+                              "n_pairs": n_pairs,
+                              'maximal_shortest_path_to_calculate': min(22, n_pairs)}
+            if p == 1:
+                new_composite_dict_p_is_1[cid] = temp_composite
+            elif (p * n >= 5) and (n * (1-p) >= 5):
+                new_composite_dict_norm_approx[cid] = temp_composite 
+            else:
+                logging.warning(f"Excluding Composite {cid}. Invalid Binomial Approximation. n: {n} p {p} np : {n * p}) n(1-p) : {n * (1 - p)}")
+        dd['new_composite_dict_norm_approx'] = new_composite_dict_norm_approx 
+        dd['new_composite_dict_p_is_1'] = new_composite_dict_p_is_1
+        dd['n_composites'] = len(dd['composite_dict'])
+        logging.info(f"N composites {dd['n_composites']}")
+        dd.pop("composite_dict")
+        return dd
 
-    #dd['N_per_composite'] = np.array([c['N'] for i, c in dd['composite_dict'].items()], dtype=jnp.int32)
-    #dd['p_per_composite'] = np.array([c['t'] for i, c in dd['composite_dict'].items()], dtype=jnp.float32)
-    assert len(dd['apms_corr_flat']) == dd['M']
+    def update_correlations(dd):
+        assert np.all(dd['corr'].index == dd['shuff_corr'].index) 
+        # Flatten corr and shuff corr to jax arrays
+        dd['apms_corr_flat'] = matrix2flat(jnp.array(dd['corr'].values, dtype=jnp.float32))
+        #dd['apms_shuff_corr_flat'] = matrix2flat(jnp.array(dd['shuff_corr'].values, dtype=jnp.float32))
+        dd['apms_shuff_corr_all_flat'] = matrix2flat(jnp.array(dd['shuff_corr_all'], dtype=jnp.float32))
+        #dd['N_per_composite'] = np.array([c['N'] for i, c in dd['composite_dict'].items()], dtype=jnp.int32)
+        #dd['p_per_composite'] = np.array([c['t'] for i, c in dd['composite_dict'].items()], dtype=jnp.float32)
+        assert len(dd['apms_corr_flat']) == dd['M']
+        return dd
+
+    dd = data_dict.copy()
+    r, c = dd['corr'].shape
+    do_checks(dd, r, c)
+    dd = update_name2node_idx(dd)
+    dd = update_maximal_nodes_edges(dd)
+    dd = update_composites(dd)
+    dd = update_correlations(dd)
     return dd 
 
 def preyu2uid_mapping_dict():
@@ -2620,10 +2639,10 @@ def _main(model_id,
                         #"trajectory_length",
         )
     model, model_data, init_strategy = model_dispatcher(model_name, model_data, save_dir)
-    if "model23" in model_name: 
-        data_savename = model_id + "_" + model_name + "_" + str(rseed) + "_model_data.pkl"
-        with open(Path(save_dir) / data_savename, "wb") as file:
-            pkl.dump(model_data, file)
+    # Save model_data to output directory
+    data_savename = model_id + "_" + model_name + "_" + str(rseed) + "_model_data.pkl"
+    with open(Path(save_dir) / data_savename, "wb") as file:
+        pkl.dump(model_data, file)
 
     if include_potential_energy:
         extra_fields = extra_fields + ("potential_energy",)
