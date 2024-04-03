@@ -409,7 +409,7 @@ def preprocess_spec_table(input_path, output_dir, sheet_nums, prey_colname, enfo
                                 enforce_bait_remapping = enforce_bait_remapping)
     log_unmapped_bait(composites)
     composites.to_csv(output_dir / "composite_table.tsv", sep="\t", index=False)
-    spec_table.to_csv(output_dir / "spec_table.tsv", sep="\t", index=True, header=False)
+    spec_table.to_csv(output_dir / "spec_table.tsv", sep="\t", index=True, header=True)
 
 
 def preprocess_dub(prey_colname="Prey", enforce_bait_remapping=False):
