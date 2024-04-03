@@ -2167,6 +2167,229 @@ def model23_ll_lp(model_data):
     #numpyro.factor("R_ll", R_ll)
     ##numpyro.sample("obs", mixtures, obs=R)
 
+def model23_se(model_data):
+    """
+    Prior only
+    """
+    # Unpack data for tracing
+    d = model_data
+    N = d['N'] 
+    M = N * (N-1) // 2
+    alpha = d['lower_edge_prob']
+    beta = d['upper_edge_prob']
+    composite_dict_p_is_1 = d['new_composite_dict_p_is_1']  # Can use N directl
+    composite_dict_norm_approx = d['new_composite_dict_norm_approx'] # Can use the Binomial approximation 
+    # Note - here we clip the data for negative correlations
+    # How to handle statistically significant negative correlations? What do they mean?
+    # Likey don't enrich for PPI's
+    # What does a statistically significant negative correlation mean? 
+
+    n_composites = d['n_composites']
+    #N_per_composite = d['N_per_composite'] # (n_composites,)
+    #p_per_composite = d['p_per_composite'] # (n_composites,)
+    z2edge_slope = 1_000
+    # Representation and Scoring
+    u = numpyro.sample('pN', dist.Uniform(low=alpha, high=beta))
+    mu = edge_prob2mu(u) # determinsitc transform
+    numpyro.deterministic('mu', mu)
+    z = numpyro.sample('z', dist.Normal(mu+0.5).expand([M,])) #(M, ) shifted normal, sigma must be 1. latent edges
+    aij = jax.nn.sigmoid((z-0.5)*z2edge_slope)
+
+def model23_se_sr(model_data):
+    """
+    SE + SR 
+    """
+    # Unpack data for tracing
+    d = model_data
+    N = d['N'] 
+    M = N * (N-1) // 2
+    alpha = d['lower_edge_prob']
+    beta = d['upper_edge_prob']
+    composite_dict_p_is_1 = d['new_composite_dict_p_is_1']  # Can use N directl
+    composite_dict_norm_approx = d['new_composite_dict_norm_approx'] # Can use the Binomial approximation 
+    # Note - here we clip the data for negative correlations
+    # How to handle statistically significant negative correlations? What do they mean?
+    # Likey don't enrich for PPI's
+    # What does a statistically significant negative correlation mean? 
+
+    n_composites = d['n_composites']
+    #N_per_composite = d['N_per_composite'] # (n_composites,)
+    #p_per_composite = d['p_per_composite'] # (n_composites,)
+    z2edge_slope = 1_000
+    # Representation and Scoring
+    u = numpyro.sample('pN', dist.Uniform(low=alpha, high=beta))
+    mu = edge_prob2mu(u) # determinsitc transform
+    numpyro.deterministic('mu', mu)
+    z = numpyro.sample('z', dist.Normal(mu+0.5).expand([M,])) #(M, ) shifted normal, sigma must be 1. latent edges
+    aij = jax.nn.sigmoid((z-0.5)*z2edge_slope)
+    #Data Likelihood
+    R = d['apms_corr_flat']
+    # Score negative correlations as if they were null
+    R = np.clip(R, 0, 1.0)
+    R0 = d['apms_shuff_corr_all_flat']  # Use all the AP-MS data
+    null_dist = Histogram(R0, bins=100).expand([M,]) # Normalized
+    null_log_like = null_dist.log_prob(R)
+    #INFINITY_FACTOR = 10 
+    #causal_dist = dist.Normal(0.23, 0.22).expand([M,]) 
+    # Null Hypothesis Test
+    #ll_0 = null_dist.log_prob(aij)
+    #ll_1 = causal_dist.log_prob(aij)
+
+    # Score approximates log[(1-a) * p(R | H0)]
+    score = (1-aij)*null_log_like # Addition on the log scale
+    numpyro.factor("R", score)
+
+    #mixture_probs = jnp.array([aij, 1-aij]).T
+    # Profile similarity likelihood
+    #mixture_model = dist.MixtureGeneral(
+    #        dist.Categorical(probs=mixture_probs),
+    #        [causal_dist, null_dist])
+    #R_ll = mixture_model.log_prob(R)
+    #numpyro.factor("R_ll", R_ll)
+    ##numpyro.sample("obs", mixtures, obs=R)
+
+    ...
+
+def model23_se_sc(model_data):
+    """
+    SE + SC
+    """
+    # Unpack data for tracing
+    d = model_data
+    N = d['N'] 
+    M = N * (N-1) // 2
+    alpha = d['lower_edge_prob']
+    beta = d['upper_edge_prob']
+    composite_dict_p_is_1 = d['new_composite_dict_p_is_1']  # Can use N directl
+    composite_dict_norm_approx = d['new_composite_dict_norm_approx'] # Can use the Binomial approximation 
+    # Note - here we clip the data for negative correlations
+    # How to handle statistically significant negative correlations? What do they mean?
+    # Likey don't enrich for PPI's
+    # What does a statistically significant negative correlation mean? 
+
+    n_composites = d['n_composites']
+    #N_per_composite = d['N_per_composite'] # (n_composites,)
+    #p_per_composite = d['p_per_composite'] # (n_composites,)
+    z2edge_slope = 1_000
+    # Representation and Scoring
+    u = numpyro.sample('pN', dist.Uniform(low=alpha, high=beta))
+    mu = edge_prob2mu(u) # determinsitc transform
+    numpyro.deterministic('mu', mu)
+    z = numpyro.sample('z', dist.Normal(mu+0.5).expand([M,])) #(M, ) shifted normal, sigma must be 1. latent edges
+    aij = jax.nn.sigmoid((z-0.5)*z2edge_slope)
+    # Define things per composite
+    #bait_prey_score("test", aij, c22_nodes, c22_N, N, 8, c22_t) 
+    for k in range(0, 20):
+        kth_bait_prey_score_norm_approx(aij, k, composite_dict_norm_approx, N)
+    for k in range(21, 26):
+        kth_bait_prey_score_norm_approx(aij, k, composite_dict_norm_approx, N)
+    for k in range(27, 2):
+        kth_bait_prey_score_norm_approx(aij, k, composite_dict_norm_approx, N)
+
+    kth_bait_prey_score_norm_approx(aij, 31, composite_dict_norm_approx, N)
+    kth_bait_prey_score_norm_approx(aij, 32, composite_dict_norm_approx, N)
+    kth_bait_prey_score_norm_approx(aij, 34, composite_dict_norm_approx, N)
+    kth_bait_prey_score_norm_approx(aij, 35, composite_dict_norm_approx, N)
+    kth_bait_prey_score_norm_approx(aij, 37, composite_dict_norm_approx, N)
+    kth_bait_prey_score_norm_approx(aij, 38, composite_dict_norm_approx, N)
+    kth_bait_prey_score_norm_approx(aij, 42, composite_dict_norm_approx, N)
+    kth_bait_prey_score_norm_approx(aij, 45, composite_dict_norm_approx, N)
+    kth_bait_prey_score_norm_approx(aij, 48, composite_dict_norm_approx, N)
+
+    kth_bait_prey_score_p_is_1(aij, 50, composite_dict_p_is_1, N)
+    kth_bait_prey_score_p_is_1(aij, 51, composite_dict_p_is_1, N)
+    kth_bait_prey_score_p_is_1(aij, 52, composite_dict_p_is_1, N)
+    kth_bait_prey_score_p_is_1(aij, 53, composite_dict_p_is_1, N)
+    kth_bait_prey_score_p_is_1(aij, 54, composite_dict_p_is_1, N)
+    kth_bait_prey_score_p_is_1(aij, 55, composite_dict_p_is_1, N)
+    kth_bait_prey_score_p_is_1(aij, 56, composite_dict_p_is_1, N)
+    kth_bait_prey_score_p_is_1(aij, 57, composite_dict_p_is_1, N)
+    kth_bait_prey_score_p_is_1(aij, 58, composite_dict_p_is_1, N)
+    kth_bait_prey_score_p_is_1(aij, 59, composite_dict_p_is_1, N)
+
+
+def model23_se_sr_sc(model_data):
+    """
+    SE + SR + SC
+    """
+    # Unpack data for tracing
+    d = model_data
+    N = d['N'] 
+    M = N * (N-1) // 2
+    alpha = d['lower_edge_prob']
+    beta = d['upper_edge_prob']
+    composite_dict_p_is_1 = d['new_composite_dict_p_is_1']  # Can use N directl
+    composite_dict_norm_approx = d['new_composite_dict_norm_approx'] # Can use the Binomial approximation 
+    # Note - here we clip the data for negative correlations
+    # How to handle statistically significant negative correlations? What do they mean?
+    # Likey don't enrich for PPI's
+    # What does a statistically significant negative correlation mean? 
+
+    n_composites = d['n_composites']
+    #N_per_composite = d['N_per_composite'] # (n_composites,)
+    #p_per_composite = d['p_per_composite'] # (n_composites,)
+    z2edge_slope = 1_000
+    # Representation and Scoring
+    u = numpyro.sample('pN', dist.Uniform(low=alpha, high=beta))
+    mu = edge_prob2mu(u) # determinsitc transform
+    numpyro.deterministic('mu', mu)
+    z = numpyro.sample('z', dist.Normal(mu+0.5).expand([M,])) #(M, ) shifted normal, sigma must be 1. latent edges
+    aij = jax.nn.sigmoid((z-0.5)*z2edge_slope)
+    # Define things per composite
+    #bait_prey_score("test", aij, c22_nodes, c22_N, N, 8, c22_t) 
+    for k in range(0, 20):
+        kth_bait_prey_score_norm_approx(aij, k, composite_dict_norm_approx, N)
+    for k in range(21, 26):
+        kth_bait_prey_score_norm_approx(aij, k, composite_dict_norm_approx, N)
+    for k in range(27, 2):
+        kth_bait_prey_score_norm_approx(aij, k, composite_dict_norm_approx, N)
+
+    kth_bait_prey_score_norm_approx(aij, 31, composite_dict_norm_approx, N)
+    kth_bait_prey_score_norm_approx(aij, 32, composite_dict_norm_approx, N)
+    kth_bait_prey_score_norm_approx(aij, 34, composite_dict_norm_approx, N)
+    kth_bait_prey_score_norm_approx(aij, 35, composite_dict_norm_approx, N)
+    kth_bait_prey_score_norm_approx(aij, 37, composite_dict_norm_approx, N)
+    kth_bait_prey_score_norm_approx(aij, 38, composite_dict_norm_approx, N)
+    kth_bait_prey_score_norm_approx(aij, 42, composite_dict_norm_approx, N)
+    kth_bait_prey_score_norm_approx(aij, 45, composite_dict_norm_approx, N)
+    kth_bait_prey_score_norm_approx(aij, 48, composite_dict_norm_approx, N)
+
+    kth_bait_prey_score_p_is_1(aij, 50, composite_dict_p_is_1, N)
+    kth_bait_prey_score_p_is_1(aij, 51, composite_dict_p_is_1, N)
+    kth_bait_prey_score_p_is_1(aij, 52, composite_dict_p_is_1, N)
+    kth_bait_prey_score_p_is_1(aij, 53, composite_dict_p_is_1, N)
+    kth_bait_prey_score_p_is_1(aij, 54, composite_dict_p_is_1, N)
+    kth_bait_prey_score_p_is_1(aij, 55, composite_dict_p_is_1, N)
+    kth_bait_prey_score_p_is_1(aij, 56, composite_dict_p_is_1, N)
+    kth_bait_prey_score_p_is_1(aij, 57, composite_dict_p_is_1, N)
+    kth_bait_prey_score_p_is_1(aij, 58, composite_dict_p_is_1, N)
+    kth_bait_prey_score_p_is_1(aij, 59, composite_dict_p_is_1, N)
+    #Data Likelihood
+    R = d['apms_corr_flat']
+    # Score negative correlations as if they were null
+    R = np.clip(R, 0, 1.0)
+    R0 = d['apms_shuff_corr_all_flat']  # Use all the AP-MS data
+    null_dist = Histogram(R0, bins=100).expand([M,]) # Normalized
+    null_log_like = null_dist.log_prob(R)
+    #INFINITY_FACTOR = 10 
+    #causal_dist = dist.Normal(0.23, 0.22).expand([M,]) 
+    # Null Hypothesis Test
+    #ll_0 = null_dist.log_prob(aij)
+    #ll_1 = causal_dist.log_prob(aij)
+
+    # Score approximates log[(1-a) * p(R | H0)]
+    score = (1-aij)*null_log_like # Addition on the log scale
+    numpyro.factor("R", score)
+    #mixture_probs = jnp.array([aij, 1-aij]).T
+    # Profile similarity likelihood
+    #mixture_model = dist.MixtureGeneral(
+    #        dist.Categorical(probs=mixture_probs),
+    #        [causal_dist, null_dist])
+    #R_ll = mixture_model.log_prob(R)
+    #numpyro.factor("R_ll", R_ll)
+    ##numpyro.sample("obs", mixtures, obs=R)
+
+
 def _note():
     """
     We need to create a restraint for Composites.
@@ -2289,7 +2512,9 @@ def model_dispatcher(model_name, model_data, save_dir):
     elif model_name == "model22_ll_lp":
         model_data = model22_ll_lp_data_getter(save_dir)
         init_strategy = init_to_uniform
-    elif model_name == "model23_ll_lp":
+    elif model_name in  ("model23_ll_lp", "model23_se", "model23_se_sc",
+                         "model23_se_sr", "model23_se_sr_sc",
+                         ):
         model = model23_ll_lp
         model_data = model23_ll_lp_data_getter(save_dir)
         model_data = model23_data_transformer(model_data)
