@@ -1921,7 +1921,7 @@ def data_from_spec_table_and_composite_table(data_path, ms_thresholds, sep="\t",
                 msscore = msscore_l[0]
                 composites[k] = {'nodes':nodes, 't': threshold, 'SID': sid}
                 k+=1
-    spec_table = pd.read_csv(spec_path, sep=sep, index_col=0, header=None)
+    spec_table = pd.read_csv(spec_path, sep=sep, index_col=0)
     # Remove the IDS that don't pass the minimal MSscore threshold
     prey_set = set(composite_table['Prey'])
     bait_set = set(composite_table['Bait'])
@@ -2113,7 +2113,6 @@ def model23_ll_lp(model_data):
     aij = jax.nn.sigmoid((z-0.5)*z2edge_slope)
     # Define things per composite
     #bait_prey_score("test", aij, c22_nodes, c22_N, N, 8, c22_t) 
-    """
     for k in range(0, 20):
         kth_bait_prey_score_norm_approx(aij, k, composite_dict_norm_approx, N)
     for k in range(21, 26):
@@ -2142,7 +2141,6 @@ def model23_ll_lp(model_data):
     kth_bait_prey_score_p_is_1(aij, 58, composite_dict_p_is_1, N)
     kth_bait_prey_score_p_is_1(aij, 59, composite_dict_p_is_1, N)
     """
-
     #Data Likelihood
     R = d['apms_corr_flat']
     # Score negative correlations as if they were null
@@ -2159,7 +2157,7 @@ def model23_ll_lp(model_data):
     # Score approximates log[(1-a) * p(R | H0)]
     score = (1-aij)*null_log_like # Addition on the log scale
     numpyro.factor("R", score)
-
+    """
     #mixture_probs = jnp.array([aij, 1-aij]).T
     # Profile similarity likelihood
     #mixture_model = dist.MixtureGeneral(
