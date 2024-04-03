@@ -2620,6 +2620,11 @@ def _main(model_id,
                         #"trajectory_length",
         )
     model, model_data, init_strategy = model_dispatcher(model_name, model_data, save_dir)
+    if "model23" in model_name: 
+        data_savename = model_id + "_" + model_name + "_" + str(rseed) + "_model_data.pkl"
+        with open(Path(save_dir) / data_savename, "wb") as file:
+            pkl.dump(model_data, file)
+
     if include_potential_energy:
         extra_fields = extra_fields + ("potential_energy",)
     if include_mean_accept_prob:
@@ -2670,9 +2675,5 @@ def _main(model_id,
            }
     with open(savename, "wb") as file:
         pkl.dump(out, file) 
-    if "model23" in model_name: 
-        data_savename = model_id + "_" + model_name + "_" + str(rseed) + "_model_data.pkl"
-        with open(Path(save_dir) / data_savename, "wb") as file:
-            pkl.dump(model_data, file)
 if __name__ == "__main__":
     main()
