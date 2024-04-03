@@ -1356,7 +1356,7 @@ def model23_ll_lp_data_getter(save_dir):
 
 
 
-def model23_data_transformer(data_dict):
+def model23_data_transformer(data_dict, calculate_composites = True):
     """
     Transforms input data to be ready for modeling. Performs some checks.
     """
@@ -1423,7 +1423,8 @@ def model23_data_transformer(data_dict):
     do_checks(dd, r, c)
     dd = update_name2node_idx(dd)
     dd = update_maximal_nodes_edges(dd)
-    dd = update_composites(dd)
+    if calculate_composites:
+        dd = update_composites(dd)
     dd = update_correlations(dd)
     return dd 
 
@@ -2532,7 +2533,11 @@ def model_dispatcher(model_name, model_data, save_dir):
                          ):
         model = model23_ll_lp
         model_data = model23_ll_lp_data_getter(save_dir)
-        model_data = model23_data_transformer(model_data)
+        # Don't calculate compoistes for models that don't need it
+        if model_name in ("model23_se_sr", "model23_se"):
+            model_data = model23_data_transformer(model_data, calculate_composites = False)
+        else:
+            model_data = model23_data_transformer(model_data, calculate_composites = True)
         #init_strategy = init_to_uniform
         #init_strategy = model_23_ll_lp_init_to_zero_strategy(model_data)
         init_strategy = model_23_ll_lp_init_to_data_strategy(model_data)
@@ -2640,7 +2645,7 @@ def _main(model_id,
         )
     model, model_data, init_strategy = model_dispatcher(model_name, model_data, save_dir)
     # Save model_data to output directory
-    data_savename = model_id + "_" + model_name + "_" + str(rseed) + "_model_data.pkl"
+    data_savename = str(model_id) + "_" + model_name + "_" + str(rseed) + "_model_data.pkl"
     with open(Path(save_dir) / data_savename, "wb") as file:
         pkl.dump(model_data, file)
 
