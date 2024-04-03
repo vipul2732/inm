@@ -164,17 +164,19 @@ def _main(o, i):
     R0 = model_data['apms_shuff_corr_all_flat']
     fig, ax = plt.subplots()
     plt.hist(R0, bins=100, range=hist_range)
+    plt.title("All Null Correlations")
     ax.set_xlabel("$R_{ij}^{0}$")
     ax.set_ylabel("Frequency")
-    save("Rhist_null")
+    save("Rhist_null_all")
 
-    # Histogram of Null 
-    R0 = model_data['apms_shuff_corr_all_flat']
+    # Histogram of Null from selected columns 
+    R0 = model_data['apms_shuff_corr_flat']
     fig, ax = plt.subplots()
     plt.hist(R0, bins=100, range=hist_range)
+    plt.title("Masked null correlations")
     ax.set_xlabel("$R_{ij}^{0}$")
     ax.set_ylabel("Frequency")
-    save("Rhist_null")
+    save("Rhist_null_mask")
 
     # Matrix plot of shuffled spec table
     shuff_spec_table = model_data['shuff_spec_table']
@@ -183,9 +185,6 @@ def _main(o, i):
     ax.set_xlabel("$Conditions$")
     ax.set_ylabel("Node")
     save("ShuffledSpecTable")
-
-    
-
 
     N = model_data['N']
     R = mv.flat2matrix(R, N)
