@@ -19,6 +19,7 @@ import preprocess_data
 import _model_variations as mv
 import generate_sampling_figures as gsf
 import generate_benchmark_figures as gbf
+import generate_analysis_figures as gaf
 import json
 import shutil
 
@@ -59,6 +60,7 @@ def main(
     hyper_param_alpha,
     hyper_param_beta,
     hyper_param_thresholds,
+    filter_kw,
 ):
     model_output_dirpath = Path(model_output_dirpath)
     model_input_fpath= Path(model_input_fpath)
@@ -76,6 +78,7 @@ def main(
             sheet_nums = 3,
             prey_colname = "PreyGene",
             enforce_bait_remapping = True,
+            filter_kw = filter_kw,
             )
 
     # Copy the files from the preprocessed data to the modeling output dir
@@ -114,4 +117,6 @@ def main(
               i = input_file)
 
     gbf.cullin_standard()
+
+    gaf.cullin_standard()
 

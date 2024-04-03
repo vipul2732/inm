@@ -396,7 +396,13 @@ def preprocess_cullin(prey_colname="PreyGene", enforce_bait_remapping=False):
     composites.to_csv("../data/processed/cullin/composite_table.tsv", sep="\t", index=False)
     spec_table.to_csv("../data/processed/cullin/spec_table.tsv", sep="\t", index=True, header=False)
 
-def preprocess_spec_table(input_path, output_dir, sheet_nums, prey_colname, enforce_bait_remapping = False):
+def preprocess_spec_table(input_path,
+                          output_dir,
+                          sheet_nums,
+                          prey_colname,
+                          enforce_bait_remapping = False,
+                          filter_kw = None,
+                          mode = "cullin"):
     spec_table, composites = get_spec_table_and_composites(
             input_path,
             sheet_nums,
@@ -407,11 +413,73 @@ def preprocess_spec_table(input_path, output_dir, sheet_nums, prey_colname, enfo
                                 sheet_nums = sheet_nums,
                                 prey_colname = prey_colname,
                                 enforce_bait_remapping = enforce_bait_remapping)
+    spec_table = filter_spec_table(spec_table, filter_kw, mode = mode)
     log_unmapped_bait(composites)
     composites.to_csv(output_dir / "composite_table.tsv", sep="\t", index=False)
     spec_table.to_csv(output_dir / "spec_table.tsv", sep="\t", index=True, header=True)
 
 
+def get_conditions_mask_cullin(spec_table, filter_kw):
+    """
+    filter_kw one of
+      wt
+      vif
+      mock
+      wt_ctrl
+      vif_ctrl
+      mock_ctrl
+      ctrl
+      all
+    """
+    mask = []
+    for col in spec_table.columns:
+        if filter_kw in ("wt", "vif", "mock"):
+            if f"{filter_kw}_r" in col:
+                mask.append(col)
+        elif filter_kw in ("wt_ctrl", "vif_ctrl", "mock_ctrl"):
+            kw = filter_kw.removesuffix("_ctrl") 
+            if f"{kw}_r" in col:
+                mask.append(col)
+            elif "_c" in col:
+                if kw == "mock":
+                    if "mock" in col:
+                        mask.append(col)
+                else:
+                    if "mock" not in col:
+                        mask.append(col)
+        elif filter_kw == "ctrl":
+            if "_c" in col:
+                mask.append(col)
+        elif filter_kw == "all":
+            return spec_table.columns
+        else:
+            raise ValueError(f"Unkown filter keyword {filter_kw}")
+    return mask
+
+def filter_spec_table(spec_table, filter_kw = None, mode = "cullin") -> pd.DataFrame:
+    """
+    Filters the input information spec_table if the filter_kw is set. 
+    filter_kw one of
+      wt
+      vif
+      mock
+      wt_ctrl
+      vif_ctrl
+      mock_ctrl
+      ctrl
+      all
+    """
+    if filter_kw:
+        if mode == "cullin":
+            if filter_kw:
+                mask = get_conditions_mask_cullin(spec_table, filter_kw)
+            return spec_table.loc[:, mask]
+        else:
+            raise NotImplementedError(f"Filtering of other datasets not implemented. See get_conditions_mask_cullin")
+    else:
+        return spec_table
+    
+            
 def preprocess_dub(prey_colname="Prey", enforce_bait_remapping=False):
     spec_table, composites = get_spec_table_and_composites(
             _raw_data_paths["dub"], 1,
