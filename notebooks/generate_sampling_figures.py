@@ -198,21 +198,8 @@ def _main(o, i):
 
 
     # Plot a table of the average value of every composite N
-    Ns = []
-    means = []
-    stds = []
-    nmax = []
-    for i in range(1000):
-        key = f"c{i}_N"
-        if key in samples:
-            Ns.append(key)
-            vals = samples[key]
-            means.append(np.mean(vals))
-            stds.append(np.std(vals))
-            nmax.append(model_data['new_composite_dict_norm_approx'][i]['N'])
-    df = pd.DataFrame({"Nmax" : nmax, "av" : means, "std" : stds}, index=Ns) 
-    outpath = str(o / "composite_N.tsv")
-    df.to_csv(outpath, sep="\t")
+    if "new_composite_dict_norm_approx" in model_data:
+        save_composite_table(model_data, o)
     # Plot a graph of composite data satisfaction
 
     # Write an edge list table of scores
@@ -242,6 +229,23 @@ def _main(o, i):
     
 
     return samples
+
+def save_composite_table(model_data, o):
+    Ns = []
+    means = []
+    stds = []
+    nmax = []
+    for i in range(1000):
+        key = f"c{i}_N"
+        if key in samples:
+            Ns.append(key)
+            vals = samples[key]
+            means.append(np.mean(vals))
+            stds.append(np.std(vals))
+            nmax.append(model_data['new_composite_dict_norm_approx'][i]['N'])
+    df = pd.DataFrame({"Nmax" : nmax, "av" : means, "std" : stds}, index=Ns) 
+    outpath = str(o / "composite_N.tsv")
+    df.to_csv(outpath, sep="\t")
 
 _example = {"i" : "../cullin_run0/0_model23_ll_lp_13.pkl", "o": "../cullin_run0/"}
 
