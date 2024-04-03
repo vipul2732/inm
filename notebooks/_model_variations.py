@@ -1411,7 +1411,7 @@ def model23_data_transformer(data_dict):
         assert np.all(dd['corr'].index == dd['shuff_corr'].index) 
         # Flatten corr and shuff corr to jax arrays
         dd['apms_corr_flat'] = matrix2flat(jnp.array(dd['corr'].values, dtype=jnp.float32))
-        #dd['apms_shuff_corr_flat'] = matrix2flat(jnp.array(dd['shuff_corr'].values, dtype=jnp.float32))
+        dd['apms_shuff_corr_flat'] = matrix2flat(jnp.array(dd['shuff_corr'].values, dtype=jnp.float32))
         dd['apms_shuff_corr_all_flat'] = matrix2flat(jnp.array(dd['shuff_corr_all'], dtype=jnp.float32))
         #dd['N_per_composite'] = np.array([c['N'] for i, c in dd['composite_dict'].items()], dtype=jnp.int32)
         #dd['p_per_composite'] = np.array([c['t'] for i, c in dd['composite_dict'].items()], dtype=jnp.float32)
