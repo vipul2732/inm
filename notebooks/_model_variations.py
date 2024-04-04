@@ -1378,6 +1378,7 @@ def model23_data_transformer(data_dict, calculate_composites = True):
     def update_composites(dd):
         new_composite_dict_norm_approx = {}
         new_composite_dict_p_is_1 = {}
+        name2node_idx = dd['name2node_idx']
         for cid, c  in dd['composite_dict'].items():
             # Check the n, p criterion for valid binomial approximation
             n = len(c['nodes'])
@@ -2270,9 +2271,14 @@ def model23_se_sr(model_data):
     #Data Likelihood
     R = d['apms_corr_flat']
     # Score negative correlations as if they were null
-    R = np.clip(R, 0, 1.0)
     R0 = d['apms_shuff_corr_flat']  # Use the local correlations 
+    R0 = d['apms_shuff_corr_all_flat']  # Use the local correlations 
+    # Number of bins used to represent the histogram is a hyper parmeter
+    # Can cause bugs due to infinities (at bin edges) 
+    # quickfix - pass the number of bins in the modeler_vars dictionary
+    # long term change to a CDF method so we don't have to represent the histogram
     null_dist = Histogram(R0, bins=100).expand([M,]) # Normalized
+    R = np.clip(R, 0., 1.0)
     null_log_like = null_dist.log_prob(R)
     #INFINITY_FACTOR = 10 
     #causal_dist = dist.Normal(0.23, 0.22).expand([M,]) 
@@ -2280,6 +2286,7 @@ def model23_se_sr(model_data):
     #ll_0 = null_dist.log_prob(aij)
     #ll_1 = causal_dist.log_prob(aij)
     # Score approximates log[(1-a) * p(R | H0)]
+    #aij = jnp.clip(aij, 0, 1, dtype=jnp.float32)
     score = (1-aij)*null_log_like # Addition on the log scale
     numpyro.factor("R", score)
 
