@@ -1229,7 +1229,9 @@ class Histogram(dist.Distribution):
             #bin_heights = jnp.array(bin_heights)
             bin_indices = jnp.digitize(x, bin_edges) - 1
             bin_indices = jnp.clip(bin_indices, 0, n_bins - 1)
-            return bin_heights[bin_indices]
+            # Add a small constant such that the log is always defined
+            NUMERICAL_CONSTANT = 1e-5
+            return bin_heights[bin_indices] + NUMERICAL_CONSTANT
         bin_heights, bin_edges = jnp.histogram(a, bins=bins, density=density)
         bin_heights = jnp.array(bin_heights)
         bin_edges = jnp.array(bin_edges)
@@ -1359,23 +1361,26 @@ def model23_ll_lp_data_getter(save_dir):
             if key in ('alpha', 'beta'):
                 alpha = modeler_vars['alpha']
                 beta = modeler_vars['beta']
-                assert alpha > a, alpha
+                assert alpha >= 0, alpha
                 assert alpha < 1, alpha
                 assert alpha < beta, beta
-                assert beta < 1, beta
-            elif key == thresholds:
+                assert beta <= 1, beta
+            elif key == 'thresholds':
                 thresholds = modeler_vars[key]
                 for t in thresholds:
-                    assert t > 0, t
-                    assert t < 1, t
+                    assert t >= 0, t
+                    assert t <= 1, t
             elif key in ("max_distance", "disconectivity_distance"):
                 max_distance = modeler_vars['max_distance']
                 disconectivity_distance = modeler_vars['disconectivity_distance']
                 assert disconectivity_distance < max_distance, (disconectivity_distance, max_distance)
                 assert disconectivity_distance > 0, disconectivity_distance
             elif key == "n_null_bins":
-                n_null_bins == modeler_vars[key]
-                assert n_null_bins > 10, f"What do you have against bins?"
+                n_null_bins = modeler_vars[key]
+                if isinstance(n_null_bins, str):
+                    assert n_null_bins == 'auto'
+                else:
+                    assert n_null_bins > 10, f"What do you have against bins?"
             else:
                 raise ValueError("Unexpected Key {key} in modeler_vars")
         def key_validate(key, modeler_vars, valtype):
@@ -1392,7 +1397,7 @@ def model23_ll_lp_data_getter(save_dir):
                     'thresholds' : list,
                     'disconectivity_distance' : int,
                     'max_distance' : int,
-                    'n_null_bins' : int,}
+                    'n_null_bins' : object,} # int or 'auto'
         for key, valtype in expected.items():
             key_validate(key, modeler_vars, valtype)
 
@@ -1407,7 +1412,6 @@ def model23_ll_lp_data_getter(save_dir):
     assert len(set(dd.keys()).intersection(modeler_vars.keys())) == 0
     dd = dd | modeler_vars
     dd['shuff_corr_all'] = shuffled_apms_correlation_matrix
-
     return dd
 
 def model23_data_transformer(data_dict, calculate_composites = True):
@@ -1457,9 +1461,6 @@ def model23_data_transformer(data_dict, calculate_composites = True):
                 logging.warning(f"Excluding Composite {cid}. Invalid Binomial Approximation. n: {n} p {p} np : {n * p}) n(1-p) : {n * (1 - p)}")
         dd['new_composite_dict_norm_approx'] = new_composite_dict_norm_approx 
         dd['new_composite_dict_p_is_1'] = new_composite_dict_p_is_1
-        dd['n_composites'] = len(dd['composite_dict'])
-        logging.info(f"N composites {dd['n_composites']}")
-        dd.pop("composite_dict")
         return dd
 
     def update_correlations(dd):
@@ -1478,10 +1479,31 @@ def model23_data_transformer(data_dict, calculate_composites = True):
     do_checks(dd, r, c)
     dd = update_name2node_idx(dd)
     dd = update_maximal_nodes_edges(dd)
+    # Log some info about composites
+    dd['n_composites'] = len(dd['composite_dict'])
+    logging.info(f"N composites {dd['n_composites']}")
+    dd.pop("composite_dict")
     if calculate_composites:
         dd = update_composites(dd)
+    else:
+        dd = dd | {"new_composite_dict_p_is_1" : None, "new_composite_dict_norm_approx" : None} 
     dd = update_correlations(dd)
+
+    # Find a number of bins without infinities
+    if dd['n_null_bins'] == 'auto':
+        dd['n_null_bins'] = auto_find_binning(dd)
     return dd 
+
+def auto_find_binning(dd, bmin=50, bmax=500):
+    x = np.arange(-1, 1, 0.001)
+    R0 = dd['apms_shuff_corr_flat']  # Use the local correlations 
+    for nbins in range(bmin, bmax):
+        null_dist = Histogram(R0, bins=nbins) # Normalized
+        y = np.sum(null_dist.log_prob(x))
+        if not np.isinf(y):
+            return nbins
+    raise ValueError(f"Failed to find binning in range {bmin}, {bmax}")
+
 
 def preyu2uid_mapping_dict():
     apms_data_path = "../table1.csv"
@@ -2317,7 +2339,7 @@ def model23_se_sc(model_data):
     model23_SC_score(
             aij = aij,
             composite_dict_norm_approx = composite_dict_norm_approx,
-            composite_dict_p_is_1 composite_dict_p_is_1,
+            composite_dict_p_is_1 =  composite_dict_p_is_1,
             N = N, 
             disconectivity_distance = disconectivity_distance,
             max_distance = max_distance)
@@ -2373,8 +2395,8 @@ def model23_unpack_model_data(model_data):
     d = model_data
     N = d['N'] 
     M = N * (N-1) // 2
-    alpha = d['lower_edge_prob']
-    beta = d['upper_edge_prob']
+    alpha = d['alpha']
+    beta = d['beta']
     composite_dict_p_is_1 = d['new_composite_dict_p_is_1']  # Can use N directl
     composite_dict_norm_approx = d['new_composite_dict_norm_approx'] # Can use the Binomial approximation 
     n_null_bins = model_data['n_null_bins']
@@ -2411,7 +2433,7 @@ def model23_se_sr_sc(model_data):
     model23_SC_score(
             aij = aij,
             composite_dict_norm_approx = composite_dict_norm_approx,
-            composite_dict_p_is_1 composite_dict_p_is_1,
+            composite_dict_p_is_1 = composite_dict_p_is_1,
             N = N,
             disconectivity_distance = disconectivity_distance,
             max_distance = max_distance)
@@ -2636,7 +2658,8 @@ def _main(model_id,
          load_warmup,
          jax_profile,):
     log_path = Path(save_dir) / "_model_variations.log"
-    logging.basicConfig(filename=log_path, filemode='w')
+    #logging.basicConfig(filename=log_path, filemode='w')
+    logger = logging.getLogger(__name__)
     entered_main_time = time.time()
     rng_key = jax.random.PRNGKey(rseed)
     eprint(f"Model ID: {model_id}")
