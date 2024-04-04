@@ -1354,8 +1354,6 @@ def model23_ll_lp_data_getter(save_dir):
     dd['shuff_corr_all'] = shuffled_apms_correlation_matrix
     return dd
 
-
-
 def model23_data_transformer(data_dict, calculate_composites = True):
     """
     Transforms input data to be ready for modeling. Performs some checks.
@@ -1909,58 +1907,86 @@ def model20_test6e_1b():
     s1 = bp1.log_prob(e)
     numpyro.factor('bp1', s1)
 
-def data_from_spec_table_and_composite_table(data_path, ms_thresholds, sep="\t", rseed=0):
+def data_from_spec_table_and_composite_table(data_path, ms_thresholds, sep="\t", rseed=0, calc_composites=True):
+
+    def check_composite_table(composite_table):
+        assert np.all(np.isreal(composite_table['MSscore'].values))
+        assert np.all(composite_table['MSscore'] >= 0)
+
+    def remove_prey(composite_table, ms_thresholds):
+        # Remove prey below threshold
+        min_threshold = np.min(ms_thresholds)
+        assert min_threshold >= 0
+        sel = composite_table['MSscore'] >= min_threshold
+        composite_table = composite_table[sel]
+
+    def populate_composites_dict(composite_table, ms_thresholds):
+        sid_set = set(composite_table['SID'])
+        composites = {}
+        k=0
+        for threshold in ms_thresholds:
+            for sid in sid_set:
+                sel = (composite_table['SID'] == sid) & (composite_table['MSscore'] >= threshold)
+                if np.sum(sel) > 0:
+                    d = composite_table[sel]
+                    bait_l = list(set(d['Bait']))
+                    msscore_l = list(set(d['MSscore']))
+                    assert len(bait_l) == 1, bait_l
+                    #Ensure bait is first index
+                    prey_l = list(set(d['Prey'])) 
+                    if bait_l[0] in prey_l:
+                        prey_l.remove(bait_l[0])
+                    nodes = bait_l + prey_l
+                    msscore = msscore_l[0]
+                    composites[k] = {'nodes':nodes, 't': threshold, 'SID': sid}
+                    k+=1
+         return composites 
+
+    def calc_shuff_correlations():
+        null_sc = spec_table.copy()
+        key = jax.random.PRNGKey(rseed)
+        shuff = np.array(jax.random.permutation(key, null_sc.values, axis=1).block_until_ready()) #shuffle rows
+        null_sc.loc[:, :] = shuff 
+        shuff_corr = np.corrcoef(null_sc.values, rowvar=True)
+        corr =       np.corrcoef(spec_table.values, rowvar=True)
+        shuff_corr = pd.DataFrame(shuff_corr, columns=spec_table.index, index=spec_table.index)
+        corr = pd.DataFrame(corr, columns=spec_table.index, index=spec_table.index)
+        return corr, shuff_corr
+
+    def filter_minimal_ids(composite_table, spec_table):
+        # Remove the IDS that don't pass the minimal MSscore threshold
+        prey_set = set(composite_table['Prey'])
+        bait_set = set(composite_table['Bait'])
+        all_ids = list(prey_set.union(bait_set))
+        sel = []
+        for name in spec_table.index: 
+            val = True if name in all_ids else False
+            sel.append(val)
+
+        spec_table = spec_table[sel]
+        return spec_table
+        
     if isinstance(data_path, str):
         spec_path = Path(data_path) / "spec_table.tsv" 
         composite_path = Path(data_path) / "composite_table.tsv"
+    
     composite_table = pd.read_csv(composite_path, sep=sep)
-    # Remove prey below threshold
-    min_threshold = np.min(ms_thresholds)
-    assert min_threshold >= 0
-    assert np.all(np.isreal(composite_table['MSscore'].values))
-    assert np.all(composite_table['MSscore'] >= 0)
-    sel = composite_table['MSscore'] >= min_threshold
-    composite_table = composite_table[sel]
+    if calc_composites:
+        check_composite_table(composite_table)
+        composite_table = remove_prey(composite_table, ms_thresholds)
+        composites = populate_composites_dict(composite_table, ms_thresholds)
+    
     # Get the composite, threshold pairs 
-    sid_set = set(composite_table['SID'])
-    composites = {}
-    k=0
-    for threshold in ms_thresholds:
-        for sid in sid_set:
-            sel = (composite_table['SID'] == sid) & (composite_table['MSscore'] >= threshold)
-            if np.sum(sel) > 0:
-                d = composite_table[sel]
-                bait_l = list(set(d['Bait']))
-                msscore_l = list(set(d['MSscore']))
-                assert len(bait_l) == 1, bait_l
-                #Ensure bait is first index
-                prey_l = list(set(d['Prey'])) 
-                if bait_l[0] in prey_l:
-                    prey_l.remove(bait_l[0])
-                nodes = bait_l + prey_l
-                msscore = msscore_l[0]
-                composites[k] = {'nodes':nodes, 't': threshold, 'SID': sid}
-                k+=1
     spec_table = pd.read_csv(spec_path, sep=sep, index_col=0)
-    # Remove the IDS that don't pass the minimal MSscore threshold
-    prey_set = set(composite_table['Prey'])
-    bait_set = set(composite_table['Bait'])
-    all_ids = list(prey_set.union(bait_set))
-    sel = []
-    for name in spec_table.index: 
-        val = True if name in all_ids else False
-        sel.append(val)
-    spec_table = spec_table[sel]
+    spec_table = filter_minimal_ids(composite_table, spec_table)
+    corr, shuff_corr = calc_shuff_correlations()
     #Calculate shuffled profile similiarties from all the data
-    null_sc = spec_table.copy()
-    key = jax.random.PRNGKey(rseed)
-    shuff = jax.random.permutation(key, null_sc.values, axis=1) #shuffle rows
-    null_sc.loc[:, :] = np.array(shuff) 
-    shuff_corr = np.corrcoef(null_sc.values, rowvar=True)
-    corr = np.corrcoef(spec_table.values, rowvar=True)
-    shuff_corr = pd.DataFrame(shuff_corr, columns=spec_table.index, index=spec_table.index)
-    corr = pd.DataFrame(corr, columns=spec_table.index, index=spec_table.index)
-    return {"corr" : corr, "shuff_corr" : shuff_corr, "composite_dict" : composites, "shuff_spec_table" : shuff} 
+
+    return {"corr" : corr,
+            "shuff_corr" : shuff_corr,
+            "composite_dict" : composites,
+            "shuff_selected_spec_table" : shuff,
+            "selected_spec_table" : spec_table} 
 
 def row_mag(A):
     return np.sqrt(np.sum(np.square(A), axis=1))
@@ -2197,16 +2223,6 @@ def model23_se(model_data):
     M = N * (N-1) // 2
     alpha = d['lower_edge_prob']
     beta = d['upper_edge_prob']
-    composite_dict_p_is_1 = d['new_composite_dict_p_is_1']  # Can use N directl
-    composite_dict_norm_approx = d['new_composite_dict_norm_approx'] # Can use the Binomial approximation 
-    # Note - here we clip the data for negative correlations
-    # How to handle statistically significant negative correlations? What do they mean?
-    # Likey don't enrich for PPI's
-    # What does a statistically significant negative correlation mean? 
-
-    n_composites = d['n_composites']
-    #N_per_composite = d['N_per_composite'] # (n_composites,)
-    #p_per_composite = d['p_per_composite'] # (n_composites,)
     z2edge_slope = 1_000
     # Representation and Scoring
     u = numpyro.sample('pN', dist.Uniform(low=alpha, high=beta))
@@ -2531,7 +2547,11 @@ def model_dispatcher(model_name, model_data, save_dir):
     elif model_name in  ("model23_ll_lp", "model23_se", "model23_se_sc",
                          "model23_se_sr", "model23_se_sr_sc",
                          ):
-        model = model23_ll_lp
+        model = dict(model23_ll_lp = model23_ll_lp,
+                     model23_se = model23_se,
+                     model23_se_sc = model23_se_sc,
+                     model23_se_sr = model23_se_sr,
+                     model23_se_sr_sc = model23_se_sr_sc)[model_name] 
         model_data = model23_ll_lp_data_getter(save_dir)
         # Don't calculate compoistes for models that don't need it
         if model_name in ("model23_se_sr", "model23_se"):

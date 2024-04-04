@@ -22,11 +22,6 @@ def main(o, i):
     _main(o, i)
 
 def _main(o, i):
-    with open(i, "rb") as f:
-        x = pkl.load(f)
-
-    samples = x['samples']
-    ef = x['extra_fields']
 
     i = Path(i)
     o = Path(o)
@@ -35,57 +30,6 @@ def _main(o, i):
         plt.savefig(str(o / i.stem) + f"_{name}_300.png", dpi=300)
         plt.savefig(str(o / i.stem) + f"_{name}_1200.png", dpi=1200)
         plt.close()
-
-    # Energy histogram
-    fig, ax = plt.subplots()
-    ax.hist(np.array(ef['energy']))
-    ax.set_xlabel("Energy")
-    ax.set_ylabel("Frequency")
-    save("energy")
-
-    x_cater = np.arange(len(ef['energy'])) 
-
-    # Energy Caterpillar
-    fig, ax = plt.subplots()
-    ax.plot(x_cater, np.array(ef['energy']), alpha=0.2)
-    ax.set_xlabel("Post warmup step")
-    ax.set_ylabel("Energy")
-    save("energy_caterpill")
-
-    # Mean acceptance histogram
-    fig, ax = plt.subplots()
-    ax.hist(np.array(ef['mean_accept_prob']))
-    ax.set_xlabel("mean_accept_prob")
-    ax.set_ylabel("Frequency")
-    save("mean_accept_prob")
-
-    # potential energy 
-    fig, ax = plt.subplots()
-    ax.hist(np.array(ef['potential_energy']))
-    ax.set_xlabel("potential_energy")
-    ax.set_ylabel("Frequency")
-    save("potential_energy")
-
-    # potential 
-    fig, ax = plt.subplots()
-    ax.plot(x_cater, np.array(ef['potential_energy']), alpha=0.2)
-    ax.set_xlabel("Post warmup step")
-    ax.set_ylabel("potential_energy")
-    save("potential_energy_caterpill")
-
-    # diverging 
-    fig, ax = plt.subplots()
-    ax.hist(np.array(ef['diverging']))
-    ax.set_xlabel("diverging")
-    ax.set_ylabel("Frequency")
-    save("diverging")
-
-    # accept_prob 
-    fig, ax = plt.subplots()
-    ax.hist(np.array(ef['accept_prob']))
-    ax.set_xlabel("accept_prob")
-    ax.set_ylabel("Frequency")
-    save("accept_prob")
 
     # Get the model data
     with open(str(i.parent / i.stem) + "_model_data.pkl", "rb") as f:
@@ -110,42 +54,6 @@ def _main(o, i):
     plt.matshow(np.array(A))
     plt.colorbar()
     save("mean_adjacency")
-
-    # Plot the hist
-    """
-    # Animation 
-    fig, ax = plt.subplots()
-    mat = ax.matshow(np.zeros((N, N)))
-    
-    def animate(i):
-        a_i = mv.flat2matrix(a[i, :], N)
-        mat = ax.matshow(np.array(a_i))
-        return mat,
-
-    nsamples, nedges = samples['z'].shape 
-    ani = animation.FuncAnimation(fig, animate, repeat=True,
-       frames=nsamples, interval=50)
-
-    # To save the animation using Pillow as a gif
-    writer = animation.PillowWriter(fps=15,
-                                     metadata=dict(artist='Me'),
-                                     bitrate=1800)
-
-    ani.save('edge_matrix.gif', writer=writer)
-    """
-
-    # plot variance
-    fig, ax = plt.subplots()
-    plt.matshow(np.array(V))
-    plt.colorbar()
-    save("var_adjacency")
-
-    # Mean Variance correlation plot
-    fig, ax = plt.subplots()
-    ax.plot(mean, var, 'k.', alpha=0.2)
-    ax.set_xlabel("Edge mean")
-    ax.set_ylabel("Edge var")
-    save("mean_var_scatter")
 
     # Plot the Profile similarity matrix of input information 
     data_path = str(i.parent)
@@ -202,6 +110,98 @@ def _main(o, i):
         save_composite_table(model_data, o)
     # Plot a graph of composite data satisfaction
 
+    with open(i, "rb") as f:
+        x = pkl.load(f)
+
+    samples = x['samples']
+    ef = x['extra_fields']
+
+    # Energy histogram
+    fig, ax = plt.subplots()
+    ax.hist(np.array(ef['energy']))
+    ax.set_xlabel("Energy")
+    ax.set_ylabel("Frequency")
+    save("energy")
+
+    x_cater = np.arange(len(ef['energy'])) 
+
+    # Energy Caterpillar
+    fig, ax = plt.subplots()
+    ax.plot(x_cater, np.array(ef['energy']), alpha=0.2)
+    ax.set_xlabel("Post warmup step")
+    ax.set_ylabel("Energy")
+    save("energy_caterpill")
+
+    # Mean acceptance histogram
+    fig, ax = plt.subplots()
+    ax.hist(np.array(ef['mean_accept_prob']))
+    ax.set_xlabel("mean_accept_prob")
+    ax.set_ylabel("Frequency")
+    save("mean_accept_prob")
+
+    # potential energy 
+    fig, ax = plt.subplots()
+    ax.hist(np.array(ef['potential_energy']))
+    ax.set_xlabel("potential_energy")
+    ax.set_ylabel("Frequency")
+    save("potential_energy")
+
+    # potential 
+    fig, ax = plt.subplots()
+    ax.plot(x_cater, np.array(ef['potential_energy']), alpha=0.2)
+    ax.set_xlabel("Post warmup step")
+    ax.set_ylabel("potential_energy")
+    save("potential_energy_caterpill")
+
+    # diverging 
+    fig, ax = plt.subplots()
+    ax.hist(np.array(ef['diverging']))
+    ax.set_xlabel("diverging")
+    ax.set_ylabel("Frequency")
+    save("diverging")
+
+    # accept_prob 
+    fig, ax = plt.subplots()
+    ax.hist(np.array(ef['accept_prob']))
+    ax.set_xlabel("accept_prob")
+    ax.set_ylabel("Frequency")
+    save("accept_prob")
+
+    # Plot the hist
+    """
+    # Animation 
+    fig, ax = plt.subplots()
+    mat = ax.matshow(np.zeros((N, N)))
+    
+    def animate(i):
+        a_i = mv.flat2matrix(a[i, :], N)
+        mat = ax.matshow(np.array(a_i))
+        return mat,
+
+    nsamples, nedges = samples['z'].shape 
+    ani = animation.FuncAnimation(fig, animate, repeat=True,
+       frames=nsamples, interval=50)
+
+    # To save the animation using Pillow as a gif
+    writer = animation.PillowWriter(fps=15,
+                                     metadata=dict(artist='Me'),
+                                     bitrate=1800)
+
+    ani.save('edge_matrix.gif', writer=writer)
+    """
+    # plot variance
+    fig, ax = plt.subplots()
+    plt.matshow(np.array(V))
+    plt.colorbar()
+    save("var_adjacency")
+
+    # Mean Variance correlation plot
+    fig, ax = plt.subplots()
+    ax.plot(mean, var, 'k.', alpha=0.2)
+    ax.set_xlabel("Edge mean")
+    ax.set_ylabel("Edge var")
+    save("mean_var_scatter")
+
     # Write an edge list table of scores
     w = []
     a = []
@@ -224,9 +224,6 @@ def _main(o, i):
     # Analysis
 
     # Count the number of Viral-Viral interactions 
-    
-    
-    
 
     return samples
 
