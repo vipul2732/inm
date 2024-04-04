@@ -1982,11 +1982,16 @@ def data_from_spec_table_and_composite_table(data_path, ms_thresholds, sep="\t",
     corr, shuff_corr = calc_shuff_correlations()
     #Calculate shuffled profile similiarties from all the data
 
-    return {"corr" : corr,
+    base = { 
+            "corr" : corr,
             "shuff_corr" : shuff_corr,
-            "composite_dict" : composites,
             "shuff_selected_spec_table" : shuff,
             "selected_spec_table" : spec_table} 
+
+    if calc_composites:
+        return base | {"composite_dict" : composites}
+    else:
+        return base
 
 def row_mag(A):
     return np.sqrt(np.sum(np.square(A), axis=1))
