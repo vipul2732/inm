@@ -771,6 +771,16 @@ def bait_prey_score_norm_approx(
     max_distance = 22):
     """
     A component of probablistic model using Numpyro primitives
+
+    Params:
+      composite_name : a unique identifier for the composite
+      aij : the flattened array of edge variables
+      composite_idxs : the list of node identities
+      Ndense : the number of nodes in the composite
+      Nmax : the number of nodes in the network
+      k   : the maximal bait prey distance at which a path is counted as disconnected
+      max_paths : the maximal number of matrix multiplications to use in the Warshal algorithm
+      DTYPE : don't change - the Adjacency matrix should be integer so that max paths is properly calculated
     """
     edge_idxs = jnp.array(node_list2edge_list(composite_idxs, Nmax))
     n_prey = numpyro.sample(composite_name + "_N", BinomialApproximation(Ndense, pc))
@@ -1341,17 +1351,63 @@ def model22_ll_lp_data_getter(save_dir):
     with open(str(save_dir) + "data.pkl", "rb") as f:
         return pkl.load(f)
 
+
+
 def model23_ll_lp_data_getter(save_dir):
+    def validate_modeler_vars(modeler_vars):
+        def extra_validate(key, modeler_vars):
+            if key in ('alpha', 'beta'):
+                alpha = modeler_vars['alpha']
+                beta = modeler_vars['beta']
+                assert alpha > a, alpha
+                assert alpha < 1, alpha
+                assert alpha < beta, beta
+                assert beta < 1, beta
+            elif key == thresholds:
+                thresholds = modeler_vars[key]
+                for t in thresholds:
+                    assert t > 0, t
+                    assert t < 1, t
+            elif key in ("max_distance", "disconectivity_distance"):
+                max_distance = modeler_vars['max_distance']
+                disconectivity_distance = modeler_vars['disconectivity_distance']
+                assert disconectivity_distance < max_distance, (disconectivity_distance, max_distance)
+                assert disconectivity_distance > 0, disconectivity_distance
+            elif key == "n_null_bins":
+                n_null_bins == modeler_vars[key]
+                assert n_null_bins > 10, f"What do you have against bins?"
+            else:
+                raise ValueError("Unexpected Key {key} in modeler_vars")
+        def key_validate(key, modeler_vars, valtype):
+            if key not in modeler_vars:
+                raise KeyError(f"Missing key {key} in modeler_vars.json")
+            else:
+                t = type(modeler_vars[key])
+                if not isinstance(modeler_vars[key], valtype):
+                    raise ValueError("Expected value {valtype} at key {key} in modeler_vars.json. Found {t} instead")
+                extra_validate(key, modeler_vars)
+        
+        expected = {'alpha' : float,
+                    'beta' : float,
+                    'thresholds' : list,
+                    'disconectivity_distance' : int,
+                    'max_distance' : int,
+                    'n_null_bins' : int,}
+        for key, valtype in expected.items():
+            key_validate(key, modeler_vars, valtype)
+
     if isinstance(save_dir, str):
         save_dir = Path(save_dir)
     with open(str(save_dir / "modeler_vars.json"), 'r') as f:
         modeler_vars = json.load(f)
+    validate_modeler_vars(modeler_vars)
     dd = data_from_spec_table_and_composite_table(str(save_dir), modeler_vars['thresholds'])
     with open(save_dir / "shuffled_apms_correlation_matrix.pkl", "rb") as f:
         shuffled_apms_correlation_matrix = pkl.load(f)
     assert len(set(dd.keys()).intersection(modeler_vars.keys())) == 0
     dd = dd | modeler_vars
     dd['shuff_corr_all'] = shuffled_apms_correlation_matrix
+
     return dd
 
 def model23_data_transformer(data_dict, calculate_composites = True):
@@ -2226,83 +2282,93 @@ def model23_ll_lp(model_data):
 
 def model23_se(model_data):
     """
-    Prior only
+    $S(M) = S_E(M)$
     """
-    # Unpack data for tracing
-    d = model_data
-    N = d['N'] 
-    M = N * (N-1) // 2
-    alpha = d['lower_edge_prob']
-    beta = d['upper_edge_prob']
-    z2edge_slope = 1_000
-    # Representation and Scoring
-    u = numpyro.sample('pN', dist.Uniform(low=alpha, high=beta))
-    mu = edge_prob2mu(u) # determinsitc transform
-    numpyro.deterministic('mu', mu)
-    z = numpyro.sample('z', dist.Normal(mu+0.5).expand([M,])) #(M, ) shifted normal, sigma must be 1. latent edges
-    aij = jax.nn.sigmoid((z-0.5)*z2edge_slope)
+    N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx, R, R0, null_dist, null_log_like, disconectivity_distance, max_distance = model23_unpack_model_data(model_data)
+    aij = model23_SE_score(
+            alpha = alpha,
+            beta = beta,
+            M = M)
 
 def model23_se_sr(model_data):
     """
-    SE + SR 
+    $S(M) = S_E(M) + S_R(M)$
     """
-    # Unpack data for tracing
-    d = model_data
-    N = d['N'] 
-    M = N * (N-1) // 2
-    alpha = d['lower_edge_prob']
-    beta = d['upper_edge_prob']
-    #composite_dict_p_is_1 = d['new_composite_dict_p_is_1']  # Can use N directl
-    #composite_dict_norm_approx = d['new_composite_dict_norm_approx'] # Can use the Binomial approximation 
-    # Note - here we clip the data for negative correlations
-    # How to handle statistically significant negative correlations? What do they mean?
-    # Likey don't enrich for PPI's
-    # What does a statistically significant negative correlation mean? 
-    #n_composites = d['n_composites']
-    #N_per_composite = d['N_per_composite'] # (n_composites,)
-    #p_per_composite = d['p_per_composite'] # (n_composites,)
-    z2edge_slope = 1_000
-    # Representation and Scoring
-    u = numpyro.sample('pN', dist.Uniform(low=alpha, high=beta))
-    mu = edge_prob2mu(u) # determinsitc transform
-    numpyro.deterministic('mu', mu)
-    z = numpyro.sample('z', dist.Normal(mu+0.5).expand([M,])) #(M, ) shifted normal, sigma must be 1. latent edges
-    aij = jax.nn.sigmoid((z-0.5)*z2edge_slope)
-    #Data Likelihood
-    R = d['apms_corr_flat']
-    # Score negative correlations as if they were null
-    R0 = d['apms_shuff_corr_flat']  # Use the local correlations 
-    R0 = d['apms_shuff_corr_all_flat']  # Use the local correlations 
-    # Number of bins used to represent the histogram is a hyper parmeter
-    # Can cause bugs due to infinities (at bin edges) 
-    # quickfix - pass the number of bins in the modeler_vars dictionary
-    # long term change to a CDF method so we don't have to represent the histogram
-    null_dist = Histogram(R0, bins=100).expand([M,]) # Normalized
-    R = np.clip(R, 0., 1.0)
-    null_log_like = null_dist.log_prob(R)
-    #INFINITY_FACTOR = 10 
-    #causal_dist = dist.Normal(0.23, 0.22).expand([M,]) 
-    # Null Hypothesis Test
-    #ll_0 = null_dist.log_prob(aij)
-    #ll_1 = causal_dist.log_prob(aij)
-    # Score approximates log[(1-a) * p(R | H0)]
-    #aij = jnp.clip(aij, 0, 1, dtype=jnp.float32)
-    score = (1-aij)*null_log_like # Addition on the log scale
-    numpyro.factor("R", score)
+    N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx, R, R0, null_dist, null_log_like, disconectivity_distance, max_distance = model23_unpack_model_data(model_data)
+    aij = model23_SE_score(
+            alpha = alpha,
+            beta = beta,
+            M = M)
+    model23_SR_score(
+            aij = aij,
+            null_log_like = null_log_like)
 
-    #mixture_probs = jnp.array([aij, 1-aij]).T
-    # Profile similarity likelihood
-    #mixture_model = dist.MixtureGeneral(
-    #        dist.Categorical(probs=mixture_probs),
-    #        [causal_dist, null_dist])
-    #R_ll = mixture_model.log_prob(R)
-    #numpyro.factor("R_ll", R_ll)
-    ##numpyro.sample("obs", mixtures, obs=R)
 
 def model23_se_sc(model_data):
     """
-    SE + SC
+    $S(M) = S_E(M) + S_C(M)$
     """
+    N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx, R, R0, null_dist, null_log_like, disconectivity_distance, max_distance = model23_unpack_model_data(model_data)
+
+    aij = model23_SE_score(
+            alpha = alpha,
+            beta = beta,
+            M = M)
+    model23_SC_score(
+            aij = aij,
+            composite_dict_norm_approx = composite_dict_norm_approx,
+            composite_dict_p_is_1 composite_dict_p_is_1,
+            N = N, 
+            disconectivity_distance = disconectivity_distance,
+            max_distance = max_distance)
+
+def model23_SE_score(alpha, beta, M):
+    z2edge_slope = 1_000
+    # Representation and Scoring
+    u = numpyro.sample('pN', dist.Uniform(low=alpha, high=beta))
+    mu = edge_prob2mu(u) # determinsitc transform
+    numpyro.deterministic('mu', mu)
+    z = numpyro.sample('z', dist.Normal(mu+0.5).expand([M,])) #(M, ) shifted normal, sigma must be 1. latent edges
+    aij = jax.nn.sigmoid((z-0.5)*z2edge_slope)
+    return aij
+
+def model23_SC_score(aij, composite_dict_norm_approx, composite_dict_p_is_1, N, disconectivity_distance,
+                     max_distance):
+    # Define things per composite
+    #bait_prey_score("test", aij, c22_nodes, c22_N, N, 8, c22_t) 
+    for k in range(0, 20):
+        kth_bait_prey_score_norm_approx(aij, k, composite_dict_norm_approx, N, k = disconectivity_distance, max_distance = max_distance)
+    for k in range(21, 26):
+        kth_bait_prey_score_norm_approx(aij, k, composite_dict_norm_approx, N, k = disconectivity_distance, max_distance = max_distance)
+    for k in range(27, 2):
+        kth_bait_prey_score_norm_approx(aij, k, composite_dict_norm_approx, N, k = disconectivity_distance, max_distance = max_distance)
+
+    kth_bait_prey_score_norm_approx(aij, 31, composite_dict_norm_approx, N, k = disconectivity_distance, max_distance = max_distance)
+    kth_bait_prey_score_norm_approx(aij, 32, composite_dict_norm_approx, N, k = disconectivity_distance, max_distance = max_distance)
+    kth_bait_prey_score_norm_approx(aij, 34, composite_dict_norm_approx, N, k = disconectivity_distance, max_distance = max_distance)
+    kth_bait_prey_score_norm_approx(aij, 35, composite_dict_norm_approx, N, k = disconectivity_distance, max_distance = max_distance)
+    kth_bait_prey_score_norm_approx(aij, 37, composite_dict_norm_approx, N, k = disconectivity_distance, max_distance = max_distance)
+    kth_bait_prey_score_norm_approx(aij, 38, composite_dict_norm_approx, N, k = disconectivity_distance, max_distance = max_distance)
+    kth_bait_prey_score_norm_approx(aij, 42, composite_dict_norm_approx, N, k = disconectivity_distance, max_distance = max_distance)
+    kth_bait_prey_score_norm_approx(aij, 45, composite_dict_norm_approx, N, k = disconectivity_distance, max_distance = max_distance)
+    kth_bait_prey_score_norm_approx(aij, 48, composite_dict_norm_approx, N, k = disconectivity_distance, max_distance = max_distance)
+
+    kth_bait_prey_score_p_is_1(aij, 50, composite_dict_p_is_1, N, k = disconectivity_distance, max_distance = max_distance)
+    kth_bait_prey_score_p_is_1(aij, 51, composite_dict_p_is_1, N, k = disconectivity_distance, max_distance = max_distance)
+    kth_bait_prey_score_p_is_1(aij, 52, composite_dict_p_is_1, N, k = disconectivity_distance, max_distance = max_distance)
+    kth_bait_prey_score_p_is_1(aij, 53, composite_dict_p_is_1, N, k = disconectivity_distance, max_distance = max_distance)
+    kth_bait_prey_score_p_is_1(aij, 54, composite_dict_p_is_1, N, k = disconectivity_distance, max_distance = max_distance)
+    kth_bait_prey_score_p_is_1(aij, 55, composite_dict_p_is_1, N, k = disconectivity_distance, max_distance = max_distance)
+    kth_bait_prey_score_p_is_1(aij, 56, composite_dict_p_is_1, N, k = disconectivity_distance, max_distance = max_distance)
+    kth_bait_prey_score_p_is_1(aij, 57, composite_dict_p_is_1, N, k = disconectivity_distance, max_distance = max_distance)
+    kth_bait_prey_score_p_is_1(aij, 58, composite_dict_p_is_1, N, k = disconectivity_distance, max_distance = max_distance)
+    kth_bait_prey_score_p_is_1(aij, 59, composite_dict_p_is_1, N, k = disconectivity_distance, max_distance = max_distance)
+
+def model23_SR_score(aij, null_log_like):
+    score = (1-aij)*null_log_like # Addition on the log scale
+    numpyro.factor("R", score)
+
+def model23_unpack_model_data(model_data):
     # Unpack data for tracing
     d = model_data
     N = d['N'] 
@@ -2311,132 +2377,44 @@ def model23_se_sc(model_data):
     beta = d['upper_edge_prob']
     composite_dict_p_is_1 = d['new_composite_dict_p_is_1']  # Can use N directl
     composite_dict_norm_approx = d['new_composite_dict_norm_approx'] # Can use the Binomial approximation 
+    n_null_bins = model_data['n_null_bins']
     # Note - here we clip the data for negative correlations
     # How to handle statistically significant negative correlations? What do they mean?
     # Likey don't enrich for PPI's
     # What does a statistically significant negative correlation mean? 
-
-    n_composites = d['n_composites']
-    #N_per_composite = d['N_per_composite'] # (n_composites,)
-    #p_per_composite = d['p_per_composite'] # (n_composites,)
-    z2edge_slope = 1_000
-    # Representation and Scoring
-    u = numpyro.sample('pN', dist.Uniform(low=alpha, high=beta))
-    mu = edge_prob2mu(u) # determinsitc transform
-    numpyro.deterministic('mu', mu)
-    z = numpyro.sample('z', dist.Normal(mu+0.5).expand([M,])) #(M, ) shifted normal, sigma must be 1. latent edges
-    aij = jax.nn.sigmoid((z-0.5)*z2edge_slope)
-    # Define things per composite
-    #bait_prey_score("test", aij, c22_nodes, c22_N, N, 8, c22_t) 
-    for k in range(0, 20):
-        kth_bait_prey_score_norm_approx(aij, k, composite_dict_norm_approx, N)
-    for k in range(21, 26):
-        kth_bait_prey_score_norm_approx(aij, k, composite_dict_norm_approx, N)
-    for k in range(27, 2):
-        kth_bait_prey_score_norm_approx(aij, k, composite_dict_norm_approx, N)
-
-    kth_bait_prey_score_norm_approx(aij, 31, composite_dict_norm_approx, N)
-    kth_bait_prey_score_norm_approx(aij, 32, composite_dict_norm_approx, N)
-    kth_bait_prey_score_norm_approx(aij, 34, composite_dict_norm_approx, N)
-    kth_bait_prey_score_norm_approx(aij, 35, composite_dict_norm_approx, N)
-    kth_bait_prey_score_norm_approx(aij, 37, composite_dict_norm_approx, N)
-    kth_bait_prey_score_norm_approx(aij, 38, composite_dict_norm_approx, N)
-    kth_bait_prey_score_norm_approx(aij, 42, composite_dict_norm_approx, N)
-    kth_bait_prey_score_norm_approx(aij, 45, composite_dict_norm_approx, N)
-    kth_bait_prey_score_norm_approx(aij, 48, composite_dict_norm_approx, N)
-
-    kth_bait_prey_score_p_is_1(aij, 50, composite_dict_p_is_1, N)
-    kth_bait_prey_score_p_is_1(aij, 51, composite_dict_p_is_1, N)
-    kth_bait_prey_score_p_is_1(aij, 52, composite_dict_p_is_1, N)
-    kth_bait_prey_score_p_is_1(aij, 53, composite_dict_p_is_1, N)
-    kth_bait_prey_score_p_is_1(aij, 54, composite_dict_p_is_1, N)
-    kth_bait_prey_score_p_is_1(aij, 55, composite_dict_p_is_1, N)
-    kth_bait_prey_score_p_is_1(aij, 56, composite_dict_p_is_1, N)
-    kth_bait_prey_score_p_is_1(aij, 57, composite_dict_p_is_1, N)
-    kth_bait_prey_score_p_is_1(aij, 58, composite_dict_p_is_1, N)
-    kth_bait_prey_score_p_is_1(aij, 59, composite_dict_p_is_1, N)
-
-
-def model23_se_sr_sc(model_data):
-    """
-    SE + SR + SC
-    """
-    # Unpack data for tracing
-    d = model_data
-    N = d['N'] 
-    M = N * (N-1) // 2
-    alpha = d['lower_edge_prob']
-    beta = d['upper_edge_prob']
-    composite_dict_p_is_1 = d['new_composite_dict_p_is_1']  # Can use N directl
-    composite_dict_norm_approx = d['new_composite_dict_norm_approx'] # Can use the Binomial approximation 
-    # Note - here we clip the data for negative correlations
-    # How to handle statistically significant negative correlations? What do they mean?
-    # Likey don't enrich for PPI's
-    # What does a statistically significant negative correlation mean? 
-
-    n_composites = d['n_composites']
-    #N_per_composite = d['N_per_composite'] # (n_composites,)
-    #p_per_composite = d['p_per_composite'] # (n_composites,)
-    z2edge_slope = 1_000
-    # Representation and Scoring
-    u = numpyro.sample('pN', dist.Uniform(low=alpha, high=beta))
-    mu = edge_prob2mu(u) # determinsitc transform
-    numpyro.deterministic('mu', mu)
-    z = numpyro.sample('z', dist.Normal(mu+0.5).expand([M,])) #(M, ) shifted normal, sigma must be 1. latent edges
-    aij = jax.nn.sigmoid((z-0.5)*z2edge_slope)
-    # Define things per composite
-    #bait_prey_score("test", aij, c22_nodes, c22_N, N, 8, c22_t) 
-    for k in range(0, 20):
-        kth_bait_prey_score_norm_approx(aij, k, composite_dict_norm_approx, N)
-    for k in range(21, 26):
-        kth_bait_prey_score_norm_approx(aij, k, composite_dict_norm_approx, N)
-    for k in range(27, 2):
-        kth_bait_prey_score_norm_approx(aij, k, composite_dict_norm_approx, N)
-
-    kth_bait_prey_score_norm_approx(aij, 31, composite_dict_norm_approx, N)
-    kth_bait_prey_score_norm_approx(aij, 32, composite_dict_norm_approx, N)
-    kth_bait_prey_score_norm_approx(aij, 34, composite_dict_norm_approx, N)
-    kth_bait_prey_score_norm_approx(aij, 35, composite_dict_norm_approx, N)
-    kth_bait_prey_score_norm_approx(aij, 37, composite_dict_norm_approx, N)
-    kth_bait_prey_score_norm_approx(aij, 38, composite_dict_norm_approx, N)
-    kth_bait_prey_score_norm_approx(aij, 42, composite_dict_norm_approx, N)
-    kth_bait_prey_score_norm_approx(aij, 45, composite_dict_norm_approx, N)
-    kth_bait_prey_score_norm_approx(aij, 48, composite_dict_norm_approx, N)
-
-    kth_bait_prey_score_p_is_1(aij, 50, composite_dict_p_is_1, N)
-    kth_bait_prey_score_p_is_1(aij, 51, composite_dict_p_is_1, N)
-    kth_bait_prey_score_p_is_1(aij, 52, composite_dict_p_is_1, N)
-    kth_bait_prey_score_p_is_1(aij, 53, composite_dict_p_is_1, N)
-    kth_bait_prey_score_p_is_1(aij, 54, composite_dict_p_is_1, N)
-    kth_bait_prey_score_p_is_1(aij, 55, composite_dict_p_is_1, N)
-    kth_bait_prey_score_p_is_1(aij, 56, composite_dict_p_is_1, N)
-    kth_bait_prey_score_p_is_1(aij, 57, composite_dict_p_is_1, N)
-    kth_bait_prey_score_p_is_1(aij, 58, composite_dict_p_is_1, N)
-    kth_bait_prey_score_p_is_1(aij, 59, composite_dict_p_is_1, N)
-    #Data Likelihood
     R = d['apms_corr_flat']
     # Score negative correlations as if they were null
     R = np.clip(R, 0, 1.0)
     R0 = d['apms_shuff_corr_flat']  # Use the local correlations 
-    null_dist = Histogram(R0, bins=100).expand([M,]) # Normalized
+    null_dist = Histogram(R0, bins=n_null_bins).expand([M,]) # Normalized
     null_log_like = null_dist.log_prob(R)
-    #INFINITY_FACTOR = 10 
-    #causal_dist = dist.Normal(0.23, 0.22).expand([M,]) 
-    # Null Hypothesis Test
-    #ll_0 = null_dist.log_prob(aij)
-    #ll_1 = causal_dist.log_prob(aij)
+    disconectivity_distance = model_data['disconectivity_distance']
+    max_distance = model_data['max_distance']
+    return (N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx,
+            R, R0, null_dist, null_log_like, disconectivity_distance, max_distance)
 
-    # Score approximates log[(1-a) * p(R | H0)]
-    score = (1-aij)*null_log_like # Addition on the log scale
-    numpyro.factor("R", score)
-    #mixture_probs = jnp.array([aij, 1-aij]).T
-    # Profile similarity likelihood
-    #mixture_model = dist.MixtureGeneral(
-    #        dist.Categorical(probs=mixture_probs),
-    #        [causal_dist, null_dist])
-    #R_ll = mixture_model.log_prob(R)
-    #numpyro.factor("R_ll", R_ll)
-    ##numpyro.sample("obs", mixtures, obs=R)
+
+
+def model23_se_sr_sc(model_data):
+    """
+    $S(M) = S_E(M) + S_R(M) + S_C(M)$
+    """
+    N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx, R, R0, null_dist, null_log_like, disconectivity_distance, max_distance = model23_unpack_model_data(model_data)
+
+    aij = model23_SE_score(
+            alpha = alpha,
+            beta = beta,
+            M = M)
+    model23_SR_score(
+            aij = aij,
+            null_log_like = null_log_like)
+    model23_SC_score(
+            aij = aij,
+            composite_dict_norm_approx = composite_dict_norm_approx,
+            composite_dict_p_is_1 composite_dict_p_is_1,
+            N = N,
+            disconectivity_distance = disconectivity_distance,
+            max_distance = max_distance)
 
 
 def _note():
