@@ -12,19 +12,15 @@ import numpy as np
 import pandas as pd
 import logging
 import shutil
+import logging
+
+logger = logging.getLogger(__name__)
 
 @click.command()
 @click.option("--ds-name")
 @click.option("--dont-remap", is_flag=True, default=False)
 def main(ds_name, dont_remap):
     out_path = "../data/processed/" + ds_name
-    log_path = out_path + "/preprocess_data.log"
-    print(log_path)
-    logging.basicConfig(
-        filename=log_path,
-        encoding="utf-8",
-        filemode='w',
-        level=logging.DEBUG)
     do_remap = not dont_remap 
     if ds_name in _raw_data_paths:
         preprocess_data(ds_name, enforce_bait_remapping=do_remap)
