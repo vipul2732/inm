@@ -1919,6 +1919,7 @@ def data_from_spec_table_and_composite_table(data_path, ms_thresholds, sep="\t",
         assert min_threshold >= 0
         sel = composite_table['MSscore'] >= min_threshold
         composite_table = composite_table[sel]
+        return composite_table
 
     def populate_composites_dict(composite_table, ms_thresholds):
         sid_set = set(composite_table['SID'])
@@ -1940,18 +1941,23 @@ def data_from_spec_table_and_composite_table(data_path, ms_thresholds, sep="\t",
                     msscore = msscore_l[0]
                     composites[k] = {'nodes':nodes, 't': threshold, 'SID': sid}
                     k+=1
-         return composites 
+        return composites 
 
-    def calc_shuff_correlations():
+    def calc_shuff_correlations(spec_table, rseed):
         null_sc = spec_table.copy()
+        nrows, ncolumns = null_sc.shape
+        temp = np.zeros(null_sc.shape)
         key = jax.random.PRNGKey(rseed)
-        shuff = np.array(jax.random.permutation(key, null_sc.values, axis=1).block_until_ready()) #shuffle rows
-        null_sc.loc[:, :] = shuff 
+        for rid in range(nrows):
+            key, k1 = jax.random.split(key)
+            shuffled_row = jax.random.permutation(k1, null_sc.iloc[rid, :].values)
+            temp[rid] = shuffled_row
+        null_sc.loc[:, :] = temp 
         shuff_corr = np.corrcoef(null_sc.values, rowvar=True)
         corr =       np.corrcoef(spec_table.values, rowvar=True)
         shuff_corr = pd.DataFrame(shuff_corr, columns=spec_table.index, index=spec_table.index)
         corr = pd.DataFrame(corr, columns=spec_table.index, index=spec_table.index)
-        return corr, shuff_corr
+        return corr, shuff_corr, null_sc 
 
     def filter_minimal_ids(composite_table, spec_table):
         # Remove the IDS that don't pass the minimal MSscore threshold
@@ -1962,7 +1968,6 @@ def data_from_spec_table_and_composite_table(data_path, ms_thresholds, sep="\t",
         for name in spec_table.index: 
             val = True if name in all_ids else False
             sel.append(val)
-
         spec_table = spec_table[sel]
         return spec_table
         
@@ -1971,21 +1976,21 @@ def data_from_spec_table_and_composite_table(data_path, ms_thresholds, sep="\t",
         composite_path = Path(data_path) / "composite_table.tsv"
     
     composite_table = pd.read_csv(composite_path, sep=sep)
+    check_composite_table(composite_table)
+    composite_table = remove_prey(composite_table, ms_thresholds)
     if calc_composites:
-        check_composite_table(composite_table)
-        composite_table = remove_prey(composite_table, ms_thresholds)
         composites = populate_composites_dict(composite_table, ms_thresholds)
     
     # Get the composite, threshold pairs 
     spec_table = pd.read_csv(spec_path, sep=sep, index_col=0)
     spec_table = filter_minimal_ids(composite_table, spec_table)
-    corr, shuff_corr = calc_shuff_correlations()
+    corr, shuff_corr, null_sc = calc_shuff_correlations(spec_table, rseed)
     #Calculate shuffled profile similiarties from all the data
 
     base = { 
             "corr" : corr,
             "shuff_corr" : shuff_corr,
-            "shuff_selected_spec_table" : shuff,
+            "selected_shuff_spec_table" : null_sc,
             "selected_spec_table" : spec_table} 
 
     if calc_composites:
