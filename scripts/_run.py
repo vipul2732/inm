@@ -23,6 +23,7 @@ import generate_analysis_figures as gaf
 import json
 import shutil
 
+logger = logging.getLogger()
 def preprocessor_protocol_dispatcher(preprocessor_protocol_name):
     if preprocessor_protocol_name == "cullin_standard":
         return preprocess_data.preprocess_spec_table
@@ -60,8 +61,39 @@ def main(
     hyper_param_alpha,
     hyper_param_beta,
     hyper_param_thresholds,
+    hyper_param_n_null_bins,
+    hyper_param_disconectivity_distance,
+    hyper_param_max_distance,
     filter_kw,
 ):
+    """
+    Params:
+      model_output_dirpath : str - relative path for outputs    
+      model_input_fpath : str - relative path to raw .xlsx file from SI
+      preprocessor_protocol_name : str - currently supports 'cullin_standard'
+      preprocessor_output_dirpath : str - relative path to write prepocessed data
+      model_id : int - a numeric identifer for the run
+      rseed : int - the random seed
+      model_name : str - keyword dispatches the model. 'model23_se', 'model23_se_sc', 'model23_se_sr', 'model23_se_sr_sc', 'model23_ll_lp'
+      model_data : None - depricated,
+      num_warmup : int - number of MCMC warmup steps,
+      num_samples : int - number of MCMC samples (single chain),
+      include_potential_energy : bool - save the potential_energy to extra_fields. Note that getting the (pseudo) posterior one can use numpyro.infer.utilities.log_density(model)
+      include_mean_accept_prob : bool - save the mean_accept_prob to extra_fields, 
+      include_extra_fields : bool - output the extra_fields, 
+      progress_bar : bool - visualize progress_bar, 
+      initial_position : typically None, 
+      save_warmup - bool : pickle the warmup samples, 
+      load_warmup - bool : load the warmup state from pickle, 
+      jax_profile - bool : run JAX profiling,
+      hyper_param_alpha : float - The density of edges is prior distributed Uniform(alpha, beta) 
+      hyper_param_beta  : float - beta < alpha
+      hyper_param_thresholds : List[float] - an ordered list of mass spec thresholds to define composites. Also used to filter the input nodes based on a minimal score.
+      hyper_param_n_null_bins : The number of bins used to represent the null distribution. Modeling can be sensitive to this parameter as some binning produce infinities (TODO fix this). 
+      hyper_param_disconectivity_distance : int - only matters for composite_connectivity. The distance at which two nodes are considered disconnected  
+      hyper_param_max_distance : int - only matters for composite_connectivity. The number of Warshal algorithm iterations to perform when calculating the shortest paths presence distance matrix.
+      filter_kw : str - a flag sent to preprocess_data to define different sets of nodes for modeling
+    """
     model_output_dirpath = Path(model_output_dirpath)
     model_input_fpath= Path(model_input_fpath)
     preprocessor_output_dirpath = Path(preprocessor_output_dirpath)
@@ -69,9 +101,10 @@ def main(
     conditionally_mkdir(model_output_dirpath)
 
     #setup_logging(model_output_dirpath)
+    logger = logging.basicConfig(filename = str(model_output_dirpath / "_run.log"), filemode="w", level=logging.INFO)
 
     preprocess_inputs = preprocessor_protocol_dispatcher(preprocessor_protocol_name) 
-
+    logging.info("preprocess_inputs")
     preprocess_inputs(
             input_path = model_input_fpath,
             output_dir = preprocessor_output_dirpath,
@@ -80,22 +113,27 @@ def main(
             enforce_bait_remapping = True,
             filter_kw = filter_kw,
             )
-
+    logging.info("copy preprocessed inputs to modeling dir")
     # Copy the files from the preprocessed data to the modeling output dir
     shutil.copy(preprocessor_output_dirpath / "spec_table.tsv", model_output_dirpath / "spec_table.tsv")
     shutil.copy(preprocessor_output_dirpath / "composite_table.tsv", model_output_dirpath / "composite_table.tsv")
     shutil.copy("../notebooks/shuffled_apms_correlation_matrix.pkl",
                 model_output_dirpath / "shuffled_apms_correlation_matrix.pkl")
 
-    modeler_vars = {"lower_edge_prob" : hyper_param_alpha,
-                    "upper_edge_prob" : hyper_param_beta,
-                    "thresholds" : hyper_param_thresholds} 
+    modeler_vars = {"alpha" : hyper_param_alpha,
+                    "beta" : hyper_param_beta,
+                    "thresholds" : hyper_param_thresholds,
+                    "n_null_bins" : hyper_param_n_null_bins,
+                    "disconectivity_distance" : hyper_param_disconectivity_distance,
+                    "max_distance" : hyper_param_max_distance,
+                    } 
 
+    logging.info("writing modeler_vars.json")
     with open(str(model_output_dirpath / "modeler_vars.json"), "w") as f:
         json.dump(modeler_vars, f)
 
 
-
+    logging.info("enter _model_variation._main")
     mv._main(model_id = model_id,
              rseed = rseed,
              model_name = model_name,
@@ -111,12 +149,13 @@ def main(
              save_warmup = save_warmup,
              load_warmup = load_warmup,
              jax_profile = jax_profile)
-    
-    input_file = model_output_dirpath / f"{model_id}_{model_name}_{rseed}.pkl"
+    fbasename = f"{model_id}_{model_name}_{rseed}"
+    input_file = model_output_dirpath / f"{fbasename}.pkl"
+    logging.info("enter generate_sampling_figures")
     gsf._main(o = str(model_output_dirpath),
               i = input_file)
-
-    gbf.cullin_standard()
-
+    logging.info("enter generate_benchmark_figures")
+    gbf.cullin_standard(model_output_dirpath, fbasename)
+    logging.info("enter generate_analysis_figures")
     gaf.cullin_standard()
 
