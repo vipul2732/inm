@@ -2201,7 +2201,7 @@ def model23_ll_lp(model_data):
     R = d['apms_corr_flat']
     # Score negative correlations as if they were null
     R = np.clip(R, 0, 1.0)
-    R0 = d['apms_shuff_corr_all_flat']  # Use all the AP-MS data
+    R0 = d['apms_shuff_corr_flat']  # Use the local correlations 
     null_dist = Histogram(R0, bins=100).expand([M,]) # Normalized
     null_log_like = null_dist.log_prob(R)
     #INFINITY_FACTOR = 10 
@@ -2271,7 +2271,7 @@ def model23_se_sr(model_data):
     R = d['apms_corr_flat']
     # Score negative correlations as if they were null
     R = np.clip(R, 0, 1.0)
-    R0 = d['apms_shuff_corr_all_flat']  # Use all the AP-MS data
+    R0 = d['apms_shuff_corr_flat']  # Use the local correlations 
     null_dist = Histogram(R0, bins=100).expand([M,]) # Normalized
     null_log_like = null_dist.log_prob(R)
     #INFINITY_FACTOR = 10 
@@ -2410,7 +2410,7 @@ def model23_se_sr_sc(model_data):
     R = d['apms_corr_flat']
     # Score negative correlations as if they were null
     R = np.clip(R, 0, 1.0)
-    R0 = d['apms_shuff_corr_all_flat']  # Use all the AP-MS data
+    R0 = d['apms_shuff_corr_flat']  # Use the local correlations 
     null_dist = Histogram(R0, bins=100).expand([M,]) # Normalized
     null_log_like = null_dist.log_prob(R)
     #INFINITY_FACTOR = 10 
