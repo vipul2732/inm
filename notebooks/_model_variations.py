@@ -1230,7 +1230,7 @@ class Histogram(dist.Distribution):
             bin_indices = jnp.digitize(x, bin_edges) - 1
             bin_indices = jnp.clip(bin_indices, 0, n_bins - 1)
             # Add a small constant such that the log is always defined
-            NUMERICAL_CONSTANT = 1e-5
+            NUMERICAL_CONSTANT = 1e-9 
             return bin_heights[bin_indices] + NUMERICAL_CONSTANT
         bin_heights, bin_edges = jnp.histogram(a, bins=bins, density=density)
         bin_heights = jnp.array(bin_heights)
@@ -2065,6 +2065,13 @@ def data_from_spec_table_and_composite_table(data_path, ms_thresholds, sep="\t",
     spec_table = filter_minimal_ids(composite_table, spec_table)
     corr, shuff_corr, null_sc = calc_shuff_correlations(spec_table, rseed)
     #Calculate shuffled profile similiarties from all the data
+    assert np.alltrue(spec_table.values >= 0)
+    assert np.alltrue(corr <= 1)
+    assert np.alltrue(corr >= -1)
+    assert np.alltrue(shuff_corr <= 1)
+    assert np.alltrue(shuff_corr >= -1)
+    assert np.alltrue(null_sc.values >= 0)
+    
 
     base = { 
             "corr" : corr,
@@ -2347,7 +2354,7 @@ def model23_se_sc(model_data):
 def model23_SE_score(alpha, beta, M):
     z2edge_slope = 1_000
     # Representation and Scoring
-    u = numpyro.sample('pN', dist.Uniform(low=alpha, high=beta))
+    u = numpyro.sample('u', dist.Uniform(low=alpha, high=beta))
     mu = edge_prob2mu(u) # determinsitc transform
     numpyro.deterministic('mu', mu)
     z = numpyro.sample('z', dist.Normal(mu+0.5).expand([M,])) #(M, ) shifted normal, sigma must be 1. latent edges
@@ -2408,6 +2415,7 @@ def model23_unpack_model_data(model_data):
     # Score negative correlations as if they were null
     R = np.clip(R, 0, 1.0)
     R0 = d['apms_shuff_corr_flat']  # Use the local correlations 
+    R0 = d['apms_shuff_corr_all_flat']  # Use the Global 
     null_dist = Histogram(R0, bins=n_null_bins).expand([M,]) # Normalized
     null_log_like = null_dist.log_prob(R)
     disconectivity_distance = model_data['disconectivity_distance']
