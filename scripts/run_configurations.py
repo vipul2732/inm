@@ -27,6 +27,55 @@ class RunConfiguration(NamedTuple):
     hyper_param_max_distance : int 
     filter_kw : str 
 
+def from_template(template: RunConfiguration, **kwargs) -> RunConfiguration:
+    """
+    Initialize a RunConfiguration from a 'template' run configuration and keyword arguments.
+
+    e.g., mini_dev_run2 = from_template(mini_dev_run, rseed = 20, num_samples = 500)
+    """
+    if isinstancen(template, RunConfiguration):
+        template = template._asdict()  
+    assert isinstance(template, dict)
+    kwargs = locals()['kwargs']
+    for key in kwargs: 
+        template[key] = kwargs[key]
+    return RunConfiguration(**template)
+
+def from_template_list(template_list, **kwargs) -> RunConfiguration:
+    """
+    Initialize a run configuration from a list of partial run configurations.
+    Each partial run configuration is an dict or NamedTuple with the appropriate keywords.
+
+    Configurations are composed in the order they appear in the list, thus later configurations
+    overwrite earlier ones without checking. 
+
+    Optionally apply keyword arguments that appear at the end of the list
+    """
+    def to_dict(x):
+        if isinstance(x, tuple):
+            return x._asdict()
+        elif isinstance(x, dict):
+            return x
+        else:
+            raise TypeError(f"Expected dict or tuple, got {type(x)}")
+
+    if len(template_list) == 0:
+        raise ValueError("Expected non empty list")
+    temp = template_list.pop(0)
+    temp = to_dict(temp)
+    kwargs = locals()['kwargs']
+
+    def recursion(temp, template_list, kwargs):
+        if len(template_list) == 0:
+            return from_template_list(temp, **kwargs)
+        else:
+            temp2 = template_list.pop(0)
+            for key in temp2:
+                temp[key] = temp2[key]
+            return recursion(temp, template_list, kwargs)
+    return recursion(temp, template_list, kwargs)
+
+
 mini_dev_run = RunConfiguration(
    model_output_dirpath = "../results/mini_dev_run",
    model_input_fpath = "../data/cullin/1-s2.0-S1931312819302537-mmc2.xlsx",
@@ -223,4 +272,75 @@ se_sr_sc_all_10k =  RunConfiguration(
    hyper_param_max_distance = 11,
    filter_kw = "all",
 )
+
+tenK_template = dict(
+   model_input_fpath = "../data/cullin/1-s2.0-S1931312819302537-mmc2.xlsx",
+   preprocessor_protocol_name = "cullin_standard",
+   preprocessor_output_dirpath = "../data/processed/cullin/",
+   model_id = 0,
+   rseed = 13,
+   model_data = None,
+   num_warmup = 1_000,
+   num_samples = 10_000,
+   include_potential_energy = True,
+   include_mean_accept_prob = False,
+   include_extra_fields = True,
+   progress_bar = True,
+   initial_position = None,
+   save_warmup = True,
+   load_warmup = True,
+   jax_profile = False,
+   hyper_param_alpha = 0.02,
+   hyper_param_beta = 0.1,
+   hyper_param_thresholds = [.5, .6, .7, .8, .9, 1.],
+   hyper_param_n_null_bins = 80,
+   hyper_param_disconectivity_distance = 10,
+   hyper_param_max_distance = 11,
+)
+
+se_10k_wt = from_template(tenK_template,
+                          model_output_dirpath = "../results/se_10k_wt",
+                          model_name = "model23_se",
+                          filter_kw = "wt",)
+
+se_sr_10k_wt = from_template(tenK_template,
+                          model_output_dirpath = "../results/se_sr_10k_wt",
+                          model_name = "model23_se_sr",
+                          filter_kw = "wt",)
+
+se_sr_sc_10k_wt = from_template(tenK_template,
+                          model_output_dirpath = "../results/se_sr_sc_10k_wt",
+                          model_name = "model23_se_sr_sc",
+                          filter_kw = "wt",)
+
+se_10k_vif = from_template(tenK_template,
+                          model_output_dirpath = "../results/se_10k_vif",
+                          model_name = "model23_se",
+                          filter_kw = "vif",)
+
+se_sr_10k_vif  = from_template(tenK_template,
+                          model_output_dirpath = "../results/se_sr_10k_vif",
+                          model_name = "model23_se_sr",
+                          filter_kw = "vif",)
+
+se_sr_sc_10k_vif = from_template(tenK_template,
+                          model_output_dirpath = "../results/se_sr_sc_10k_vif",
+                          model_name = "model23_se_sr_sc",
+                          filter_kw = "vif",)
+
+
+se_10k_mock = from_template(tenK_template,
+                          model_output_dirpath = "../results/se_10k_mock",
+                          model_name = "model23_se",
+                          filter_kw = "mock",)
+
+se_sr_10k_mock  = from_template(tenK_template,
+                          model_output_dirpath = "../results/se_sr_10k_mock",
+                          model_name = "model23_se_sr",
+                          filter_kw = "mock",)
+
+se_sr_sc_10k_mock = from_template(tenK_template,
+                          model_output_dirpath = "../results/se_sr_sc_10k_mock",
+                          model_name = "model23_se_sr_sc",
+                          filter_kw = "mock",)
 
