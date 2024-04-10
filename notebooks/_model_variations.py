@@ -1987,6 +1987,14 @@ def model20_test6e_1b():
     numpyro.factor('bp1', s1)
 
 def data_from_spec_table_and_composite_table(data_path, ms_thresholds, sep="\t", rseed=0, calc_composites=True):
+    def validate_spec_table(spec_table):
+        r, c = spec_table.shape
+        assert r > 2, r
+        assert c > 2, c
+        assert np.alltrue(~np.isnan(spec_table))
+        assert np.alltrue(~np.isinf(spec_table))
+        assert np.alltrue(spec_table.values >= 0)
+        assert np.alltrue(spec_table.values <= 1000)
 
     def check_composite_table(composite_table):
         assert np.all(np.isreal(composite_table['MSscore'].values))
@@ -2062,11 +2070,19 @@ def data_from_spec_table_and_composite_table(data_path, ms_thresholds, sep="\t",
     
     # Get the composite, threshold pairs 
     spec_table = pd.read_csv(spec_path, sep=sep, index_col=0)
+    validate_spec_table(spec_table)
     spec_table = filter_minimal_ids(composite_table, spec_table)
+    validate_spec_table(spec_table)
     corr, shuff_corr, null_sc = calc_shuff_correlations(spec_table, rseed)
     #Calculate shuffled profile similiarties from all the data
+    r, c = spec_table.shape
+
+    assert r > 2, r
+    assert c > 2, c
     assert np.alltrue(spec_table.values >= 0)
-    assert np.alltrue(corr <= 1)
+    assert np.alltrue(~np.isnan(corr))
+    assert np.alltrue(~np.isinf(corr))
+    assert np.alltrue(corr <= 1) 
     assert np.alltrue(corr >= -1)
     assert np.alltrue(shuff_corr <= 1)
     assert np.alltrue(shuff_corr >= -1)
