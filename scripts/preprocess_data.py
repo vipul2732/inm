@@ -40,7 +40,6 @@ def bait_parser(x, strat):
 def remove_corrupt_rows(df, bait_colname, prey_colname, spoke_score_colname,):
    """Sometimes excel corrupts identifers to dates - we remove these without correction
    eg SEPT7"""
-
    sel = []
    for i, r in df.iterrows():
        val = isinstance(r[bait_colname], str) and isinstance(r[prey_colname], str)
@@ -238,8 +237,6 @@ def get_mapping_dict(xlsx_path):
     shutil.copy(fpath, to_path)
     return d
         
-
- 
 def get_spec_table_and_composites(xlsx_path,
                                   sheet_nums,
                                   header=0,
@@ -469,7 +466,11 @@ def filter_spec_table(spec_table, filter_kw = None, mode = "cullin") -> pd.DataF
         if mode == "cullin":
             if filter_kw:
                 mask = get_conditions_mask_cullin(spec_table, filter_kw)
-            return spec_table.loc[:, mask]
+                spec_table = spec_table.loc[:, mask]
+                # Drop rows that are all zero
+                not_zero_rows = np.sum(spec_table, axis=1) != 0
+                spec_table = spec_table[not_zero_rows]
+                return spec_table
         else:
             raise NotImplementedError(f"Filtering of other datasets not implemented. See get_conditions_mask_cullin")
     else:
