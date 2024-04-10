@@ -25,11 +25,12 @@ def main(o, i):
     _main(o, i)
 
 _base_style = ""
-_corr_matrix_style = ""
-_spec_counts_style = ""
-_histogram_style = ""
-_scatter_plot_style = ""
-_caterpillar_style = ""
+_corr_rc =   {"image.cmap" : "coolwarm"} 
+_matrix_rc = {"image.cmap" : "hot"}
+_spec_rc =   {"image.cmap" : "gist_gray"} 
+_histogram_rc = ""
+_scatter_plot_rc = ""
+_caterpillar_rc = ""
 
 
 def rc_context(rc = None, fname = None):
@@ -52,7 +53,8 @@ def _main(o, i):
         plt.savefig(str(o / i.stem) + f"_{name}_300.png", dpi=300)
         plt.savefig(str(o / i.stem) + f"_{name}_1200.png", dpi=1200)
         plt.close()
-
+    
+    @rc_context(rc = _spec_rc)
     def plot_spec_count_table(table, xlabel, ylabel, savename, title):
         fig, ax = plt.subplots()
         plt.matshow(np.array(table))
@@ -61,28 +63,39 @@ def _main(o, i):
         ax.set_title(title)
         plt.colorbar()
         save(savename)
-    
+
+    @rc_context(rc = _corr_rc) 
     def plot_correlation_matrix(matrix, xlabel, savename, title, ylabel = None):
         if ylabel is None:
             ylabel = xlabel
         fig, ax = plt.subplots()
-        plt.matshow(matrix)
+        cax = ax.matshow(matrix, vmin=-1, vmax=1)
+        plt.colorbar(shrink = 0.95, mappable = cax, ax = ax)
         ax.set_xlabel(xlabel)
         ax.set_ylabel(ylabel)
         ax.set_title(title)
         save(savename)
 
-    def plot_matrix(matrix, savename):
+    @rc_context(rc = _matrix_rc) 
+    def plot_matrix(matrix, xlabel, savename, title, ylabel = None):
+        if ylabel is None:
+            ylabel = xlabel
         fig, ax = plt.subplots()
-        plt.matshow(matrix)
-        plt.colorbar()
+        cax = ax.matshow(matrix, vmin=0, vmax=1)
+        plt.colorbar(shrink = 0.95, mappable = cax, ax = ax)
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
         save(savename)
 
-
-    def plot_histogram(x, xlabel, ylabel, title, savename, bins = 100, hist_range=(-1, 1),
+    def plot_histogram(x, xlabel, ylabel, savename, title = None, bins = 100, hist_range=(-1, 1),
                        text = None, textx = None, texty = None,): 
+            
+        if title is None:
+            N = len(x)
+            title = f"N={N}    {bins} bins"
         fig, ax = plt.subplots()
-        plt.hist(x, bins = bins, range = range)
+        plt.hist(x, bins = bins, range = hist_range)
         ax.set_title(title)
         ax.set_xlabel(xlabel)
         ax.set_ylabel(ylabel)
@@ -202,17 +215,8 @@ def _main(o, i):
             table = spec_table,
             xlabel = "node",
             ylabel = "condition",
+            title = "Spectral counts",
             savename = "spec_table",)
-
-    N = model_data['N']
-    R = mv.flat2matrix(R, N)
-    R = np.array(R)
-
-    # Mean Variance correlation plot
-    fig, ax = plt.subplots()
-    plt.matshow(R)
-    plt.colorbar()
-    save("reconstructed_apms_corr")
 
 
     with open(i, "rb") as f:
@@ -225,6 +229,7 @@ def _main(o, i):
     N = model_data['N']
     a = jax.nn.sigmoid((samples['z']-0.5)*1_000)
     mean = np.mean(a, axis=0) 
+    u = samples['u']
 
     # Plot a table of the average value of every composite N
     if "new_composite_dict_norm_approx" in model_data:
@@ -247,6 +252,8 @@ def _main(o, i):
 
     plot_matrix(
             matrix = np.array(A),
+            xlabel = "node",
+            title = "Average edge score",
             savename = "mean_adjacency",)
 
     # Energy histogram
@@ -328,6 +335,8 @@ def _main(o, i):
     """
     plot_matrix(
             matrix = np.array(V),
+            title = "Edge variance",
+            xlabel = "node",
             savename = "var_adjacency",)
 
     # Mean Variance correlation plot
@@ -339,9 +348,9 @@ def _main(o, i):
             ylabel = "Edge variance",
             savename = "mean_var_scatter",)
 
-    # Distribution of pN
+    # Distribution of u 
     plot_histogram(
-            x = pN,
+            x = u,
             xlabel = "$u$",
             ylabel = "Frequency",
             title = "Nuisance variable $u$",
