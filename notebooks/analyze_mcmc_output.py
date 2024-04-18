@@ -12,8 +12,6 @@ MCMCM Fields
 - potential energy
 
 Coordinates are transformed to an unconstrained space
-
-
 """
 
 from functools import partial
@@ -300,27 +298,65 @@ def roc_analysis(pred_array, threshold, reference, N_expected_edges):
     tpr = np.sum(tp) / np.sum(reference)
     ppr = np.sum(positive_predictions) / N_expected_edges
     return tpr, ppr 
-            
+    
+def calc_accuracy(edge_samples, reference, metric="auc_roc"):
+    n, m = edge_samples.shape
+    edge_samples = np.array(edge_samples, dtype=np.float32)
+    reference = np.array(reference, dtype=np.float32)
+    accuracy_array = np.zeros(n)
 
-def model14_traj2analysis(traj: str):
+    if metric == "auc_roc":
+        f = sklearn.metrics.roc_auc_score
+    elif metric == "ap":
+        f = sklearn.metrics.average_precision_score
+    else:
+        raise NotImplementedError
+    for i in range(n):
+        edges = edge_samples[i, :]
+        assert edges.shape == reference.shape, (edges.shape, reference.shape)
+        accuracy = f(reference, edges)
+        accuracy_array[i] = accuracy
+    return accuracy_array
+
+def calc_log_density(edge_samples, model, model_data):
+    n, m = edge_samples.shape
+    log_density_array = np.zeros(n)
+    for i in range(n):
+        edges = edge_samples[i, :]
+        log_density, _ = numpyro.infer.util.log_density(
+                model, (model_data,), {},
+                {'pT' : edges})
+        log_density_array[i] = log_density
+    return log_density_array
+
+
+def model14_traj2analysis(traj_path, model, model_data, reference=None,):
     """
     traj : str to a trajectory pickle file. e.g, 0_model14_0.pkl
-    
     Output:
       saves an analysis_file. 0_model14_0_analysis.pkl
     """
-    direct, cocomplex = get_auc_model14(traj)
-    
-    analysis = {
-                "direct_auc" : direct,    # Area under curve for each model
-                "cocomplex_auc" : cocomplex, # Area under curve for each model
-    }
-    
-    top_analysis = {"top_direct_auc" : max(direct),
-                    "top_cocomplex_auc" : max(cocomplex),
-                    "lowest_potential_energy" : min(traj['extra_fields']['potential_energy']),
-    }
+    with open(traj_path, "rb") as f:
+        d = pkl.load(f)
+    score_array = np.array(d['extra_fields']['potential_energy'])
+    edge_samples = d['samples']['pT']
+    if reference is not None:
+        accuracy_array = calc_accuracy(edge_samples, reference) 
+        log_density_array = calc_log_density(edge_samples, model, model_data)
+    return {"potential_energy" : score_array,
+            "accuracy" : accuracy_array,
+            "log_density": log_density_array}
 
+def model14_ap_score(traj_path, model, model_data, reference=None):
+    with open(traj_path, "rb") as f:
+        d = pkl.load(f)
+    score_array = np.array(d['extra_fields']['potential_energy'])
+    edge_samples = d['samples']['pT']
+    if reference is not None:
+        ap = calc_accuracy(edge_samples, reference, metric='ap')
+    return {"AP" : ap} 
+           
+           
 
 
 
@@ -329,13 +365,13 @@ def model14_traj2analysis(traj: str):
 @click.option("--analysis-name" ,help="a name for the analysis")
 @click.option("--model-name")
 @click.option("--fig-dpi", type=int, default=300)
+@click.option("--dir-name", type=str)
 def main(trajectory_name, analysis_name, fig_dpi, model_name):
-    _main(trajectory_name, analysis_name, fig_dpi, model_name)
+    _main(trajectory_name, analysis_name, fig_dpi, model_name, dir_name)
 
-def _main(trajectory_name, analysis_name, fig_dpi, model_name):
-    dir_name = analysis_name + "__" + trajectory_name
-    assert not Path(dir_name).is_dir()
-    os.mkdir(dir_name) 
+def _main(trajectory_name, analysis_name, fig_dpi, model_name, dir_name):
+    prefix = analysis_name + "__" + trajectory_name
+    save_path = Path(dir_name) / prefix
 
     with open(trajectory_name + ".pkl", "rb") as f:
         d = pkl.load(f)
@@ -343,15 +379,14 @@ def _main(trajectory_name, analysis_name, fig_dpi, model_name):
     plt.hist(energy, bins=50)
     plt.xlabel("score")
     plt.ylabel("frequency")
-    plt.savefig(dir_name + "/potential_energy_hist.png", dpi=fig_dpi)
+    plt.savefig(str(save_path) + "_potential_energy_hist.png", dpi=fig_dpi)
     plt.close()
 
     x = np.arange(len(energy))
     plt.plot(x, energy, 'k.')
     plt.ylabel("score")
     plt.xlabel("step")
-    plt.savefig(dir_name + "/caterpillar.png", dpi=fig_dpi)
+    plt.savefig(str(save_path) + "_caterpillar.png", dpi=fig_dpi)
     
-
 if __name__ == "__main__":
     main()
