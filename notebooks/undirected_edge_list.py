@@ -48,6 +48,11 @@ class UndirectedEdgeList:
         u = UndirectedEdgeList()
         u.update_from_df(df)
         return u
+    def expanded_difference(self, other):
+        """
+        The difference in edge values between self and other. 
+        """
+        ...
  
     def read_csv(self, path,  a_colname="auid", b_colname="buid", edge_value_colname = None, sep="\t"):
         _read_csv(u=self, path=path, a_colname=a_colname, b_colname=b_colname, sep=sep)
@@ -62,11 +67,13 @@ class UndirectedEdgeList:
             _reindex(self, reindexer, enforce_coverage = enforce_coverage)
         else:
             _all_vs_all_reindex(self, reindexer, enforce_coverage = enforce_coverage)
-    def to_csv(self, path, a_colname, b_colname, index, sep, header, edge_colname="value"):
+    def to_csv(self, path, a_colname, b_colname, index, sep, header, edge_colname="value", sort_values = False):
         if self.edge_values:
             df = pd.DataFrame({a_colname : self.a_nodes, b_colname : self.b_nodes, edge_colname : self.edge_values})
         else:
             df = pd.DataFrame({a_colname : self.a_nodes, b_colname : self.b_nodes})
+        if sort_values:
+            df = df.sort_values(edge_colname)
         df.to_csv(path, sep=sep, index = index, header = header)
     def update_properties(self):
         _update_properties(self)
@@ -122,6 +129,8 @@ class UndirectedEdgeList:
 
 def _update_from_df(u, df,a_colname="auid", b_colname="buid", edge_value_colname = None,
                     multi_edge_value_merge_strategy = None): 
+    if edge_value_colname:
+        assert isinstance(multi_edge_value_merge_strategy, str), f"Must specify a strategy for merging duplicate edges: 'max', 'unique'"   
     u.a_nodes = set(df[a_colname].values)
     u.b_nodes = set(df[b_colname].values)
     u.nodes = u.a_nodes.union(u.b_nodes)
@@ -135,8 +144,12 @@ def _update_from_df(u, df,a_colname="auid", b_colname="buid", edge_value_colname
         a = r[a_colname]
         b = r[b_colname]
         if a != b: # No self edges
-            assert isinstance(a, str)
-            assert isinstance(b, str)
+            if not isinstance(a, str):
+                print(f"{(a, type(a))}")
+                raise ValueError
+            if not isinstance(b, str):
+                print(f"{(b, type(b))}")
+                raise ValueError
             edge = frozenset((a, b)) 
             if edge not in seen_edges:
                 if edge_value_colname:
@@ -149,6 +162,8 @@ def _update_from_df(u, df,a_colname="auid", b_colname="buid", edge_value_colname
                 if edge_value_colname:
                     if multi_edge_value_merge_strategy == "max":
                         edge_value = max(r[edge_value_colname], seen_edges[edge])
+                    elif multi_edge_value_merge_strategy == "unique":
+                        assert edge not in seen_edges, "expected unqiue edges"
                     else:
                         raise NotImplementedError
             seen_edges[edge] = edge_value
@@ -159,12 +174,12 @@ def _update_from_df(u, df,a_colname="auid", b_colname="buid", edge_value_colname
         vals = []
         for i, a in enumerate(anodes):
             b = bnodes[i]
-            assert a != b
+            assert a != b, (a, b)
             edge = frozenset((a, b))
             vals.append(seen_edges[edge])
-        assert len(vals) == len(anodes)
+        assert len(vals) == len(anodes), (len(vals), len(anodes))
         u.edge_values = vals 
-    assert len(anodes) == len(bnodes)
+    assert len(anodes) == len(bnodes), (len(anodes), len(bnodes))
     u.a_nodes = anodes 
     u.b_nodes = bnodes 
     u.update_properties()
@@ -196,7 +211,7 @@ def _reindex(u, reindexer, enforce_coverage):
     """
     if isinstance(reindexer, dict):
         if enforce_coverage:
-            assert len(set(reindexer.keys()).union(u.nodes)) == u.n_nodes
+            assert len(set(reindexer.keys()).union(u.nodes)) == u.n_nodes, "coverage failed to enforce"
         anew = []
         bnew = []
         if enforce_coverage:
