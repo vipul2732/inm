@@ -78,7 +78,7 @@ def main():
     now = datetime.datetime.now()
     formatted_date = now.strftime("%Y_%m_%d_%H_%M")
     log_fname = Path(args.o) / (formatted_date + "__prepare_modeling_inputs.log") 
-    logging.basicConfig(filename=str(log_fname))
+    logger = logging.getLogger(__name__)
 
     # Validate args
     validate_args(args)
