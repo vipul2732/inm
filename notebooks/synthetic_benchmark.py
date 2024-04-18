@@ -71,6 +71,20 @@ import math
 import _model_variations as mv
 import pickle as pkl
 import xarray as xr
+import numpyro
+from numpyro.infer import (
+    MCMC,
+    NUTS,
+    init_to_value,
+    init_to_uniform,
+    )
+import click
+import pandas as pd
+import matplotlib.pyplot as plt
+from typing import List 
+from itertools import combinations, product
+from pathlib import Path
+
 
 _test_key = jax.random.PRNGKey(0)
 
@@ -167,9 +181,6 @@ def get_bait_prey_network(rng_key, n_prey, n_bait: int, d_crit,
                            bait_idx_array)
     return Aconnected, bait_idx_array, prey_idx
      
-
-
-
 def data_from_network_model14_rng(rng_key, A, mu=0.23, sigma=0.21, ntest=3005):
     """
     Assume a binary matrix input A 
@@ -199,4 +210,135 @@ def data_from_network_model14_rng(rng_key, A, mu=0.23, sigma=0.21, ntest=3005):
     Samples = Samples + Samples.T
     return Samples
 
+def composite_connectivity_benchmark(analysis_name, Ns: List[int], Cms: List[int], num_samples=2000, num_warmup=500):
+    """
+    1. Vary the network size N and the size of the smallest composite 
+    2. Run inference
+    3. Calculate the total posterior probability mass of solutions with a edge
+       weight above Cm_N - 1
+    4. Plot and save results 
+    """
+    assert len(Ns) == len(Cms), "lists aren't of equal size"
+    n = len(Ns)
+    x = np.array(Cms) 
+    y1 = np.zeros(n)
+    y2 = np.zeros(n)
+    y_med = np.zeros(n)
+    y_std = np.zeros(n)
+    y_med_null = np.zeros(n)
+    y_std_null = np.zeros(n)
+    for i, cm in enumerate(Cms):
+        cm = np.arange(cm)
+        N = Ns[i]
+        key = jax.random.PRNGKey(13)
+        nuts = NUTS(mv.model20_test6f)
+        mcmc = MCMC(nuts,num_warmup=num_warmup, num_samples=num_samples)
+        mcmc.run(key, N, cm, extra_fields=('potential_energy',))
+        samples = mcmc.get_samples()
+        sum_of_edges = np.sum(samples['e'], axis=1)
+        med = np.mean(sum_of_edges) 
+        std = np.std(sum_of_edges)
+        pp = np.sum(sum_of_edges >= len(cm)-1) / num_samples
+        nuts = NUTS(mv.model20_test6f_null)
+        mcmc = MCMC(nuts,num_warmup=num_warmup, num_samples=num_samples)
+        mcmc.run(key, N, cm, extra_fields=('potential_energy',))
+        samples = mcmc.get_samples()
+        sum_of_edges = np.sum(samples['e'], axis=1)
+        pp_null = np.sum(sum_of_edges >= len(cm)-1) / num_samples
+        med_null = np.mean(sum_of_edges) 
+        std_null = np.std(sum_of_edges)
+        y1[i] = pp
+        y2[i] == pp_null
+        y_med[i] = med
+        y_std[i] = std
+        y_med_null[i] = med_null
+        y_std_null[i] = std_null
+    df = pd.DataFrame({"N": Ns, "Cms": Cms, "y1": y1, "y_null": y2, "z_med": y_med,
+                       "z_std": y_std, "z_null_med": y_med_null, "z_std_null": y_std_null})
+    if ".tsv" not in analysis_name:
+        analysis_name = analysis_name + ".tsv"
+    df.to_csv(analysis_name, sep="\t")
+    _composite_connectivity_benchmark_plot(df)
+
+def _composite_connectivity_benchmark_plot(df):
+    fig, ax = plt.subplots()
+    ax.plot(df['Cms'], df['y1'], 'k.', label="Composite")
+    ax.plot(df['Cms'], df['y_null'], 'r.', label="Null")
+    ax.set_xlabel("N Composite")
+    ax.set_ylabel("Posterior probability Sum of Edge Weights >= x-1")
+    ax.legend()
+    plt.savefig(analysis_name.strip(".tsv") + ".png", dpi=300)
+    plt.close()
+    fig, ax = plt.subplots()
+    ax.errorbar(df['Cms'], df['z_med'], yerr=df['z_std'], fmt='k.', label="Composite")
+    ax.errorbar(df['Cms'], df['z_null_med'], yerr=df['z_std_null'], fmt='r.', label="Null")
+    ax.set_xlabel("N Composite")
+    ax.set_ylabel("Sum of Edge Weights")
+    ax.legend()
+    plt.savefig(analysis_name.strip(".tsv") + "_sum.png", dpi=300)
+    plt.close()
+
+
+def run_multiple_benchmarks(N=None,
+                            edge_prob=None,
+                            n_bait=3,
+                            scores=None,
+                            overwrite_existing=False,
+                            suffix="",
+                            remove_dirs=False,
+                            static_seed=0,
+                            d_crit=15,
+                            max_path_length = 17,
+                            ):
+    """
+    The solutions must be the same
+    N: 3, 10, 50, 100, 500 
+    Edge Density: 0.04, 0.13, 0.48, 0.97 
+    Baits : 3
+    Likelihood Only
+    Prior Only
+    Prior & Likelihood
+    Single Composite
+    - Composite Hierarchy
+    - Overlapping vs non overlapping 
+    For the chosen amount of sampling X we calculate
+    1. Top Accuracy per chain +/- s.d 
+    2. Top precision per chain +/- s.d 
+    3. Accuracy of average network, precision of average network
+    Generate the synthetic data 
+    Default Parameters Values
+    d_crit 
+    """
+    assert d_crit < max_path_length - 1
+    assert n_bait > 0
+    if N is None:
+        N = [4, 9, 50, 100, 500]
+    for i in N:
+        assert i > 2
+    if edge_prob is None:
+        edge_prob = [0.04, 0.13, 0.48, 0.97]
+    for i in edge_prob:
+        assert i < 1
+        assert i > 0
+    if scores is None:
+        scores = ["bp_lp", "lbh_ll", "lbh_ll__bp_lp"]
+    all_tests = list(product(N, edge_prob, scores))
+    paths = []
+    for test in all_tests:
+        path_str = str(test[0]) + "_" + str(test[1]) + "_" + str(test[2]) + f"_{n_bait}" + suffix
+        path = Path(path_str)
+        paths.append(path)
+        if not path.is_dir():
+            path.mkdir()
+        if remove_dirs:
+            path.rmdir()
+    static_key = jax.random.PRNGKey(static_seed)
+    # Generate the synthetic data for each example
+    for i, test in enumerate(all_tests):
+        #1 Generate the ground truth network
+        N, prob, score_key = test
+        Aref, bait_idx, prey_idx = get_bait_prey_network(static_key,N,n_bait,d_crit,prob, max_path_length)   
+        #2 Generate the ground truth data
+        data = data_from_network_model14_rng(static_key, Aref) 
+    return Aref, bait_idx, prey_idx, data
 
