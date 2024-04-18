@@ -11,6 +11,7 @@ Edge ordering
 u = EdgeList
 """
 
+import click
 import pandas as pd
 from pathlib import Path
 import pickle as pkl
@@ -90,7 +91,7 @@ def get_humap_medium_reference():
     u.update_from_df(df)
     return u
 
-def get_humap_high_reference():
+def get_humap_high_reference() -> UndirectedEdgeList:
     df = pd.read_csv("../data/processed/references/humap2_ppis_high.tsv", sep="\t")
     u = UndirectedEdgeList()
     u.update_from_df(df)
@@ -415,21 +416,23 @@ def adjacency2edgelist_df(A, node_idx2name):
             b.append(node_idx2name[j])
     return pd.DataFrame({"a" : a, "b" : b, "w": w})
                         
-def model23_results2edge_list(modeling_output_dirpath):
+def model23_results2edge_list(modeling_output_dirpath, fbasename, discard_first_n=0):
     """
     1. Path to modeling results
     2. Get an edge score as average across all modeling runs
     """
-    fname = "0_model23_ll_lp_13.pkl"
+    fname = f"{fbasename}.pkl"
     with open(modeling_output_dirpath / fname, "rb") as f:
         d = pkl.load(f)
-    with open(modeling_output_dirpath / "0_model23_ll_lp_13_model_data.pkl", "rb") as f:
+    with open(modeling_output_dirpath / f"{fbasename}_model_data.pkl", "rb") as f:
         model_data = pkl.load(f)
     # Plot the average adjacency matrix  
     samples = d['samples']
     nsamples, M = samples['z'].shape
     N = model_data['N']
-    a = jax.nn.sigmoid((samples['z']-0.5)*1_000)
+    z = samples['z']
+    z = z[discard_first_n:, :]
+    a = jax.nn.sigmoid((z-0.5)*1_000)
     mean = np.mean(a, axis=0) 
     A = mv.flat2matrix(mean, N)
     a = []
@@ -479,7 +482,13 @@ def compare_and_save():
 
     ...
 
-def cullin_standard(model_output_dirpath):
+def get_filter10_pred(model_output_dirpath: Path) -> UndirectedEdgeList:
+    df = pd.read_csv(model_output_dirpath / "average_predicted_edge_scores_filter10.tsv", sep="\t")
+    u = UndirectedEdgeList()
+    u.update_from_df(df, a_colname="auid", b_colname="buid", edge_value_colname="w", multi_edge_value_merge_strategy="max")
+    return u
+
+def cullin_standard(model_output_dirpath, fbasename):
     references = dict( 
         humap2_high = get_humap_high_reference(),
         humap2_medium = get_humap_medium_reference(),
@@ -490,8 +499,13 @@ def cullin_standard(model_output_dirpath):
     )
     
     predictions = dict(
-        average_edge = model23_results2edge_list(model_output_dirpath),
-        cullin_max_saint = get_cullin_saint_scores_edgelist()
+        average_edge = model23_results2edge_list(model_output_dirpath, fbasename),
+        cullin_max_saint = get_cullin_saint_scores_edgelist(),
+        average_edge_after2k = model23_results2edge_list(
+            model_output_dirpath,
+            fbasename,
+            discard_first_n = 2000),
+        average_edge_filter10 = get_filter10_pred(model_output_dirpath)
     )
 
     plotter = tpr_ppr.PprTprPlotter()
@@ -526,7 +540,12 @@ def cullin_standard(model_output_dirpath):
                        "a_gene" : [inv_reindexer[k] for k in u.a_nodes],
                        "b_gene" : [inv_reindexer[k] for k in u.b_nodes],
                        "w" : u.edge_values})
-    df.to_csv("average_predicted_edge_scores.tsv", sep="\t", index=None)
+    df = df.sort_values("w", ascending=False)
+    df.to_csv(str(model_output_dirpath / "average_predicted_edge_scores.tsv"), sep="\t", index=None)
+
+    # Calculate the node intersection table for all nodes
+
+    # Calculate the edge intersection table for all edges
 
 def main():
     outdir = "../results/generate_benchmark_figures/"
@@ -556,6 +575,17 @@ def main():
     # Create a SAINT Auc Table
     df = pd.DataFrame({"auc" : auc, "shuff_auc" : shuff_auc, "detla_auc" : delta_auc}, index=names)
     df.to_csv(outdir + "cullin_saint_max_summary_table.tsv", sep="\t")
+
+@click.command()
+@click.option("--i")
+@click.option("--fbasename")
+def main(i, fbasename):
+    _main(i, fbasename)
+
+def _main(i, fbasename):
+    i = Path(i)
+    cullin_standard(i, fbasename)
+
 
 
 
