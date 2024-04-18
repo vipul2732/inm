@@ -1,10 +1,21 @@
+def interact():
+    import code
+    code.InteractiveConsole(locals=globals()).interact()
+
 from _BSASA_functions import *
+from _BSASA_imports import *
+
 from types import SimpleNamespace
 import plot_data
+
+# Globals 
+SAVE_CHAIN_MAPPING = True
+LOAD_CHAIN_MAPPING_FROM_PKL = False
 
 # Objects for returning user info
 pad = notepad.NotePad()
 # init bsasa_reference
+
 bsasa_reference = SimpleNamespace()
 bsasa_reference.df = init_bsasa_ref()
 pad.write(("Loading Buried Solvent Accessible Surface Area Reference",
@@ -79,7 +90,7 @@ pad.write(("percent matched balance", dataset_balance_matched * 100))
 auth_prey_gene_and_uid = SimpleNamespace()
 auth_prey_gene_and_uid.df = pd.read_csv("../table1.csv")
 pad.write(("Table 1: Maps PreyGene to Uniprot ID",
-           auth_prey_gene_and_uid.shape))
+           auth_prey_gene_and_uid.df.shape))
 auth_prey_gene_and_uid.gene2uid = {
         key:val for key, val in auth_prey_gene_and_uid.df.values}
 auth_prey_gene_and_uid.uid2gene = {
@@ -96,47 +107,61 @@ pad.write("-- PDBs in BSASA --")
 pad.write((f"4n9f", '4n9f' in bsasa_reference.pdb_set))
 
 #summarize_col(bsasa_ref, 'bsasa_lst')
-bsasa_reference.interaction_set = init_interaction_set(bsasa_ref)
+bsasa_reference.interaction_set = init_interaction_set(bsasa_reference.df)
 #n_possible_interactions = math.comb(uid_total, 2)
 #n_possible_found_interactions = math.comb(len(prey_set), 2)
 #npdbs_per_interaction = init_npdbs_per_interaction(bsasa_ref, interaction_set)
 # Filter by percent sequence identity
 # Map PDB chains to Uniprot Queries
 
-chain_mapping = SimpleNamespace()
-chain_mapping.df  = pd.read_csv("../significant_cifs/chain_mapping_all.csv")
-pad.write(("Loading chain mapping", chain_mapping.df.shape))
-sel = chain_mapping.df['bt_aln_percent_seq_id'] >= 0.3
-chain_mapping.df = chain_mapping.df[sel]
-pad.write(("Chains over 30% sequence identity", chain_mapping.shape))
-# How many pdb ids and uids are there?
+##chain_mapping = SimpleNamespace()
+##chain_mapping.df  = pd.read_csv("../significant_cifs/chain_mapping_all.csv")
+##pad.write(("Loading chain mapping", chain_mapping.df.shape))
+##sel = chain_mapping.df['bt_aln_percent_seq_id'] >= 0.3
+##chain_mapping.df = chain_mapping.df[sel]
+##pad.write(("Chains over 30% sequence identity", chain_mapping.df.shape))
+### How many pdb ids and uids are there?
+##
+##chain_mapping.pdb_set = set(chain_mapping.df['PDBID'].values)
+##chain_mapping.uid_set = set(chain_mapping.df['QueryID'].values)
+##pad.write(("N PDBS in chain mapping",  len(chain_mapping.pdb_set)))
+##pad.write(("N UIDS in chain mapping",  len(chain_mapping.uid_set)))
+##
+##chain_mapping.complexes = init_complexes(
+##        chain_mapping.pdb_set, chain_mapping.df)
+##
+##chain_mapping.cocomplexes = SimpleNamespace()
+##
+##chain_mapping.cocomplexes.pdb_id__uid_fset  = init_cocomplexes(chain_mapping.complexes)
+##pad.write(("N cocomplexes", len(chain_mapping.cocomplexes.pdb_id__uid_fset.keys())))
+##chain_mapping.cocomplexes.edge_id__cocomplex_edge = init_cocomplex_edge_id__cocomplex_edge(
+##        chain_mapping.cocomplexes.pdb_id__uid_fset)
+##pad.write(("N cocomplex edges",
+##           len(chain_mapping.cocomplexes.edge_id__cocomplex_edge.keys())))
+##
+##chain_mapping.cocomplexes.uid_set = init_cocomplex_uid_set(chain_mapping.cocomplexes.pdb_id__uid_fset)
+##
+##
+##
+##
+##
+### Long Running Cell
+##chain_mapping.cocomplexes.pairs = list(combinations(chain_mapping.cocomplexes.uid_set, 2))
+##
+##chain_mapping.cocomplexes.df = init_cocomplex_df(
+##        chain_mapping.cocomplexes.pairs, chain_mapping.cocomplexes.pdb_id__uid_fset)
+##
+##pad.write(("Co-complex df", chain_mapping.cocomplexes.df.shape))
 
-chain_mapping.pdb_set = set(chain_mapping.df['PDBID'].values)
-chain_mapping.uid_set = set(chain_mapping.df['QueryID'].values)
-pad.write(("N PDBS in chain mapping",  len(chain_mapping.pdb_set)))
-pad.write(("N UIDS in chain mapping",  len(chain_mapping.uid_set)))
+if LOAD_CHAIN_MAPPING_FROM_PKL:
+    with open("chain_mapping.pkl", "rb") as f:
+        chain_mapping = pkl.load(f)
+else:
+    chain_mapping, pad = init_chain_mapping(pad)
 
-chain_mapping.complexes = init_complexes(
-        chain_mapping.pdb_set, chain_mapping.df)
-
-chain_mapping.cocomplexes = SimpleNamespace()
-
-chain_mapping.cocomplexes.pdb_id__uid_fset  = init_cocomplexes(chain_mapping.complexes)
-pad.write(("N cocomplexes", len(chain_mapping.cocomplexes.pdb_id__uid_fset.keys())))
-chain_mapping.cocomplexes.edge_id__cocomplex_edge = init_cocomplex_edge_id__cocomplex_edge(
-        chain_mapping.cocomplexes.pdb_id__uid_fset)
-pad.write(("N cocomplex edges",
-           len(chain_mapping.cocomplexes.edge_id__cocomplex_edge.keys())))
-
-chain_mapping.cocomplexes.uid_set = init_cocomplex_uid_set(chain_mapping.cocomplexes.pdb_id__uid_fset)
-
-# Long Running Cell
-chain_mapping.cocomplexes.pairs = list(combinations(chain_mapping.cocomplexes.uid_set, 2))
-
-chain_mapping.cocomplexes.df = init_cocomplex_df(
-        chain_mapping.cocomplexes.pairs, chain_mapping.cocomplexes.pdb_id__uid_fset)
-
-pad.write(("Co-complex df", chain_mapping.cocomplexes.df.shape))
+if SAVE_CHAIN_MAPPING:
+    with open("chain_mapping.pkl", "wb") as f:
+        pkl.dump(chain_mapping, f)
 
 cullin_data = SimpleNamespace()
 df1, df2, df3 = init_dfs()
@@ -163,11 +188,10 @@ df_new, control_mappings  = update_df_new_based_on_assumed_control_mappings(cull
 
 cullin_data.df_new = df_new.copy()
 cullin_data.control_mappings = control_mappings.copy()
+
 del df_new
 del control_mappings
 
-pad.write(("Assumed CBFB control mapping", cullin_data.control_mappings["cbfb"]))
-pad.write(("Assumed CUL5 control mapping", cullin_data.control_mappings["cul5"]))
 pad.write(("Assumed ELOB control mapping", cullin_data.control_mappings["elob"]))
 
 # Removing extra counts
@@ -186,6 +210,12 @@ cullin_data.df_new = update_df_new_with_tryptic_sites(cullin_data.df_new, fasta.
     fasta.uid2seq)
 pad.write(("DF NEW - Add sequence info", cullin_data.df_new.shape))
 
+SAVE_DF_NEW = True
+
+if SAVE_DF_NEW:
+    with open("df_new.pkl", "wb") as f:
+        pkl.dump(cullin_data.df_new, f)
+
 # Error
 # 
 df_new, cocomplex_ref_pairs, direct_ref_pairs = init_interactions(
@@ -197,10 +227,14 @@ cullin_data.df_new = df_new.copy()
 bsasa_reference.cocomplex_ref_pairs = cocomplex_ref_pairs.copy()
 bsasa_reference.direct_ref_pairs = direct_ref_pairs.copy() 
 
+PICKLE_DF_NEW = True
+if PICKLE_DF_NEW:
+    with open("df_new.pkl", "wb") as f:
+        pkl.dump(df_new, f)
+
 del df_new
 
-
-pad.write(("DF NEW - Init interactions", df_new.shape))
+pad.write(("DF NEW - Init interactions", cullin_data.df_new.shape))
 bait = ['CBFB', 'ELOB', 'CUL5', 'LRR1']
 
 cullin_data.prey_set = sorted(list(set(cullin_data.df_new.index)))
@@ -224,6 +258,12 @@ pad.write(("Tensor Control", tensorC.shape))
 spectral_count_xarray = init_spectral_count_xarray(
         tensorR, tensorC)
 
+import pickle as pkl
+save_spectral_count_xarray = True
+if save_spectral_count_xarray:
+    with open("spectral_count_xarray.pkl", "wb") as f:
+        pkl.dump(spectral_count_xarray, f)
+
 pad.write(("Spectral Counts", spectral_count_xarray.shape))
 
 cullin_data.preyname2uid = {
@@ -231,14 +271,17 @@ cullin_data.preyname2uid = {
 cullin_data.uid2preyname = {
         val:key for key,val in cullin_data.preyname2uid.items()}
 
-chain_mapping.cocomplex_df = update_cocomplex_df_with_PreyXNames(
-        chain_mapping.cocomplex_df, cullin_data.uid2preyname)
+chain_mapping.cocomplexes.df = update_cocomplex_df_with_PreyXNames(
+        chain_mapping.cocomplexes.df, cullin_data.uid2preyname)
 
 cocomplex_matrix = init_cocomplex_matrix(
-        cullin_data.nprey,
-        cullin_data.preyu,
-        cullin_data.preyv,
-        chain_mapping.cocomplexes.df)
+        nprey = cullin_data.nprey,
+        preyu = cullin_data.preyu,
+        preyv = cullin_data.preyv,
+        cocomplex_df = chain_mapping.cocomplexes.df)
+
+chain_mapping.cocomplexes.matrix = cocomplex_matrix.copy()
+#del cocomplex_matrix
 
 bsasa_reference.df = update_bsasa_ref_with_PreyXNames(bsasa_reference.df, cullin_data.uid2preyname)
 # Long running: 2 min
@@ -252,26 +295,30 @@ ds = xr.Dataset({'cocomplex': cocomplex_matrix,
                  'CRL_E':tensorR,
                  'CRL_C':tensorC})
 
+SAVE_DS = True
+if SAVE_DS:
+    with open("ds.pkl", "wb") as f:
+        pkl.dump(ds, f)
+
 # Append Cocomplex labels to DataFrame
 cullin_data.df_new = update_df_new_PDB_COCOMPLEX(cullin_data.df_new, ds)
-pad.write(("Add cocomplex labels to DF NEW", df_new.shape))
+pad.write(("Add cocomplex labels to DF NEW", cullin_data.df_new.shape))
 
 # Benchmark cos sim on cocomplex reference
-
 cos_sim_matrix, mag_v = cosin_sim_df2cos_sim_matrix(
         spectral_counts2cosin_sim_df(spectral_count_xarray))
-
 
 # Benchmark cos sim on direct reference
 direct_benchmark = SimpleNamespace()
 direct_benchmark.reference = SimpleNamespace()
-direct_benchmark.reference.matrix = (direct_matrix > 1).copy()
+direct_benchmark.reference.matrix = (direct_matrix > 0).copy()
 direct_benchmark.prediction = SimpleNamespace()
 direct_benchmark.prediction.cosine_similarity = SimpleNamespace()
 direct_benchmark.prediction.cosine_similarity.matrix = cos_sim_matrix
 direct_benchmark.reference.matrix = direct_benchmark.reference.matrix.sel(
         preyu=direct_benchmark.prediction.cosine_similarity.matrix.preyu,
         preyv=direct_benchmark.prediction.cosine_similarity.matrix.preyv,)
+
 direct_benchmark.reference.n_edges = np.sum(np.tril(
     direct_benchmark.reference.matrix, k=-1))
 direct_benchmark.reference.n_possible_edges = math.comb(
@@ -288,6 +335,9 @@ direct_benchmark.prediction.cosine_similarity.ppr = (
     direct_benchmark.prediction.cosine_similarity.pps /
     direct_benchmark.reference.n_possible_edges
     )
+del pps
+del tps
+
 direct_benchmark.prediction.cosine_similarity.tpr = (
     direct_benchmark.prediction.cosine_similarity.tps /
     direct_benchmark.reference.n_edges
@@ -299,10 +349,226 @@ direct_benchmark.prediction.cosine_similarity.auc = (
         )
     )
 
+direct_benchmark.prediction.cosine_similarity.auc = np.round(
+   direct_benchmark.prediction.cosine_similarity.auc, 2)
+
+SAVE_DIRECT_BENCHMARK = True
+if SAVE_DIRECT_BENCHMARK:
+    with open("direct_benchmark.pkl", "wb") as f:
+        pkl.dump(direct_benchmark, f)
+
+save_direct_benchmark_fig = False
+if save_direct_benchmark_fig:
+    fig, ax = plt.subplots()
+    ax.set_title("Direct Interaction Benchmark")
+    ax.plot(direct_benchmark.prediction.cosine_similarity.ppr,
+            direct_benchmark.prediction.cosine_similarity.tpr,
+            label=f"cosine similarity score: AUC {direct_benchmark.prediction.cosine_similarity.auc}")
+    xlabel = ("Positive predictive rate"
+        f" (N={h(direct_benchmark.reference.n_possible_edges)})"
+    )
+    ylabel = ("True positive rate"
+        f" (N={h(direct_benchmark.reference.n_edges)})"
+    )
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.legend()
+    fig.savefig("direct_benchmark.png", dpi=1200)
+    plt.close()
+
 # Benchmark cos sim on cocomplex reference
 cocomplex_benchmark = SimpleNamespace()
+cocomplex_benchmark.reference = SimpleNamespace()
+cocomplex_benchmark.reference.matrix = (chain_mapping.cocomplexes.matrix > 0).copy() 
 
-cocomplex_benchmark.reference_matrix = cocomplex_matrix
+cocomplex_benchmark.prediction = SimpleNamespace()
+cocomplex_benchmark.prediction.cosine_similarity = SimpleNamespace()
+cocomplex_benchmark.prediction.cosine_similarity.matrix = cos_sim_matrix
+
+cocomplex_benchmark.reference.matrix = (
+        cocomplex_benchmark.reference.matrix.sel(
+            preyu=cocomplex_benchmark.prediction.cosine_similarity.matrix.preyu,
+            preyv=cocomplex_benchmark.prediction.cosine_similarity.matrix.preyv))
+
+cocomplex_benchmark.reference.n_edges = np.sum(np.tril(
+    cocomplex_benchmark.reference.matrix, k=-1))
+cocomplex_benchmark.reference.n_possible_edges = math.comb(
+        len(cocomplex_benchmark.reference.matrix), 2)
+cocomplex_benchmark.thresholds = np.arange(0, 1.01, 0.01)
+pps, tps = pp_tp_from_pairwise_prediction_matrix_and_ref(
+        cocomplex_benchmark.reference.matrix,
+        cocomplex_benchmark.prediction.cosine_similarity.matrix,
+        cocomplex_benchmark.thresholds)
+cocomplex_benchmark.prediction.cosine_similarity.pps = np.array(pps) 
+cocomplex_benchmark.prediction.cosine_similarity.tps = np.array(tps) 
+cocomplex_benchmark.prediction.cosine_similarity.ppr = (
+    cocomplex_benchmark.prediction.cosine_similarity.pps /
+    cocomplex_benchmark.reference.n_possible_edges
+    )
+cocomplex_benchmark.prediction.cosine_similarity.tpr = (
+    cocomplex_benchmark.prediction.cosine_similarity.tps /
+    cocomplex_benchmark.reference.n_edges
+    )
+cocomplex_benchmark.prediction.cosine_similarity.auc = (
+    sklearn.metrics.auc(
+        x = cocomplex_benchmark.prediction.cosine_similarity.ppr,
+        y = cocomplex_benchmark.prediction.cosine_similarity.tpr,
+        )
+    )
+
+cocomplex_benchmark.prediction.cosine_similarity.auc = np.round(
+   cocomplex_benchmark.prediction.cosine_similarity.auc, 3)
+
+SAVE_COCOMPLEX_BENCHMARK = True
+
+if SAVE_COCOMPLEX_BENCHMARK:
+    with open("cocomplex_benchmark.pkl", "wb") as f:
+        pkl.dump(cocomplex_benchmark, f)
+
+fig, ax = plt.subplots()
+ax.set_title("Cocomplex Interaction Benchmark")
+ax.plot(cocomplex_benchmark.prediction.cosine_similarity.ppr,
+        cocomplex_benchmark.prediction.cosine_similarity.tpr,
+        label=f"cosine similarity score: AUC {cocomplex_benchmark.prediction.cosine_similarity.auc}")
+ax.set_xlabel("Positive predictive rate")
+ax.set_ylabel("True positive rate")
+ax.legend()
+fig.savefig("cocomplex_benchmark.png", dpi=1200)
+plt.close()
+
+#Plot the relationship between cosine similarity and shortest paths
+#A is the direct interaction reference
+A1 = direct_benchmark.reference.matrix.values
+A1 = np.array(A1, dtype=float)
+assert sum(np.diag(A1)) == 0 # valid adjacency
+assert np.all(A1 == A1.T)     # valid adjacency
+assert np.min(A1) == 0       # no negative cycles 
+assert np.max(A1) == 1
+#The matrix power 
+
+n = 30 # For the Cullin System the max path length for direct interactions is 22 
+D = np.linalg.matrix_power(A1, n)
+n -= 1
+while n > 0:
+    if (n % 10) == 0:
+        print(f"power {n}")
+    #A2 = A1 @ A1
+    #A3 = A1 @ A2
+    #A4 = A1 @ A3
+    #A5 = A1 @ A4
+    An = np.linalg.matrix_power(A1, n)
+    D = np.where(An > 0, n, D)
+    n -= 1
+
+# Plot the histogram of path lengths
+fig, ax = plt.subplots(1, 1)
+_x = D[np.tril_indices_from(D, k=-1)]
+_nz = np.sum(_x == 0)
+_x = _x[_x != 0]
+
+plt.hist(_x, bins=100)
+plt.text(10, 15000, f"Disconnected: {h(_nz)}")
+plt.title("Cullin Benchmark Direct Paths")
+plt.xlabel("Shortest path length")
+plt.ylabel(f"Frequency (N={len(_x)})")
+plt.legend()
+plt.savefig("direct_path_length_hist.png", dpi=1200)
+plt.close()
+# 
+
+D = xr.DataArray(D, dims=["preyu", "preyv"],
+                 coords=cos_sim_matrix.coords,
+                 )
+bait_prey_D = D.sel(preyu=["ELOB", "CUL5", "PEBB"])
+fig, ax = plt.subplots(1, 1)
+ax.hist(np.ravel(bait_prey_D.values), bins=100)
+plt.xlabel("Shortest path length")
+plt.ylabel("Frequency")
+plt.title(f"Bait Prey path lengths\nN={np.prod(bait_prey_D.values.shape)}")
+plt.savefig("bait_prey_path_lengths.png", dpi=300)
+
+# Now plot Saint Scores vs path-length
+#saint_score_array = bait_prey_D.copy()
+#saint_score_array.loc[:, :] = 0.0
+#saint_score_array = spectral_count_xarray.sel(preyu=saint_score_array.preyu,
+interact()
+# Bait prey difference
+bait_prey_spectral_count_diff = bait_prey_D.copy()
+sc_diff = spectral_count_xarray.sel(AP=True) - spectral_count_xarray(AP=False)
+sc_diff = sc_diff.mean("rep", "condition")
+
+
+
+for bait in set(cullin_data.df_new['bait']):
+    sel = cullin_data.df_new['bait'] == bait
+    subdf = cullin_data.df_new.loc[sel, 'SaintScore']
+    if bait == "CBFB":
+        bait = "PEBB"
+    #saint_score_array.loc[subdf.inde
+
+    
+
+
+
+
+
+
+# Make a histogram pair plot of d and cos sim
+# Select the non-zero paths
+# This looks a lot like two independant marginal distributions
+
+def hist_plot2d_features(D, savename, feature_name):
+    """
+    """
+    xbins = 21
+    ybins = 100
+    idxs = np.tril(D, k=-1) != 0
+    _x = D[idxs]
+    _y = cos_sim_matrix.values[idxs]
+    fig, ax = plt.subplots(2, 2)
+    mapp = ax[1, 0].hist2d(_x, _y, bins=[xbins, ybins], vmax=300)
+    #plt.colorbar(mapp)
+    ax[0, 0].sharex(ax[1, 0])
+    ax[0, 0].hist(_x, bins=xbins)
+    ax[0, 0].set_ylabel("Frequency")
+    ax[1, 1].sharey(ax[1, 0])
+    ax[1, 1].hist(_y, orientation='horizontal', bins=ybins)
+    ax[1, 0].set_xlabel("Shortest path length")
+    ax[1, 0].set_ylabel(feature_name)
+    plt.savefig(savename, dpi=300)
+    plt.close()
+
+#Plot the relationship between SaintScore and Path length
+
+
+# Feature Average SC Pair
+_X = spectral_count_xarray.sel(AP=True) - spectral_count_xarray.sel(AP=False)
+_X = _X.sel(bait=["ELOB", "CUL5", "CBFB"], preyu=cos_sim_matrix.preyu)
+_X = _X.mean(dim=["condition", "rep"])
+_D = cos_sim_matrix.copy()
+
+
+
+sns.set_theme(style="ticks")
+
+# Load the planets dataset and initialize the figure
+planets = sns.load_dataset("planets")
+g = sns.JointGrid(data=planets, x="year", y="distance", marginal_ticks=True)
+
+# Set a log scaling on the y axis
+g.ax_joint.set(yscale="log")
+
+# Create an inset legend for the histogram colorbar
+cax = g.figure.add_axes([.15, .55, .02, .2])
+
+# Add the joint and marginal histogram plots
+g.plot_joint(
+            sns.histplot, discrete=(True, False),
+                cmap="light:#03012d", pmax=.8, cbar=True, cbar_ax=cax
+                )
+g.plot_marginals(sns.histplot, element="step", color="#03012d")
+
+
 
 
 #benchmark_summary = init_benchmark_summary(
