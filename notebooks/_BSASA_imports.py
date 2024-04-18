@@ -13,9 +13,10 @@ from functools import partial
 from itertools import combinations
 from typing import Set, FrozenSet
 from types import SimpleNamespace
+import pickle as pkl
 # third party
 from typing import NamedTuple
-import arviz as az
+#import arviz as az
 import biotite
 import biotite.sequence.io
 import flyplot as flt
@@ -29,10 +30,11 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import notepad
-import optax
+#import optax
 import pathlib
 import pandas as pd
 import scipy as sp
+import sklearn
 import seaborn as sns
 import xarray as xr
 # from third party
@@ -45,3 +47,4 @@ from numpyro.ops.indexing import Vindex
 from numpyro.infer import MixedHMC, HMC, MCMC
 from numpyro.diagnostics import hpdi, summary
 from pathlib import Path
+
