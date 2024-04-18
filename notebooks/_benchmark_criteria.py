@@ -7,7 +7,6 @@ import pandas as pd
 from scipy.integrate import simpson
 import scipy.stats
 
-
 def tp_from_edge_id_lists(ref, pred) -> int:
     """Returns the number of shared elements between the
        two lists"""
