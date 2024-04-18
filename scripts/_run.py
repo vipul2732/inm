@@ -149,6 +149,15 @@ def main(
              save_warmup = save_warmup,
              load_warmup = load_warmup,
              jax_profile = jax_profile)
+
+    figures(model_id = model_id,
+            model_name = model_name,
+            rseed = rseed,
+            model_output_dirpath = model_output_dirpath)
+
+def figures(model_id, model_name, rseed, model_output_dirpath, **kwargs):
+    if isinstance(model_output_dirpath, str):
+        model_output_dirpath = Path(model_output_dirpath)
     fbasename = f"{model_id}_{model_name}_{rseed}"
     input_file = model_output_dirpath / f"{fbasename}.pkl"
     logging.info("enter generate_sampling_figures")
@@ -158,4 +167,5 @@ def main(
     gbf.cullin_standard(model_output_dirpath, fbasename)
     logging.info("enter generate_analysis_figures")
     gaf.cullin_standard()
+
 
