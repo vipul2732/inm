@@ -114,7 +114,6 @@ def synthetic_benchmark_fn(analysis_name : str,
                         ):
     """
     Make a directoy, generate all figures
-    
     Params:
       analysis_name : A name for the analysis
       n_prey : the number of prey types
@@ -212,7 +211,6 @@ def synthetic_benchmark_fn(analysis_name : str,
     plt.close()
     
     # Flatten the inputs for modeling
-    
     reference_flat = _model_variations.matrix2flat(A.values) # use this method to flatten and unflatten matrices
     # so that indices are preserved
     
@@ -221,6 +219,17 @@ def synthetic_benchmark_fn(analysis_name : str,
     
     # Model 14 is the mixture model
     # Model 15 has beta priors, not much different
+
+    _model_variations.save_model22_ll_lp_data(
+            save_dir,
+            N,
+            flattened_apms_similarity_scores,
+            flattened_shuffled_apms,
+            lower_edge_prob_bound = 0.0,
+            upper_edge_prob_bound = 1.0,
+            z2edge_slope = 1000,
+            composites = [],
+            BAIT_PREY_SLOPE)
     
     model14_names = ("model14", "model15")
 
@@ -228,6 +237,8 @@ def synthetic_benchmark_fn(analysis_name : str,
         model_data = _model_variations.model14_data_getter()
         model_data['flattened_apms_similarity_scores'] = data_flat
         model = _model_variations.model14
+    elif model_name == "model22_ll_lp":
+        model_data = _model_variations.model22_ll_lp_data_getter(dir_name)
     else:
         raise ValueError(f"Unknown model name {model_name}")
     # Plot the reference and causal edges
@@ -244,7 +255,7 @@ def synthetic_benchmark_fn(analysis_name : str,
     
     # Make the inital position relative to the analysis directory
     if initial_position is not None:
-        initial_position = str(dir_path / initial_posiiton)
+        initial_position = str(dir_path / initial_position)
     # Fit the model m_chain times writing to the file system
     fit(model_name = model_name,
         m_chains = m_chains,
@@ -844,3 +855,71 @@ def top_accuracy_top_score_figure(dir_path,
 def errplot(x, y, yerr):
     plt.errorbar(x, y, yerr, fmt='.')
     plt.xlabel("Sample group")
+
+    
+def run_multiple_benchmarks(N=None,
+                            edge_prob=None,
+                            n_bait=3,
+                            scores=None,
+                            overwrite_existing=False,
+                            suffix="",
+                            remove_dirs=False,
+                            static_seed=0,
+                            d_crit=15,
+                            max_path_length = 17,
+                            num_warmup = 500,
+                            num_samples = 1000,
+                            m_chains = 50,
+                            ):
+    """
+    The solutions must be the same
+    N: 3, 10, 50, 100, 500 
+    Edge Density: 0.04, 0.13, 0.48, 0.97 
+    Baits : 3
+    Likelihood Only
+    Prior Only
+    Prior & Likelihood
+    Single Composite
+    - Composite Hierarchy
+    - Overlapping vs non overlapping 
+    For the chosen amount of sampling X we calculate
+    1. Top Accuracy per chain +/- s.d 
+    2. Top precision per chain +/- s.d 
+    3. Accuracy of average network, precision of average network
+    Generate the synthetic data 
+    Default Parameters Values
+    d_crit 
+    """
+    assert d_crit < max_path_length - 1
+    assert n_bait > 0
+    if N is None:
+        N = [4, 9, 50, 100, 500]
+    for i in N:
+        assert i > 2
+    if edge_prob is None:
+        edge_prob = [0.04, 0.13, 0.48, 0.97]
+    for i in edge_prob:
+        assert i < 1
+        assert i > 0
+    if scores is None:
+        scores = ["bp_lp", "lbh_ll", "lbh_ll__bp_lp"]
+    all_tests = list(product(N, edge_prob, scores))
+    paths = []
+    scorekey2model_name = {"bp_lp" : None,
+                           "lbh_ll" : None,
+                           "lbh_ll__bp_lp" : None }
+    for i, path in enumerate(paths):
+        model_name = scorekey2model_name[scores[i]]    
+        synthetic_benchmark_fn(
+                analysis_name = str(path),
+                n_prey = N[i],
+                n_bait = n_bait,
+                d_crit = d_crit,
+                dir_name = str(path),
+                rseed = static_seed,
+                edge_probability = edge_prob[i],
+                num_warmup = num_warmup,
+                num_samples = num_samples,
+                m_chains = m_chains, 
+                model_name = model_name) 
+
