@@ -2524,7 +2524,7 @@ _model_dispatch = {
     "model_11_path_length": (model_11_path_length, init_to_uniform, lambda x: int(x)),
         }
 
-def model_dispatcher(model_name, model_data, save_dir):
+def model_dispatcher(model_name, model_data, save_dir, init_strat_dispatch_key=""):
     if model_name in _model_dispatch:
         model, init_strategy, data_func = _model_dispatch[model_name]
         model_data = data_func(model_data)
@@ -2599,9 +2599,13 @@ def model_dispatcher(model_name, model_data, save_dir):
             model_data = model23_data_transformer(model_data, calculate_composites = False)
         else:
             model_data = model23_data_transformer(model_data, calculate_composites = True)
-        #init_strategy = init_to_uniform
         #init_strategy = model_23_ll_lp_init_to_zero_strategy(model_data)
-        init_strategy = model_23_ll_lp_init_to_data_strategy(model_data)
+        if init_strat_dispatch_key == "uniform":
+            init_strategy = init_to_uniform
+        elif init_strat_dispatch_key == "":
+            init_strategy = model_23_ll_lp_init_to_data_strategy(model_data)
+        else:
+            raise ValueError(f"Uknown key {init_strat_dispatch_key}")
     else:
         raise ValueError(f"Invalid {model_name}")
     return model, model_data, init_strategy
@@ -2635,6 +2639,7 @@ def trace_model_shapes(model, arg):
 @click.option("--save-warmup", default=False)
 @click.option("--load-warmup", default=False)
 @click.option("--jax-profile", default=False, is_flag=True)
+@click.option("--init-strat", default="")
 def main(model_id,
          rseed,
          model_name,
@@ -2649,7 +2654,8 @@ def main(model_id,
          initial_position,
          save_warmup,
          load_warmup,
-         jax_profile):
+         jax_profile,
+         init_strat):
     _main(model_id = model_id,
           rseed = rseed,
           model_name = model_name,
@@ -2664,7 +2670,8 @@ def main(model_id,
           initial_position = initial_position,
           save_warmup = save_warmup,
           load_warmup = load_warmup,
-          jax_profile = jax_profile)
+          jax_profile = jax_profile,
+          init_strat = init_strat,)
 
 def _main(model_id,
          rseed,
@@ -2680,7 +2687,8 @@ def _main(model_id,
          initial_position,
          save_warmup,
          load_warmup,
-         jax_profile,):
+         jax_profile,
+         init_strat):
     log_path = Path(save_dir) / "_model_variations.log"
     #logging.basicConfig(filename=log_path, filemode='w')
     logger = logging.getLogger(__name__)
@@ -2705,7 +2713,7 @@ def _main(model_id,
                             # step_size N
                         #"trajectory_length",
         )
-    model, model_data, init_strategy = model_dispatcher(model_name, model_data, save_dir)
+    model, model_data, init_strategy = model_dispatcher(model_name, model_data, save_dir, init_strat_dispatch_key = init_strat)
     # Save model_data to output directory
     data_savename = str(model_id) + "_" + model_name + "_" + str(rseed) + "_model_data.pkl"
     with open(Path(save_dir) / data_savename, "wb") as file:
