@@ -18,3 +18,4 @@ significant_cifs/*.csv
 .DS_Store
 .RHistory
 scripts/hgscore
+results
