@@ -19,6 +19,7 @@ significant_cifs/*.csv
 *.pairsWprob
 *.interactome.txt
 *.tar.gz
+*humap2_complexes_20200809.txt
 .Rproj.user
 .DS_Store
 .RHistory
