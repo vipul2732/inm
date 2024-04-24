@@ -1,68 +1,11 @@
-## AP-MS PPI Benchmark 
+# Integartive Network Modeling
 
-Prey were taken from the authors exactly.
-The following prey were excluded from the analysis
+The broad goal of inm is to contribute to the characterization of biological networks by integrating data from diverse sources.
+inm is under development and will be distributed as an Integrative Modeling Platform ([IMP](https://github.com/salilab/imp/)) module.
 
-- IGHG1\_MOUSE
+Modeling proceeds in 5 stages: (i) gathering AP-MS protein spectral counts under multiple conditions, (ii) representing a model where nodes represent protein types
+and edges represent a protein interaction between at least one pair of molecules of the corresponding types, (iii) a scoring function
+that scores the agreement between AP-MS spectral counts and a network model, (iv) sampling alternative configurations of edges using an MCMC scheme,
+(v) analysis of the output sample of network models.
 
-
-Viral proteins were mapped to the uniprot identifier with
-the longest sequence by keyword search.
-
-- vifprotein          :   P69723 
-- polpolyprotein      :   Q2A7R5 
-- nefprotein          :   P18801
-- tatprotein          :   P0C1K3
-- gagpolyprotein      :   P12493
-- revprotein          :   P69718
-- envpolyprotein      :   O12164
-
-
-Table 1. Prey Table
-PreyGene, UniprotId, UniprotSeq, UniprotSeqLen 
-
-Uniprot sequences were fetched for all prey
-The following entries were obsolete.
-- P30042  :  
-- Q9Y2S0  :  
-
-For these obsolete entries the most recent uniref sequence was saved instead
-
-HHBlits was used to search the PDB70 with default parameters. 
-
-Table2. Significant HHR Hit Table
-QueryUID,PDB70ID,Probab,E-value,Score,Aligned\_cols,Identities,Similarity,Sum\_probs,Template\_Neff,Q,T 
-
-Filter the pairwise alignments by resulting in 
-- evalue <= 1e-7
-- aln\_len > 88
-- %seq ID >= 30% 
-
-XX Significant Alignments
-
-Two queries may map to the same chain in the template
-or they may map to different chains (Self vs Non-self).
-
-Table 3. Non Self Significant Pair Table
-Query1, Query2, PDB70ID1, PDB70ID2 
-
-Edge cases were handled
-
-PDB Files were renumbered according to their input sequence
-alignemnts.
-
-BSASA was calculated for all pairs of renumbered pdb files 
-
-Any Prey pair may the following relationships.
-- Not found in the same PDB
-- Found in one PDB
-  - Map to a single chain
-  - Map to multiple chains
- 
-- Found in multiple PDB's 
-
-Table 4. PDB70ID, SASA
-   
-Table 5. PDB70ID1, PDB70ID2, SASA1, SASA2, BSASA, QUERIES1, QUERIES2 
-
-
+inm includes an example system and benchmarks against Protein Data Bank and Humap 2.0 derived interactions.  
