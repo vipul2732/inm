@@ -128,6 +128,7 @@ mini_dev_run = RunConfiguration(
     filter_kw = "all",
 )
 
+
 mini_se_sr_run = RunConfiguration(
     model_output_dirpath = "../results/mini_se_sr_run",
     model_input_fpath = "../data/cullin/1-s2.0-S1931312819302537-mmc2.xlsx",
@@ -155,6 +156,10 @@ mini_se_sr_run = RunConfiguration(
     hyper_param_max_distance = 11,
     filter_kw = "all",
 )
+
+mini_se_sr_run2 = from_template(mini_se_sr_run,
+                              model_output_dirpath = "mini_se_sr_run2",
+                              init_strat = "uniform")
 
 mini_se_sc_run = RunConfiguration(
     model_output_dirpath = "../results/mini_se_sc_run",

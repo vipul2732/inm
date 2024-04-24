@@ -65,6 +65,7 @@ def main(
     hyper_param_disconectivity_distance,
     hyper_param_max_distance,
     filter_kw,
+    init_strat = "",
 ):
     """
     Params:
@@ -93,6 +94,7 @@ def main(
       hyper_param_disconectivity_distance : int - only matters for composite_connectivity. The distance at which two nodes are considered disconnected  
       hyper_param_max_distance : int - only matters for composite_connectivity. The number of Warshal algorithm iterations to perform when calculating the shortest paths presence distance matrix.
       filter_kw : str - a flag sent to preprocess_data to define different sets of nodes for modeling
+      init_strat : str - currently supports 'uniform' and an empty string.
     """
     model_output_dirpath = Path(model_output_dirpath)
     model_input_fpath= Path(model_input_fpath)
@@ -148,7 +150,8 @@ def main(
              initial_position = initial_position,
              save_warmup = save_warmup,
              load_warmup = load_warmup,
-             jax_profile = jax_profile)
+             jax_profile = jax_profile,
+             init_strat = init_strat)
 
     figures(model_id = model_id,
             model_name = model_name,
