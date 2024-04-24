@@ -27,3 +27,6 @@ scripts/hgscore
 results
 *.tab3.txt
 data/intact
+
+data/hiv_emap/data_s1.csv
+data/processed/preppi
