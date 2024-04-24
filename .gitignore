@@ -26,3 +26,4 @@ significant_cifs/*.csv
 scripts/hgscore
 results
 *.tab3.txt
+data/intact

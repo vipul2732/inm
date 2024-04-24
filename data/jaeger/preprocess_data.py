@@ -7,7 +7,7 @@ with open(f"{prefix}.xls", "rb") as f:
 
 
 for sheet in range(4):
-    d[sheet].to_csv(prefix + f"_sheet_{sheet}.tsv")
+    d[sheet].to_csv(prefix + f"_sheet_{sheet}.tsv", sep="\t", index=False)
 
 # Get all the uniprot ids across all experiments and write to a file
 d0_uids = set(d[0].loc[:, "Prey"].values)

@@ -8,4 +8,4 @@ df = pd.read_csv("preppi.human_af.interactome.txt", sep="\t")
 sel = df['total_score'] > 379
 df_proc = df[sel]
 
-df_proc.to_csv("../processed/preppi.human_af.interactome_LR379.txt", sep="\t")
+df_proc.to_csv("../processed/preppi/preppi.human_af.interactome_LR379.txt", sep="\t")

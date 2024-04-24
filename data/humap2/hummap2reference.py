@@ -7,6 +7,8 @@ d_high = df[df['w'] > 0.94]
 d_medium.to_csv("../processed/references/humap2_ppis_medium.tsv", sep="\t", index=False)
 d_high.to_csv("../processed/references/humap2_ppis_high.tsv", sep="\t", index=False)
 
+df.to_csv("../processed/references/humap2_ppis_all.tsv", sep="\t", index=False)
+
 
 
 

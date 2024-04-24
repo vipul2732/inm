@@ -18,6 +18,7 @@ pdb_prey_uid = pdb.preyv
 # Remap prey ids to uniprot ids
 _tf = {r["PreyGene"] : r["UniprotId"] for i, r in huttenhain_uids.iterrows()}
 tf = {(key if "_" not in key else key.split("_")[0]):val for key, val in _tf.items()}
+
 pdb_prey_uid = np.array([tf[i] for i in pdb_prey_uid.values])
 pdb_prey_uid = pd.Series(pdb_prey_uid)
 
