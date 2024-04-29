@@ -26,6 +26,7 @@ class RunConfiguration(NamedTuple):
     hyper_param_disconectivity_distance : int 
     hyper_param_max_distance : int 
     filter_kw : str 
+    init_strat : str = ""
 
 def from_template(template: RunConfiguration, **kwargs) -> RunConfiguration:
     """
@@ -128,7 +129,6 @@ mini_dev_run = RunConfiguration(
     filter_kw = "all",
 )
 
-
 mini_se_sr_run = RunConfiguration(
     model_output_dirpath = "../results/mini_se_sr_run",
     model_input_fpath = "../data/cullin/1-s2.0-S1931312819302537-mmc2.xlsx",
@@ -156,6 +156,33 @@ mini_se_sr_run = RunConfiguration(
     hyper_param_max_distance = 11,
     filter_kw = "all",
 )
+
+mini_se_sr_low_prior_1 = from_template(mini_se_sr_run,
+    model_output_dirpath = "../results/mini_se_sr_low_prior_1",
+    hyper_param_alpha = 0.001,
+    hyper_param_beta = 0.01,
+    )
+
+mini_se_sr_low_prior_1_uniform = from_template(mini_se_sr_run,
+    model_output_dirpath = "../results/mini_se_sr_low_prior_1_uniform",
+    hyper_param_alpha = 0.001,
+    hyper_param_beta = 0.01,
+    init_strat = "uniform",
+    )
+
+se_sr_low_prior_1_all_20k = from_template(mini_se_sr_low_prior_1,
+    model_output_dirpath = "../results/se_sr_low_prior_1_all_20k",
+    num_samples = 20_000,
+    num_warmup = 1_000,
+    )
+
+se_sr_low_prior_1_all_uniform_20k = from_template(
+        mini_se_sr_low_prior_1_uniform,
+        model_output_dirpath = "../results/se_sr_low_prior_1_uniform_all_20k",
+        num_warmup = 1_000,
+        num_samples = 20_000,
+        )
+        
 
 mini_se_sr_run2 = from_template(mini_se_sr_run,
                               model_output_dirpath = "mini_se_sr_run2",
@@ -243,6 +270,7 @@ mini_se_sr_mock_ctrl = from_template(mini_template,
                            model_output_dirpath = "../results/mini_se_sr_mock_ctrl",
                            model_name = "model23_se_sr",
                            filter_kw="mock_ctrl")
+
 
 se_all_10k =  RunConfiguration(
     model_output_dirpath = "../results/se_all_10k",
