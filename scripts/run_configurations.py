@@ -27,6 +27,7 @@ class RunConfiguration(NamedTuple):
     hyper_param_max_distance : int 
     filter_kw : str 
     init_strat : str = ""
+    thinning : int = 1
 
 def from_template(template: RunConfiguration, **kwargs) -> RunConfiguration:
     """
@@ -129,6 +130,11 @@ mini_dev_run = RunConfiguration(
     filter_kw = "all",
 )
 
+mini_dev_run_w_thinning = from_template(mini_dev_run,
+    model_output_dirpath = "../results/mini_dev_run_w_thinning",
+    thinning = 2,
+    )
+
 mini_se_sr_run = RunConfiguration(
     model_output_dirpath = "../results/mini_se_sr_run",
     model_input_fpath = "../data/cullin/1-s2.0-S1931312819302537-mmc2.xlsx",
@@ -174,6 +180,12 @@ se_sr_low_prior_1_all_20k = from_template(mini_se_sr_low_prior_1,
     model_output_dirpath = "../results/se_sr_low_prior_1_all_20k",
     num_samples = 20_000,
     num_warmup = 1_000,
+    )
+
+se_sr_low_prior_1_all_100k = from_template(se_sr_low_prior_1_all_20k,
+    model_output_dirpath = "../results/se_sr_low_prior_1_all_100k",
+    thinning = 5,
+    num_samples = 100_000,
     )
 
 se_sr_low_prior_1_all_uniform_20k = from_template(

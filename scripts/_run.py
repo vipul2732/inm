@@ -66,6 +66,7 @@ def main(
     hyper_param_max_distance,
     filter_kw,
     init_strat = "",
+    thinning = 1,
 ):
     """
     Params:
@@ -151,7 +152,8 @@ def main(
              save_warmup = save_warmup,
              load_warmup = load_warmup,
              jax_profile = jax_profile,
-             init_strat = init_strat)
+             init_strat = init_strat,
+             thinning = thinning)
 
     figures(model_id = model_id,
             model_name = model_name,
@@ -170,5 +172,4 @@ def figures(model_id, model_name, rseed, model_output_dirpath, **kwargs):
     gbf.cullin_standard(model_output_dirpath, fbasename)
     logging.info("enter generate_analysis_figures")
     gaf.cullin_standard()
-
 

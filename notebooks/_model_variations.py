@@ -1986,6 +1986,22 @@ def model20_test6e_1b():
     s1 = bp1.log_prob(e)
     numpyro.factor('bp1', s1)
 
+def calc_shuff_correlations(spec_table, rseed):
+    null_sc = spec_table.copy()
+    nrows, ncolumns = null_sc.shape
+    temp = np.zeros(null_sc.shape)
+    key = jax.random.PRNGKey(rseed)
+    for rid in range(nrows):
+        key, k1 = jax.random.split(key)
+        shuffled_row = jax.random.permutation(k1, null_sc.iloc[rid, :].values)
+        temp[rid] = shuffled_row
+    null_sc.loc[:, :] = temp 
+    shuff_corr = np.corrcoef(null_sc.values, rowvar=True)
+    corr =       np.corrcoef(spec_table.values, rowvar=True)
+    shuff_corr = pd.DataFrame(shuff_corr, columns=spec_table.index, index=spec_table.index)
+    corr = pd.DataFrame(corr, columns=spec_table.index, index=spec_table.index)
+    return corr, shuff_corr, null_sc 
+
 def data_from_spec_table_and_composite_table(data_path, ms_thresholds, sep="\t", rseed=0, calc_composites=True):
     def validate_spec_table(spec_table):
         r, c = spec_table.shape
@@ -2030,21 +2046,6 @@ def data_from_spec_table_and_composite_table(data_path, ms_thresholds, sep="\t",
                     k+=1
         return composites 
 
-    def calc_shuff_correlations(spec_table, rseed):
-        null_sc = spec_table.copy()
-        nrows, ncolumns = null_sc.shape
-        temp = np.zeros(null_sc.shape)
-        key = jax.random.PRNGKey(rseed)
-        for rid in range(nrows):
-            key, k1 = jax.random.split(key)
-            shuffled_row = jax.random.permutation(k1, null_sc.iloc[rid, :].values)
-            temp[rid] = shuffled_row
-        null_sc.loc[:, :] = temp 
-        shuff_corr = np.corrcoef(null_sc.values, rowvar=True)
-        corr =       np.corrcoef(spec_table.values, rowvar=True)
-        shuff_corr = pd.DataFrame(shuff_corr, columns=spec_table.index, index=spec_table.index)
-        corr = pd.DataFrame(corr, columns=spec_table.index, index=spec_table.index)
-        return corr, shuff_corr, null_sc 
 
     def filter_minimal_ids(composite_table, spec_table):
         # Remove the IDS that don't pass the minimal MSscore threshold
@@ -2367,14 +2368,37 @@ def model23_se_sc(model_data):
             disconectivity_distance = disconectivity_distance,
             max_distance = max_distance)
 
+def calculate_degree_from_edgelist(edgelist, degree_vector, n_nodes):
+    edgelist_idx = 0
+    for u in range(n_nodes):
+        for v in range(0, u):
+            val = edgelist[edgelist_idx]
+            du = degree_vector[u]
+            dv = degree_vector[v]
+            degree_vector = degree_vector.at[u].set(val + du)
+            degree_vector = degree_vector.at[v].set(val + dv)
+            edgelist_idx += 1
+    return degree_vector
+
+def model23_DegreeRestraint_score():
+    """
+    Restraining the degree of a node involves 
+    1. Calculating the degree
+        .
+    2. Applying a restraint on the degree of each node independantly
+    3. summing the restraint values (log prob)
+    """
+
+def Z2A(z):
+    return jax.nn.sigmoid((z-0.5)*1_000)
+
 def model23_SE_score(alpha, beta, M):
-    z2edge_slope = 1_000
     # Representation and Scoring
     u = numpyro.sample('u', dist.Uniform(low=alpha, high=beta))
     mu = edge_prob2mu(u) # determinsitc transform
     numpyro.deterministic('mu', mu)
     z = numpyro.sample('z', dist.Normal(mu+0.5).expand([M,])) #(M, ) shifted normal, sigma must be 1. latent edges
-    aij = jax.nn.sigmoid((z-0.5)*z2edge_slope)
+    aij = Z2A(z)
     return aij
 
 def model23_SC_score(aij, composite_dict_norm_approx, composite_dict_p_is_1, N, disconectivity_distance,
@@ -2640,6 +2664,7 @@ def trace_model_shapes(model, arg):
 @click.option("--load-warmup", default=False)
 @click.option("--jax-profile", default=False, is_flag=True)
 @click.option("--init-strat", default="")
+@click.option("--thinning", type=int, default=1)
 def main(model_id,
          rseed,
          model_name,
@@ -2655,7 +2680,8 @@ def main(model_id,
          save_warmup,
          load_warmup,
          jax_profile,
-         init_strat):
+         init_strat,
+         thinning,):
     _main(model_id = model_id,
           rseed = rseed,
           model_name = model_name,
@@ -2671,7 +2697,8 @@ def main(model_id,
           save_warmup = save_warmup,
           load_warmup = load_warmup,
           jax_profile = jax_profile,
-          init_strat = init_strat,)
+          init_strat = init_strat,
+          thinning = thinning)
 
 def _main(model_id,
          rseed,
@@ -2688,7 +2715,8 @@ def _main(model_id,
          save_warmup,
          load_warmup,
          jax_profile,
-         init_strat):
+         init_strat,
+         thinning,):
     log_path = Path(save_dir) / "_model_variations.log"
     #logging.basicConfig(filename=log_path, filemode='w')
     logger = logging.getLogger(__name__)
@@ -2734,7 +2762,7 @@ def _main(model_id,
     warmup_savename = str(Path(save_dir) / warmup_savename)
     nuts = NUTS(model, init_strategy=init_strategy)
     # Do the warmup
-    mcmc = MCMC(nuts, num_warmup=num_warmup, num_samples=num_samples, progress_bar=progress_bar)
+    mcmc = MCMC(nuts, num_warmup=num_warmup, num_samples=num_samples, progress_bar=progress_bar, thinning=thinning)
     if save_warmup:
         rng_key, key = jax.random.split(rng_key)
         mcmc.warmup(key, model_data = model_data)

@@ -6,8 +6,8 @@ import json
 
 
 @click.command()
-@click.argument("name")
-@click.option("--figures", default = False, is_flag = True)
+@click.argument("name") 
+@click.option("--figures", default = False, is_flag = True, help="only run figures")
 def main(name, figures):
     run_configuration =rc.__dict__[name]._asdict() 
     model_output_dirpath = Path(run_configuration['model_output_dirpath'])
