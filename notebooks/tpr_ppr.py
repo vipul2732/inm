@@ -56,19 +56,34 @@ class PprTprPlotter:
     def plot(self, save_path, title, results: PprTprResults):
         _plotter_plot(self, save_path, title, results) 
 
-def _plotter_plot(o, save_path, title, results):
-    fig, ax = plt.subplots(1, 1)
-    ax.set_xlabel(f"PPR N={results.n_predicted_positives}")
-    ax.set_ylabel(f"TPR N={results.n_total_positives}")
+def add_curve_to_roc_plot(ax, results):
+    ax.plot(results.ppr_points, results.tpr_points, label=f"predicted AUC {round(results.auc, 3)}")
+
+def add_shuffled_curve_to_roc_plot(ax, results):
+    ax.plot(results.shuff_ppr_points, results.shuff_tpr_points, label=f"shuffled AUC {round(results.shuff_auc, 3)}")
+
+def set_roc_limits(ax):
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
-    ax.plot(results.ppr_points, results.tpr_points, label=f"predicted AUC {round(results.auc, 3)}")
-    ax.plot(results.shuff_ppr_points, results.shuff_tpr_points, label=f"shuffled AUC {round(results.shuff_auc, 3)}")
+
+def set_roc_labels_with_N(ax, results):
+    ax.set_xlabel(f"PPR N={results.n_predicted_positives}")
+    ax.set_ylabel(f"TPR N={results.n_total_positives}")
+
+def dpi_save(save_path, fig, dpi: int):
+    fig.savefig(save_path + f"_{dpi}.png", dpi=dpi)
+
+
+def _plotter_plot(o, save_path, title, results):
+    fig, ax = plt.subplots(1, 1)
+    set_roc_limits(ax)
+    add_curve_to_roc_plot(ax, results)
+    add_shuffled_curve_to_roc_plot(ax, results)
     ax.set_title(title)
     ax.legend()
-    plt.savefig(save_path + "_300.png", dpi=300)
-    plt.savefig(save_path + "_1200.png", dpi=1200)
-    plt.close()
+    dpi_save(save_path, fig, 300)
+    dpi_save(save_path, fig, 1200)
+    plt.close(fig=fig)
 
 def _plotter_init(x):
     ...
