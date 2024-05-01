@@ -229,7 +229,6 @@ def _main(o, i):
     N = model_data['N']
     a = jax.nn.sigmoid((samples['z']-0.5)*1_000)
     mean = np.mean(a, axis=0) 
-    u = samples['u']
 
     # Plot a table of the average value of every composite N
     if "new_composite_dict_norm_approx" in model_data:
@@ -349,12 +348,14 @@ def _main(o, i):
             savename = "mean_var_scatter",)
 
     # Distribution of u 
-    plot_histogram(
-            x = u,
-            xlabel = "$u$",
-            ylabel = "Frequency",
-            title = "Nuisance variable $u$",
-            savename = "hist_u",) 
+    if 'u' in samples:
+        u = samples['u']
+        plot_histogram(
+                x = u,
+                xlabel = "$u$",
+                ylabel = "Frequency",
+                title = "Nuisance variable $u$",
+                savename = "hist_u",) 
 
     # Write an edge list table of scores
     w = []
