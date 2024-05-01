@@ -188,7 +188,7 @@ se_sr_low_prior_1_all_100k = from_template(se_sr_low_prior_1_all_20k,
     num_samples = 100_000,
     )
 
-se_sr_low_prior_1_all_uniform_20k = from_template(
+se_sr_low_prior_1_uniform_all_20k = from_template(
         mini_se_sr_low_prior_1_uniform,
         model_output_dirpath = "../results/se_sr_low_prior_1_uniform_all_20k",
         num_warmup = 1_000,
