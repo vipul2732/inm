@@ -23,6 +23,7 @@ from functools import partial
 from undirected_edge_list import UndirectedEdgeList
 import _model_variations as mv
 import tpr_ppr
+import matplotlib.pyplot as plt
 
 def load_cullin_composite_saint_scores():
     df = pd.read_csv("../data/processed/cullin/composite_table.tsv", sep="\t")
@@ -147,6 +148,7 @@ def get_pdb_ppi_predict_direct_reference(source="tsv"):
     #c.update_from_df(df, a_colname="Bait", b_colname="Prey", edge_value_colname = "MSscore",
     #                 multi_edge_value_merge_strategy = "max")
     return u 
+
 
 def get_pdb_ppi_predict_cocomplex_reference(source="tsv"):
     if source == "pkl":
@@ -488,33 +490,68 @@ def get_filter10_pred(model_output_dirpath: Path) -> UndirectedEdgeList:
     u.update_from_df(df, a_colname="auid", b_colname="buid", edge_value_colname="w", multi_edge_value_merge_strategy="max")
     return u
 
-def cullin_standard(model_output_dirpath, fbasename):
+def get_hgscore():
+    path = "./hgscore/hgsscore_output.csv"
+    df = pd.read_csv(path)
+    u = UndirectedEdgeList()
+    reindexer = get_cullin_reindexer()
+    
+def get_minimal_saint_table(model_output_dirpath):
+    path = model_output_dirpath / "composite_table.tsv"
+
+def get_pdb_indirect(pdb_direct, pdb_cocomplex):
+    return pdb_cocomplex.edge_identity_difference(pdb_direct)
+
+def _test_cullin_standard():
     references = dict( 
         humap2_high = get_humap_high_reference(),
         humap2_medium = get_humap_medium_reference(),
         pre_ppi = get_pre_ppi_af_hc(),
         huri = get_huri_reference(),
-        pdb_direct = get_pdb_ppi_predict_direct_reference(),
-        pdb_cocomplex = get_pdb_ppi_predict_cocomplex_reference(),
     )
-    
-    predictions = dict(
-        average_edge = model23_results2edge_list(model_output_dirpath, fbasename),
-        cullin_max_saint = get_cullin_saint_scores_edgelist(),
-        average_edge_after2k = model23_results2edge_list(
-            model_output_dirpath,
-            fbasename,
-            discard_first_n = 2000),
-        average_edge_filter10 = get_filter10_pred(model_output_dirpath)
-    )
+    pdb_direct = get_pdb_ppi_predict_direct_reference(),
+    pdb_cocomplex = get_pdb_ppi_predict_cocomplex_reference(),
+    breakpoint()
 
+def to_dirpath(str_or_dirpath):
+    if isinstance(str_or_dirpath, str):
+        return Path(str_or_dirpath)
+    elif isinstance(str_or_dirpath, Path):
+        return str_or_dirpath
+    else:
+        raise ValueError
+
+
+
+def humap_bench(bench_output = "../results/humap_bench", topN=None):
+    bench_output = to_dirpath(bench_output)
+    assert bench_output.is_dir()
+    pdb_direct = get_pdb_ppi_predict_direct_reference()
+    pdb_cocomplex = get_pdb_ppi_predict_cocomplex_reference()
+    pdb_indirect = pdb_cocomplex.edge_identity_difference(pdb_direct)
+    references =  {"pdb_direct" : pdb_direct, "pdb_cocomplex" : pdb_cocomplex, "pdb_indirect": pdb_indirect}
+    predictions = {"humap_all" : get_humap_all_reference()}
+
+    write_roc_curves_and_table(bench_output, predictions=predictions, references=references)
+
+def write_roc_curves_and_table(model_output_dirpath, predictions, references):
     plotter = tpr_ppr.PprTprPlotter()
     # Summary Table
     ref_name_lst = []
     pred_name_lst = []
     auc = []   
     shuff_auc = []
+    n_reference_positives = []
 
+    pairs_to_plot_on_one_graph = [
+        ("average_edge", "humap2_high"),
+        ("average_edge", "huri"),
+        ("average_edge", "pdb_direct"),
+        ("average_edge", "pdb_cocomplex"),
+        ("cullin_max_saint", "pdb_cocomplex")
+        ]
+    fig_multi, ax_multi = plt.subplots(1, 1)
+    tpr_ppr.set_roc_limits(ax_multi) 
     for pred_name, prediction in predictions.items():
         for ref_name, reference in references.items():
             comparison_name = f"{pred_name}_v_{ref_name}"
@@ -525,9 +562,22 @@ def cullin_standard(model_output_dirpath, fbasename):
             ref_name_lst.append(ref_name)
             auc.append(compare_results.auc)
             shuff_auc.append(compare_results.shuff_auc)
-            
+            n_reference_positives.append(compare_results.n_total_positives)
+            if (pred_name, ref_name) in pairs_to_plot_on_one_graph:
+                ax_multi.plot(compare_results.ppr_points, compare_results.tpr_points, label=f"{round(compare_results.auc, 3)} {pred_name} {ref_name}")
+    
+    ax_multi.legend()
+    ax_multi.set_xlabel("Positive predictive rate")
+    ax_multi.set_ylabel("True positive rate")
+    multi_savepath = str(model_output_dirpath / "roc_multi")
+    tpr_ppr.dpi_save(multi_savepath, fig_multi, 300)
+    tpr_ppr.dpi_save(multi_savepath, fig_multi, 1200)
+    plt.close(fig=fig_multi)
+
+
     df = pd.DataFrame({"prediction" : pred_name_lst,
                        "reference" : ref_name_lst,
+                       "N reference" : n_reference_positives,
                        "auc" : auc,
                        "shuff_auc" : shuff_auc,}) 
     df.to_csv(str(model_output_dirpath / "benchmark.tsv"), sep="\t")
@@ -542,6 +592,46 @@ def cullin_standard(model_output_dirpath, fbasename):
                        "w" : u.edge_values})
     df = df.sort_values("w", ascending=False)
     df.to_csv(str(model_output_dirpath / "average_predicted_edge_scores.tsv"), sep="\t", index=None)
+
+def cullin_standard(model_output_dirpath, fbasename, with_humap_as_prediction_at_cullin=True):
+    references = dict( 
+        humap2_high = get_humap_high_reference(),
+        humap2_medium = get_humap_medium_reference(),
+        pre_ppi = get_pre_ppi_af_hc(),
+        huri = get_huri_reference(),
+    )
+    pdb_direct = get_pdb_ppi_predict_direct_reference()
+    pdb_cocomplex = get_pdb_ppi_predict_cocomplex_reference()
+    pdb_indirect = pdb_cocomplex.edge_identity_difference(pdb_direct)
+    references = references | {"pdb_direct" : pdb_direct, "pdb_cocomplex" : pdb_cocomplex, "pdb_indirect": pdb_indirect}
+    
+    predictions = dict(
+        average_edge = model23_results2edge_list(model_output_dirpath, fbasename),
+        cullin_max_saint = get_cullin_saint_scores_edgelist(),
+        average_edge_after2k = model23_results2edge_list(
+            model_output_dirpath,
+            fbasename,
+            discard_first_n = 2000),
+    #    hgscore_all = get_hgscore()
+    )
+    if with_humap_as_predictions_at_cullin:
+        # Get humap
+        humap_all = get_humap_all_reference()
+        # Reduce the map to the represented in the cullin system 
+        predicted_nodes = predictions['average_edge'].get_node_list()
+        humap_at_predicted_nodes = humap_all.node_select(predicted_nodes)
+        del humap_all
+        predictions = predictions | {"humap_at_average_edge_scores" : humap_at_predicted_nodes}
+
+    if (model_output_dirpath / "average_predicted_edge_scores_filter10.tsv").is_file():
+        temp = get_filter10_pred(model_output_dirpath)
+        predictions = predictions | {"average_edge_filter10" : temp}
+
+    write_roc_curves_and_table(model_output_dirpath, references=references, predictions=predictions)
+    
+    # Calculate the minimal pairwise SaintTable
+    minimal_saint_table = get_minimal_saint_table()
+
 
     # Calculate the node intersection table for all nodes
 
