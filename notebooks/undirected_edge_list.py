@@ -74,7 +74,8 @@ class UndirectedEdgeList:
         v = UndirectedEdgeList()
         v.update_from_edge_dict(new_edge_dict)
         return v
-
+    def get_node_list(self):
+        return list(set(list(self.a_nodes)).union(set(list(self.b_nodes))))
 
     def read_csv(self, path,  a_colname="auid", b_colname="buid", edge_value_colname = None, sep="\t"):
         _read_csv(u=self, path=path, a_colname=a_colname, b_colname=b_colname, sep=sep)
