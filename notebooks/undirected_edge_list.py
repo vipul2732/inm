@@ -48,12 +48,34 @@ class UndirectedEdgeList:
         u = UndirectedEdgeList()
         u.update_from_df(df)
         return u
-    def expanded_difference(self, other):
+    def edge_identity_difference(self, other): 
         """
-        The difference in edge values between self and other. 
+        Subtract edges based on identity. 
         """
-        ...
- 
+        # Build the first edge dict
+        self._build_edge_dict()
+        other._build_edge_dict()
+        new_edge_dict = {}
+        for key, value in self._edge_dict.items():
+            if key not in other._edge_dict:
+                new_edge_dict[key] = value
+        # Return a new UndirectedEdgeList
+        u = UndirectedEdgeList()
+        u.update_from_edge_dict(new_edge_dict)
+        return u 
+    def node_select(self, nodes):
+        """Give a list of nodes, select the edge list corresponding to the nodes in the list """
+        self._build_edge_dict()
+        new_edge_dict = {}
+        for edge, value in self._edge_dict.items():
+            a, b = edge
+            if (a in nodes) and (b in nodes):
+                new_edge_dict[edge] = value
+        v = UndirectedEdgeList()
+        v.update_from_edge_dict(new_edge_dict)
+        return v
+
+
     def read_csv(self, path,  a_colname="auid", b_colname="buid", edge_value_colname = None, sep="\t"):
         _read_csv(u=self, path=path, a_colname=a_colname, b_colname=b_colname, sep=sep)
     def read_example(self, name="biogrid"):
@@ -84,6 +106,10 @@ class UndirectedEdgeList:
           how to handle repeated observation of the same edge.
         """
         _update_from_df(self, df, a_colname=a_colname, b_colname=b_colname, edge_value_colname = edge_value_colname, multi_edge_value_merge_strategy = multi_edge_value_merge_strategy) 
+
+    def update_from_edge_dict(self, edge_dict):
+        _update_from_edge_dict(self, edge_dict)
+
     def node_intersection(self, other):
         assert isinstance(other, UndirectedEdgeList)
         return self.nodes.intersection(other.nodes)
@@ -183,6 +209,24 @@ def _update_from_df(u, df,a_colname="auid", b_colname="buid", edge_value_colname
     u.a_nodes = anodes 
     u.b_nodes = bnodes 
     u.update_properties()
+
+def _update_from_edge_dict(u, edge_dict):
+    # Get the node set
+    node_set = {}
+    anodes = []
+    bnodes = []
+    edges = []
+    for edge, edge_value in edge_dict.items():
+        a_node, b_node = edge
+        anodes.append(a_node)
+        bnodes.append(b_node)
+        edges.append(edge_value)
+    u.nedges = len(edges)
+    u.a_nodes = np.array(anodes)
+    u.b_nodes = np.array(bnodes)
+    u.edge_values = edges
+    u.update_properties()
+
 
 def _init(u):
     u.nedges = 0 
@@ -294,6 +338,50 @@ N edges {u.nedges}"""
 def _read_csv(u, path, a_colname="auid", b_colname="buid", edge_value_colname = None, sep="\t"):
     df = pd.read_csv(path, sep=sep)
     u.update_from_df(df, a_colname = a_colname, b_colname = b_colname, edge_value_colname = edge_value_colname)
+
+def _example_a():
+    u = UndirectedEdgeList()
+    df = pd.DataFrame({'auid': ['a', 'a', 'b'],
+                       'buid': ['b', 'c', 'c'],
+                       'w' : [1, 2, 3]})
+    u.update_from_df(
+            df,
+            edge_value_colname = 'w', multi_edge_value_merge_strategy = "max")
+    return u
+
+def _example_b():
+    u = UndirectedEdgeList()
+    df = pd.DataFrame(
+            {'auid': ['a', 'd', 'b'],
+             'buid': ['b', 'c', 'c'],
+             'w' : [1, 2, 3]})
+    u.update_from_df(df, edge_value_colname = 'w', multi_edge_value_merge_strategy = "max")
+    return u
+
+def _test_edge_identity_difference():
+    a = _example_a()
+    b = _example_b()
+    c = a.edge_identity_difference(b)
+    assert c.nedges == 1
+
+def _test_node_select():
+    a = _example_a()
+    nodes = ['a', 'b'] 
+    c = a.node_select(nodes)
+    assert c.n_nodes == 2
+    assert c.nedges == 1
+    return a, c, nodes
+
+def _test_node_select2():
+    a = _example_a()
+    nodes = ['a', 'b', 'e'] 
+    c = a.node_select(nodes)
+    assert c.n_nodes == 2
+    assert c.nedges == 1
+    return a, c, nodes
+
+
+
 
 _example_path = {"biogrid_ref" : "../data/processed/references/biogrid_reference.tsv",
                  "huri_ref": "../data/processed/references/HuRI_reference.tsv",
