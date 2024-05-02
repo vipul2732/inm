@@ -194,7 +194,6 @@ se_sr_low_prior_1_uniform_all_20k = from_template(
         num_warmup = 1_000,
         num_samples = 20_000,
         )
-        
 
 mini_se_sr_run2 = from_template(mini_se_sr_run,
                               model_output_dirpath = "mini_se_sr_run2",
@@ -344,6 +343,10 @@ se_sr_all_10k =  RunConfiguration(
 se_sr_all_20k = from_template(se_sr_all_10k,
                               num_samples = 20_000,
                               model_output_dirpath = "../results/se_sr_all_20k",)
+
+se_sr_all_20k_r16 = from_template(se_sr_all_20k,
+                                  model_output_dirpath = "../results/se_sr_all_20k_r16",
+                                  rseed = 16)
 
 se_sr_all_2k =  RunConfiguration(
     model_output_dirpath = "../results/se_sr_all_2k",
