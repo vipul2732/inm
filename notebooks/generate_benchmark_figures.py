@@ -593,7 +593,27 @@ def write_roc_curves_and_table(model_output_dirpath, predictions, references):
     df = df.sort_values("w", ascending=False)
     df.to_csv(str(model_output_dirpath / "average_predicted_edge_scores.tsv"), sep="\t", index=None)
 
-def cullin_standard(model_output_dirpath, fbasename, with_humap_as_prediction_at_cullin=True):
+def get_indirect_edges():
+    pdb_direct = get_pdb_ppi_predict_direct_reference()
+    pdb_cocomplex = get_pdb_ppi_predict_cocomplex_reference()
+    pdb_indirect = pdb_cocomplex.edge_identity_difference(pdb_direct)
+    return pdb_indirect
+
+def get_decoys_from_u(rng_key, u, N_decoys, a_colname="auid", b_colname="buid"):
+    indices = jnp.arange(u.nedges)
+    random_indices = jax.random.permutation(rng_key, indices)
+    random_indices = random_indices[0:N_decoys]
+    # build decoy
+    #breakpoint()
+    a_nodes = np.array(u.a_nodes)[random_indices]
+    b_nodes = np.array(u.b_nodes)[random_indices]
+    decoy = UndirectedEdgeList()
+    df = pd.DataFrame({a_colname : a_nodes, b_colname : b_nodes})
+    decoy.update_from_df(df, a_colname = a_colname, b_colname = b_colname)
+    return decoy
+
+
+def cullin_standard(model_output_dirpath, fbasename, with_humap_as_predictions_at_cullin=True):
     references = dict( 
         humap2_high = get_humap_high_reference(),
         humap2_medium = get_humap_medium_reference(),
@@ -611,9 +631,16 @@ def cullin_standard(model_output_dirpath, fbasename, with_humap_as_prediction_at
         average_edge_after2k = model23_results2edge_list(
             model_output_dirpath,
             fbasename,
-            discard_first_n = 2000),
+            discard_first_n = 2000))
+
+    #    Add some decoy references    
+    decoy_key_50 = jax.random.PRNGKey(303)
+    decoy_key_100 = jax.random.PRNGKey(404)
+    decoy50  = get_decoys_from_u(decoy_key_50,  predictions['average_edge'], 50) 
+    decoy100 = get_decoys_from_u(decoy_key_100, predictions['average_edge'], 100)
+    references = references | {"decoy50" : decoy50, "decoy100" : decoy100}
+
     #    hgscore_all = get_hgscore()
-    )
     if with_humap_as_predictions_at_cullin:
         # Get humap
         humap_all = get_humap_all_reference()
