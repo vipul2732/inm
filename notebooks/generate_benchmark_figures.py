@@ -581,6 +581,9 @@ def write_roc_curves_and_table(model_output_dirpath, predictions, references):
                        "auc" : auc,
                        "shuff_auc" : shuff_auc,}) 
     df.to_csv(str(model_output_dirpath / "benchmark.tsv"), sep="\t")
+    df.round(decimals = {"auc" : 3, "shuff_auc" : 3})
+    df.to_csv(str(model_output_dirpath / "benchmark_pub.tsv"))
+
     # Write the model prediction table
     reindexer = get_cullin_reindexer()
     inv_reindexer = {val : key for key, val in reindexer.items()}
@@ -636,9 +639,11 @@ def cullin_standard(model_output_dirpath, fbasename, with_humap_as_predictions_a
     #    Add some decoy references    
     decoy_key_50 = jax.random.PRNGKey(303)
     decoy_key_100 = jax.random.PRNGKey(404)
+    decoy_key_500 = jax.random.PRNGKey(504)
     decoy50  = get_decoys_from_u(decoy_key_50,  predictions['average_edge'], 50) 
     decoy100 = get_decoys_from_u(decoy_key_100, predictions['average_edge'], 100)
-    references = references | {"decoy50" : decoy50, "decoy100" : decoy100}
+    decoy500 = get_decoys_from_u(decoy_key_500, predictions['average_edge'], 500)
+    references = references | {"decoy50" : decoy50, "decoy100" : decoy100, "decoy500" : decoy500}
 
     #    hgscore_all = get_hgscore()
     if with_humap_as_predictions_at_cullin:
