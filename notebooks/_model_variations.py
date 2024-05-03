@@ -951,9 +951,6 @@ def weight2edge(x, slope=1000):
     """
     return jax.nn.sigmoid((x-0.5)*slope)
 
-def z2edge(z, slope=1000):
-    return jax.nn.sigmoid((z)*slope)
-
 class BaitPreyInfo(NamedTuple):
     edge_idxs : Array 
     Ndense : int 
