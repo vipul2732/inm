@@ -28,6 +28,7 @@ import networkx as nx
 import _model_variations as mv
 import pickle as pkl
 from collections import namedtuple
+import pyvis
 
 
 # +
@@ -143,6 +144,49 @@ def get_comparisons(u, dref, iref, cref):
     cocomplex = gbf.do_benchmark(u, cref)
     return direct, indirect, cocomplex
 
+def matrix_df_to_edge_list_df(df):
+    a, b = df.shape
+    columns = df.columns
+    an = []
+    bn = []
+    w = []
+    for i in range(a):
+        for j in range(0, i):
+            an.append(columns[i])
+            bn.append(columns[j])
+            w.append(float(df.iloc[i, j]))
+    return pd.DataFrame({'a': an, 'b': bn, 'w': w})
+
+def mymatshow(x, ax=None):
+    plt.matshow(x, cmap='plasma')
+    plt.colorbar(shrink=0.8)
+    
+def heatshow(x, square=True, n=12, shrink=0.8):
+    fig, ax = plt.subplots(figsize=(n, n))
+    cbar_kws = {"shrink": shrink}
+    sns.heatmap(x, square=square, cbar_kws=cbar_kws)
+    
+def get_top_edges_upto_threshold(edgelist_df, threshold=0.5):
+    k = 0
+    top_edges = {}
+    top_node_set = []
+    for i, r in edgelist_df.sort_values('w', ascending=False).iterrows():
+        #print(r['a'], r['b'], round(r['w'], 2))
+        top_node_set.append(r['a'])
+        top_node_set.append(r['b'])
+        top_edges[k] = r['a'], r['b']
+        if r['w'] < threshold:
+            break
+        k += 1
+    return list(set(top_node_set)), top_edges
+
+def pyvis_plot_network(top_edges):
+    G = nx.Graph()
+    G.add_edges_from([(val[0], val[1]) for i, val in top_edges.items()])
+    net = pyvis.network.Network(notebook = True)
+    net.from_nx(G)
+    return net
+
 
 # +
 # Globals
@@ -158,11 +202,13 @@ pdb_indirect = pdb_cocomplex.edge_identity_difference(pdb_direct)
 
 # Paths
 BasePaths = namedtuple("BasePaths",
-        "wt", "vif", "u20")
+        "wt vif u20")
 
 base_paths = BasePaths(
     wt = Path("../results/se_sr_wt_ctrl_20k/"),
-    vif = Path("../results/se_sr_vif_ctrl_20k/"),)
+    vif = Path("../results/se_sr_vif_ctrl_20k/"),
+    u20 = Path("../results/se_sr_low_prior_1_uniform_all_20k/")
+    wt_u20 = Path("../results/se_sr_low_prior_1_wt_20k/"))
 
 wt_path = "../results/se_sr_wt_ctrl_20k/"
 vif_path = "../results/se_sr_vif_ctrl_20k/"
@@ -185,16 +231,24 @@ u_u20_control = gbf.model23_results2edge_list(
     Path("../results/se_sr_low_prior_1_uniform_all_20k/"),
     "0_model23_se_sr_13")
 
+# +
 # Frames and counts
-av_wt, wt_spec_counts = get_results(wt_path)
-av_u20, av_u20_spec_counts = get_results(all_u_20)
+av_wt, av_wt_spec_counts = get_results(wt_path)
+wt_mcmc = pkl_load(base_paths.wt / "0_model23_se_sr_13.pkl")
+wt_model_data = pkl_load(
+    base_paths.wt / "0_model23_se_sr_13_model_data.pkl")
+
+wt_samples = wt_mcmc['samples']
+wt_As = mv.Z2A(wt_samples['z'])
+wt_As_av = np.mean(wt_As, axis=0)
+wt_A = mv.flat2matrix(wt_As_av, wt_model_data['N'])
+#wt_u20, wt_u20_spec_counts = get_results(all_u_20)
+# -
 
 # Graphs of data frames
 Gu20 = get_graph_from_df(av_u20)
 Gwt = get_graph_from_df(av_wt)
 Gwt_02 = get_filter_network(Gwt, 0.2)
-
-# -
 
 plt.hist(u20_As_av, bins=100)
 plt.show()
@@ -206,10 +260,7 @@ plot_benchmark(*get_comparisons(u_u20_control, pdb_direct, pdb_indirect, pdb_coc
 print(Gu20)
 print(Gwt)
 
-# +
-
 print(Gwt_02)
-# -
 
 pos = nx.spring_layout(Gwt_02)
 nx.draw(Gwt_02, with_labels="True")
@@ -312,7 +363,7 @@ plt.show()
 
 sorted(maximal_cliques_temp, key=(lambda x: len(x)), reverse=True)
 
-sns.heatmap(av_u20_spec_counts.loc[['NRBP2',
+some_nodes = ['NRBP2',
   'T22D2',
   'T22D1',
   'ZY11B',
@@ -325,7 +376,18 @@ sns.heatmap(av_u20_spec_counts.loc[['NRBP2',
   'HIF1A',
   'UBC12',
   'FEM1B',
-  'MED8'], :], xticklabels=4)
+  'MED8']
+sns.heatmap(av_u20_spec_counts.loc[some_nodes, :], xticklabels=4)
+plt.savefig("some_spec_counts.png", dpi=300)
+#plt.close()
+
+sns.heatmap(av_u20_spec_counts.loc[["EMD", "BAF"], :], vmax=5)
+
+sns.heatmap(wt_spec_counts.loc[some_nodes, :], xticklabels=4)
+
+sns.heatmap(av)
+
+plt.close()
 
 plt.matshow(u20_A, cmap='plasma')
 
@@ -354,11 +416,35 @@ mymatshow(one_minus_degree_prior * one_minus_degree_prior.T)
 u20_A_corrected = u20_A * (one_minus_degree_prior * one_minus_degree_prior.T)
 
 _N = 12
-def mymatshow(x, ax=None):
-    plt.matshow(x, cmap='plasma')
-    plt.colorbar(shrink=0.8)
 plt.figure(figsize=(_N, _N))
 mymatshow(u20_A_corrected)
+
+help(sns.heatmap)
+
+u20_A_df = pd.DataFrame(u20_A,
+                        columns = [u20_model_data['node_idx2name'][k] for k in range(u20_model_data['N'])],
+                       index = [u20_model_data['node_idx2name'][k] for k in range(u20_model_data['N'])])
+
+heatshow(u20_A_df)
+
+heatshow(degree_prior * degree_prior.T)
+
+wt_A_df = pd.DataFrame(wt_A, 
+    index = [wt_model_data['node_idx2name'][k] for k in range(wt_model_data['N'])],
+    columns = [wt_model_data['node_idx2name'][k] for k in range(wt_model_data['N'])])
+
+heatshow(wt_A_df)
+
+heatshow(u20_A_corrected)
+plt.close()
+
+(degree_prior * degree_prior.T).shape
+
+plt.plot(weighted_degree, 'k.')
+plt.xlabel("Node index")
+plt.ylabel("Degree")
+
+plt.close()
 
 fig, ax = plt.subplots(figsize=(12, 12))
 sns.heatmap(u20_A_corrected)
@@ -368,44 +454,33 @@ u20_A_corrected_df = pd.DataFrame(
     columns = [u20_model_data['node_idx2name'][k] for k in range(u20_model_data['N'])],
     index =   [u20_model_data['node_idx2name'][k] for k in range(u20_model_data['N'])])
 
+heatshow(u20_A_corrected_df)
+
 u20_corrected_cluster_grid = sns.clustermap(u20_A_corrected_df, metric='correlation')
 
-
-def matrix_df_to_edge_list_df(df):
-
-    a, b = df.shape
-    columns = df.columns
-    an = []
-    bn = []
-    w = []
-    for i in range(a):
-        for j in range(0, i):
-            an.append(columns[i])
-            bn.append(columns[j])
-            w.append(float(df.iloc[i, j]))
-    return pd.DataFrame({'a': an, 'b': bn, 'w': w})
 
 
 u20_A_corrected_edgelist_df = matrix_df_to_edge_list_df(u20_A_corrected_df)
 
-top_N = 300
-k = 0
-top_edges = {}
-top_node_set = []
-for i, r in u20_A_corrected_edgelist_df.sort_values('w', ascending=False).iterrows():
-    print(r['a'], r['b'], round(r['w'], 2))
-    top_node_set.append(r['a'])
-    top_node_set.append(r['b'])
-    top_edges[k] = r['a'], r['b']
-    if r['w'] < 0.5:
-        break
-    
-    k += 1
+u20_A_df = pd.DataFrame(u20_A,
+                        columns = [u20_model_data['node_idx2name'][k] for k in range(u20_model_data['N'])],
+                       index = [u20_model_data['node_idx2name'][k] for k in range(u20_model_data['N'])])
+
+u20_A_edgelist_df = matrix_df_to_edge_list_df(u20_A_df)
+
+wt_A_edgelist_df =  matrix_df_to_edge_list_df(wt_A_df)
+
+# +
+
+
+top_node_set, top_edges = get_top_edges_upto_threshold(u20_A_edgelist_df)
 top_node_set = list(set(top_node_set))
+print(len(top_node_set), len(top_edges))
+# -
 
-sns.clustermap(u20_A_corrected_df.loc[top_node_set, top_node_set])
 
-len(top_node_set)
+
+sns.clustermap(u20_A_corrected_df, metric="cosine")#.loc[top_node_set, top_node_set])
 
 sns.heatmap(av_u20_spec_counts.loc[top_node_set, :], vmax=10)
 
@@ -417,15 +492,168 @@ plt.tight_layout()
 plt.show()
 
 # +
-G = nx.Graph()
-G.add_edges_from([(val[0], val[1]) for i, val in top_edges.items()])
 
-net = pyvis.network.Network(notebook = True)
-
-net.from_nx(G)
-
-net.show("example.html")
+#net.show("example.html")
 # -
+
+u20_A_top_node_set, u20_A_top_edges = get_top_edges_upto_threshold(u20_A_edgelist_df, threshold=0.9997)
+print(len(u20_A_top_node_set), len(u20_A_top_edges))
+
+u20_A_corrected_top_node_set, u20_A_corrected_top_edges = get_top_edges_upto_threshold(
+    u20_A_corrected_edgelist_df, threshold=0.5)
+print(len(u20_A_corrected_top_node_set), len(u20_A_corrected_top_edges))
+
+net_corrected = pyvis_plot_network(u20_A_corrected_top_edges)
+
+net_corrected.show("example.html")
+
+# ## VIF Network
+# - DCA11: known vif interactor. Binds to CUL4B
+# - SPAG5: Mitotic spindle component. mTORC, CDK2, RAPTOR
+# - CUL4B: E3 ubiquitin ligase
+# - PDC6I: Multifuncitons. ESCRT. HIV-1 viral budding.
+# - MAGD1: Involved in the apoptotic response after nerve growth factor (NGF) binding in neuronal cells. Inhibits cell cycle progression, and facilitates NGFR-mediated apoptosis. May act as a regulator of the function of DLX family members. May enhance ubiquitin ligase activity of RING-type zinc finger-containing E3 ubiquitin-protein ligases
+#
+#
+# ## EZH2 Network
+# - EZH2: Polycomb group (PcG) protein. Catalytic subunit of the PRC2/EED-EZH2 complex.
+#     - ABCG2
+# - ABCF2: ATP-binding cassette sub-family F member 2
+#
+# ## CBFB-Beta Network
+# Hypothesis - this interaction network occurs at the nuclear envelope.
+# - CBFB-RUNX1: Forms the heterodimeric complex core-binding factor (CBF) with CBFB
+# - CBFB-RUNX2: Transcription factor
+# - CBFB-ANXA1: Plays important roles in the innate immune response as effector of glucocorticoid-mediated responses and regulator of the inflammatory process.
+# - CBFB-BAG3: Molecular co-chaperone for HSP70
+# - CBFB-AKP8L: Could play a role in constitutive transport element (CTE)-mediated gene expression by association with DHX9. In case of HIV-1 infection, involved in the DHX9-promoted annealing of host tRNA(Lys3) to viral genomic RNA.
+# - CBFB-BAF:Non-specific DNA-binding protein. EMD and BAF are cooperative cofactors of HIV-1 infection
+# - EMD-BAF!: EMD and BAF are cooperative cofactors of HIV-1 infection. Association of EMD with the viral DNA requires the presence of BAF and viral integrase. The association of viral DNA with chromatin requires the presence of BAF and EMD
+# - TOIP1: Required for nuclear membrane integrity. Induces TOR1A and TOR1B
+#
+# - HPBP1: 
+# - CBFB-RF
+#
+#
+#
+# ## CUL5 Network
+# - CUL5 and substrate receptors ASB1, ASB3, ASB7, ASB13
+# - CUL5 and NEDD8
+# - CUL5-RB40C: Substrate recognition component cullin
+# - CUL5-PCMD2: Elongin BC-CUL5-SOCS-box protein
+# - CUL5-RBX2: Probable component of the SCF (SKP1-CUL1-F-box protein) E3 ubiquitin ligase complex 
+# - CUL5-EMC1: Endoplasmic reticulmn. Unknown
+# - CUL5-UGGG1: ER Quality control
+# - CUL5-SOCS4: SCF-like ECS (Elongin BC-CUL2/5-SOCS-box protein) E3 ubiquitin-protein ligase complex
+# - CUL5-MYL4: Myosin
+# - CUL5-DCNL1: Part of an E3 ubiquitin ligase complex for neddylation. Acts by binding to cullin-RBX1 complexes
+# - CUL5-CAND1: Key assembly factor of SCF (SKP1-CUL1-F-box protein) E3 ubiquitin ligase complex
+# - CUL5-SYNE2: Linking network between organelles and the actin cytoskeleton to maintain the subcellular spatial organization. As a component of the LINC
+#
+#
+#
+# ## NFKB Network
+# - NFKB1: NF-kappa-B is a pleiotropic transcription factor present in almost all cell types.
+# - BAG6: (Unkown) Client proteins that cannot be properly delivered to the endoplasmic reticulum are ubiquitinated by RNF126, an E3 ubiquitin-protein ligase associated with BAG6 and are sorted to the proteasome.
+# - RD23B: Multiubiquitin chain receptor involved in modulation of proteasomal degradation. Binds to polyubiquitin chains
+# - OXSR1: Effector serine/threonine-protein kinase component of the WNK-SPAK/OSR1 kinase cascade
+# - Plays a central role in late thymocyte development by controlling both positive and negative T-cell selection.
+# - ARGH1: ARHGEF1. 
+# - PDS5A: Probable regulator of sister chromatid cohesion in mitosis which may stabilize cohesin complex association with chromatin
+# - 2AAB: Interacts with RAD21 a APOB promoter.
+#
+#
+#
+#
+# ## LLR1 Network
+# - LLR1. Substrate recognition subunit of an ECS (Elongin BC-CUL2/5-SOCS-box protein)
+# - SGT1. May play a role in ubiquitination and subsequent proteasomal degradation of target proteins.
+#
+#
+#
+# ## ARI1 Network
+# - ARI1: E3 ubiquitin-protein ligase, which catalyzes ubiquitination of target proteins together with ubiquitin-conjugating enzyme E2 UBE2L3.
+# - TFAP4: Transcription factor that activates both viral and cellular genes by binding to the symmetrical DNA sequence 5'-CAGCTG-3'.
+#
+# ## HSP76 Network
+# - RNF114: E3 ubiquitin-protein ligase that promotes the ubiquitination of various substrates
+# - NLRC3: Negative regulator of the innate immune response. HSV-1, TOLL, STING
+# - STK39: Unkown
+#
+#
+#
+#
+# RAB21: Small GTPase involved in membrane trafficking control
+# - RAB21-CISY: Citrate synthase is found in nearly all cells capable of oxidative metabolism
+#
+#
+#
+#
+# - RBX2-Nedd8: Part of an E3 ubiquitin ligase complex for neddylation
+# - APC11 a cullin anaphase protomting complex
+#
+#
+#
+
+wt_weighted_degree = np.sum(wt_A_df.values, axis=0).reshape((235, 1))
+
+plt.plot(wt_weighted_degree, 'k.')
+
+wt_top_node_set, wt_top_edges = get_top_edges_upto_threshold(wt_A_edgelist_df, threshold=0.9998)
+print(len(wt_top_node_set), len(wt_top_edges))
+
+wt_net = pyvis_plot_network(wt_top_edges)
+
+# +
+#wt_net.show("wt_example.html")
+# -
+
+net_corrected.show("example.html")
+
+net = pyvis_plot_network(u20_A_top_edges)
+
+net.show("net_example.html")
+
+# ## Cop9
+# - KAT3: No known viral or COP9 ascociation.Catalyzes the irreversible transamination of the L-tryptophan metabolite L-kynurenine to form kynurenic acid (KA)
+# - ELOC: Elongation factor
+# - RBX1: Ring box protein 1
+#
+# ## CUL5 - ASB
+# - ASB: Substrate-recognition component of a SCF-like ECS (Elongin-Cullin-SOCS-box protein) E3 ubiquitin-protein ligase. 
+# - SOCS2: Probable substrate recognition component of a SCF-like ECS (Elongin BC-CUL2/5-SOCS-box protein) E3 ubiquitin-protein.
+# - SPSB: Substrate recognition component of a SCF-like ECS (Elongin BC-CUL2/5-SOCS-box protein)
+# - PCMD2: May act as a substrate recognition component of an ECS (Elongin BC-CUL5-SOCS-box protein)
+# - RB40C: Probable substrate-recognition component of a SCF-like ECS (Elongin-Cullin-SOCS-box protein)
+#
+# ## RUNX
+# - RUNX: transcription factors
+# - CBFB: Bind to CBFB
+# - PML: Nuclear bodies
+#
+# ## SYNE2
+# - SYNE2: Organlle linking
+# - Cell cycle-regulated E3 ubiquitin ligase that controls progression through mitosis and the G1 phase of the cell cycl
+
+plt.hist(u20_A_edgelist_df['w'], bins=100)
+plt.show()
+
+u20_A_edgelist_df[u20_A_edgelist_df['w'] > 0.9998]
+
+plt.hist(u20_A_edgelist_df['w'], bins=100, range=(0.999, 1))
+plt.show()
+
+np.concatenate([np.linspace(0, 0.9), np.linspace(0.9, 1)])
+
+plt.hist(u20_A_edgelist_df['w'], bins=100, range=(0, 0.01))
+plt.show()
+
+x = u20_A_corrected_edgelist_df
+sel = x['a'] == 'ELOB'
+x.sort_values('w', ascending=False).loc[sel, :]
+
+
+u20
 
 cbfb_network = ["BAF", "EMD"]
 ezh2_network = ["EZH2", "ABCF2"]
@@ -472,7 +700,7 @@ sns.heatmap(av_u20_spec_counts.loc[cbfb_network, :], vmax=10)
 #
 # ## NFKB Network
 # - NFKB1: NF-kappa-B is a pleiotropic transcription factor present in almost all cell types.
-# - NFKB1-BAG6: (Unkown) Client proteins that cannot be properly delivered to the endoplasmic reticulum are ubiquitinated by RNF126, an E3 ubiquitin-protein ligase associated with BAG6 and are sorted to the proteasome.
+# - BAG6: (Unkown) Client proteins that cannot be properly delivered to the endoplasmic reticulum are ubiquitinated by RNF126, an E3 ubiquitin-protein ligase associated with BAG6 and are sorted to the proteasome.
 # - RD23B: Multiubiquitin chain receptor involved in modulation of proteasomal degradation. Binds to polyubiquitin chains
 # - OXSR1: Effector serine/threonine-protein kinase component of the WNK-SPAK/OSR1 kinase cascade
 # - Plays a central role in late thymocyte development by controlling both positive and negative T-cell selection.
@@ -484,12 +712,14 @@ sns.heatmap(av_u20_spec_counts.loc[cbfb_network, :], vmax=10)
 # ## VIF Network
 # - Vif-DCA11
 # - Vif-CUL4B: Core component of multiple cullin-RING-based E3 ubiquitin-protein ligase complexes. DCA11 known to interact with CUL4A. CUL4B?
+# - DCA11: CUL4B
+# - PD6I:
 # - DCA11-PDC6I: Multifunctional protein involved in endocytosis, multivesicular body biogenesis. Role in HIV-1.
 # - CUL4B-SPAG5.Essential component of the mitotic spindle required for normal chromosome segregation and progression into anaphase.
 # - CUL4B-MAGD1: Involved in the apoptotic response after nerve growth factor (NGF) binding in neuronal cells. Inhibits cell cycle progression, and facilitates NGFR-mediated apoptosis. May act as a regulator of the function of DLX family members. May enhance ubiquitin ligase activity of RING-type zinc finger-containing E3 ubiquitin-protein ligases
 #
 # ## LLR1 Network
-# - LLR1-SGT1. Substrate recognition subunit of an ECS (Elongin BC-CUL2/5-SOCS-box protein)
+# - LLR1. Substrate recognition subunit of an ECS (Elongin BC-CUL2/5-SOCS-box protein)
 # - SGT1. May play a role in ubiquitination and subsequent proteasomal degradation of target proteins.
 #
 #
@@ -513,15 +743,12 @@ sns.heatmap(av_u20_spec_counts.loc[cbfb_network, :], vmax=10)
 #
 #
 # - RBX2-Nedd8: Part of an E3 ubiquitin ligase complex for neddylation
-# - 
-#
-#
 # - APC11 a cullin anaphase protomting complex
 #
 #
 #
 
-import pyvis
+
 
 cluster_maps = cluster_map_from_clustergrid(
     u20_A_corrected_df,

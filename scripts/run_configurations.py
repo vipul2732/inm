@@ -182,10 +182,53 @@ se_sr_low_prior_1_all_20k = from_template(mini_se_sr_low_prior_1,
     num_warmup = 1_000,
     )
 
+se_sr_low_prior_1_wt_20k = from_template(mini_se_sr_low_prior_1,
+    model_output_dirpath = "../results/se_sr_low_prior_1_wt_20k",
+    num_samples = 20_000,
+    num_warmup = 1_000,
+    filter_kw = "wt",
+    )
+
+se_sr_low_prior_1_vif_20k = from_template(mini_se_sr_low_prior_1,
+    model_output_dirpath = "../results/se_sr_low_prior_1_vif_20k",
+    num_samples = 20_000,
+    num_warmup = 1_000,
+    filter_kw = "vif",
+    )
+
+se_sr_low_prior_1_uniform_mock_20k = from_template(
+    mini_se_sr_low_prior_1_uniform,
+    model_output_dirpath = "../results/se_sr_low_prior_1_uniform_mock_20k",
+    num_samples = 20_000,
+    num_warmup = 1_000,
+    filter_kw = "mock",
+    )
+
+se_sr_low_prior_1_uniform_wt_20k = from_template(mini_se_sr_low_prior_1_uniform,
+    model_output_dirpath = "../results/se_sr_low_prior_1_uniform_wt_20k",
+    num_samples = 20_000,
+    num_warmup = 1_000,
+    filter_kw = "wt",
+    )
+
+se_sr_low_prior_1_uniform_vif_20k = from_template(mini_se_sr_low_prior_1_uniform,
+    model_output_dirpath = "../results/se_sr_low_prior_1_uniform_vif_20k",
+    num_samples = 20_000,
+    num_warmup = 1_000,
+    filter_kw = "vif",
+    )
+
 se_sr_low_prior_1_all_100k = from_template(se_sr_low_prior_1_all_20k,
     model_output_dirpath = "../results/se_sr_low_prior_1_all_100k",
     thinning = 5,
     num_samples = 100_000,
+    )
+
+se_sr_low_prior_1_all_100k = from_template(se_sr_low_prior_1_all_20k,
+    model_output_dirpath = "../results/se_sr_low_prior_1_wt_100k",
+    thinning = 5,
+    num_samples = 100_000,
+    filter_kw = "wt",
     )
 
 se_sr_low_prior_1_uniform_all_20k = from_template(
