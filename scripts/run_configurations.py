@@ -208,9 +208,30 @@ se_sr_low_prior_1_uniform_mock_100k = from_template(
     mini_se_sr_low_prior_1_uniform,
     model_output_dirpath = "../results/se_sr_low_prior_1_uniform_mock_100k",
     num_samples = 100_000,
-    num_warmup = 1_000,
+    num_warmup = 5_000,
     filter_kw = "mock",
+    thinning = 5,
     )
+
+se_sr_low_prior_1_uniform_wt_100k = from_template(
+    mini_se_sr_low_prior_1_uniform,
+    model_output_dirpath = "../results/se_sr_low_prior_1_uniform_wt_100k",
+    num_samples = 100_000,
+    num_warmup = 5_000,
+    filter_kw = "wt",
+    thinning = 5,
+    )
+
+se_sr_low_prior_1_uniform_vif_100k = from_template(
+    mini_se_sr_low_prior_1_uniform,
+    model_output_dirpath = "../results/se_sr_low_prior_1_uniform_vif_100k",
+    num_samples = 100_000,
+    num_warmup = 5_000,
+    filter_kw = "vif",
+    thinning = 5,
+    )
+
+
 
 se_sr_low_prior_2_uniform_mock_5k = from_template(
     mini_se_sr_low_prior_1_uniform,
