@@ -204,6 +204,45 @@ se_sr_low_prior_1_uniform_mock_20k = from_template(
     filter_kw = "mock",
     )
 
+se_sr_low_prior_1_uniform_mock_100k = from_template(
+    mini_se_sr_low_prior_1_uniform,
+    model_output_dirpath = "../results/se_sr_low_prior_1_uniform_mock_100k",
+    num_samples = 100_000,
+    num_warmup = 1_000,
+    filter_kw = "mock",
+    )
+
+se_sr_low_prior_2_uniform_mock_5k = from_template(
+    mini_se_sr_low_prior_1_uniform,
+    model_output_dirpath = "../results/se_sr_low_prior_2_uniform_mock_5k",
+    num_samples = 20_000,
+    num_warmup = 1_000,
+    filter_kw = "mock",
+    hyper_param_alpha = 0.0001,
+    hyper_param_beta = 0.001,
+    )
+
+se_sr_low_prior_2_uniform_mock_20k = from_template(
+    mini_se_sr_low_prior_1_uniform,
+    model_output_dirpath = "../results/se_sr_low_prior_2_uniform_mock_20k",
+    num_samples = 20_000,
+    num_warmup = 1_000,
+    filter_kw = "mock",
+    hyper_param_alpha = 0.0001,
+    hyper_param_beta = 0.001,
+    )
+
+se_sr_low_prior_2_uniform_mock_100k = from_template(
+    mini_se_sr_low_prior_1_uniform,
+    model_output_dirpath = "../results/se_sr_low_prior_2_uniform_mock_100k",
+    num_samples = 100_000,
+    num_warmup = 1_000,
+    filter_kw = "mock",
+    hyper_param_alpha = 0.0001,
+    hyper_param_beta = 0.001,
+    thinning = 5,
+    )
+
 se_sr_low_prior_1_uniform_wt_20k = from_template(mini_se_sr_low_prior_1_uniform,
     model_output_dirpath = "../results/se_sr_low_prior_1_uniform_wt_20k",
     num_samples = 20_000,
@@ -224,7 +263,7 @@ se_sr_low_prior_1_all_100k = from_template(se_sr_low_prior_1_all_20k,
     num_samples = 100_000,
     )
 
-se_sr_low_prior_1_all_100k = from_template(se_sr_low_prior_1_all_20k,
+se_sr_low_prior_1_wt_100k = from_template(se_sr_low_prior_1_all_20k,
     model_output_dirpath = "../results/se_sr_low_prior_1_wt_100k",
     thinning = 5,
     num_samples = 100_000,
@@ -540,12 +579,10 @@ se_sr_10k_wt = from_template(tenK_template,
                           filter_kw = "wt",)
 
 se_sr_20k_wt = from_template(tenK_template,
-                          model_output_dirpath = "../results/se_sr_20k_wt",
-                          model_name = "model23_se_sr",
-                          num_samples = 20_000, 
+    model_output_dirpath = "../results/se_sr_20k_wt",
+    model_name = "model23_se_sr",
+    num_samples = 20_000, 
                           filter_kw = "wt",)
-
-
 
 se_sr_sc_10k_wt = from_template(tenK_template,
                           model_output_dirpath = "../results/se_sr_sc_10k_wt",
@@ -562,12 +599,10 @@ se_sr_10k_vif  = from_template(tenK_template,
                           model_name = "model23_se_sr",
                           filter_kw = "vif",)
 
-
 se_sr_sc_10k_vif = from_template(tenK_template,
                           model_output_dirpath = "../results/se_sr_sc_10k_vif",
                           model_name = "model23_se_sr_sc",
                           filter_kw = "vif",)
-
 
 se_10k_mock = from_template(tenK_template,
                           model_output_dirpath = "../results/se_10k_mock",
@@ -607,4 +642,3 @@ se_sr_sc_10k_mock = from_template(tenK_template,
                           model_output_dirpath = "../results/se_sr_sc_10k_mock",
                           model_name = "model23_se_sr_sc",
                           filter_kw = "mock",)
-
