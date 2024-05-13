@@ -12,6 +12,17 @@
 #     name: python3
 # ---
 
+# +
+
+import importlib
+import dev_clique_and_community_src as dcc
+import numpyro
+import numpyro.distributions as dist
+import jax
+importlib.reload(dcc)
+# %matplotlib inline
+# -
+
 import matplotlib.pyplot as plt
 import seaborn as sns
 import networkx as nx
@@ -33,250 +44,9 @@ import pyvis
 
 
 # +
-# Load in the average network
-def pkl_load(path):
-    with open(path, "rb") as f:
-        return pkl.load(f)
-
-def av_edge_load(path):
-    return pd.read_csv(path, sep="\t")
-
-def get_clique_list(G):
-    return list(nx.find_cliques(G))
-
-def get_n_from_iterator(iterator):
-    """Memory efficient"""
-    n = 0
-    for i in iterator:
-        n += 1
-    return n
-
-def clique_plot(ts, ns):
-    plt.plot(ts, ns, 'k.')
-    plt.xlabel("threshold")
-    plt.ylabel("N cliques")
-
-def get_filter_network(G, threshold):
-    filtered_graph = nx.Graph()
-    nodes = G.nodes()
-    filtered_graph.add_nodes_from(nodes)
-    filtered_edges = [(u, v, w) for u,v,w in G.edges(data='weight') if w > threshold]
-    filtered_graph.add_weighted_edges_from(filtered_edges)
-    return filtered_graph
-
-def add_names_to_df(df, uid2name):
-    df.loc[:, "aname"] = [uid2name[uid] for uid in df['auid']]
-    df.loc[:, "bname"] = [uid2name[uid] for uid in df['buid']]
-    
-def get_results_df_spec_counts(dir_str):
-    path = dir_str + "average_predicted_edge_scores.tsv"
-    df = av_edge_load(path)
-    spec_counts = pd.read_csv(
-        dir_str + "spec_table.tsv",
-        sep="\t",
-        index_col=0)
-    return df, spec_counts
-
-def plot_edges(ts, ne):
-    plt.plot(ts, ne, 'k')
-    plt.ylabel("number of edges")
-    plt.xlabel("threshold")
-    
-def get_n_maximal_cliques(G, ts):
-    return [get_n_from_iterator(nx.find_cliques(get_filter_network(G, t))) for t in ts]
-    
-def h(x):
-    return '{:,}'.format(x)
-
-
-def get_nedges(G, ts):
-    return [get_filter_network(G, t).number_of_edges() for t in ts]
-
-def get_graph_from_df(df):
-    G = nx.Graph()
-
-    # Add edges with weights to the graph
-    for i, r in df.iterrows():
-        G.add_edge(r['a_gene'], r['b_gene'], weight=r['w'])
-    return G
-
-def CSN_selector(df):
-    sel = np.array(["CSN" in r['a_gene'] for i,r in df.iterrows()])
-    sel2 = np.array(["CSN" in r['b_gene'] for i,r in df.iterrows()])
-    sel3 = sel & sel2
-    return sel3
-
-def dataframe_from_matrix(matrix, node_names, name2uid):
-    matrix_predictor = []
-    for i in range(236):
-        for j in range(0, i):
-            val = float(matrix[i, j])
-            aname = node_names[i]
-            bname = node_names[j]
-    
-            matrix_predictor.append((aname, bname, val))
-    
-    matrix_predictor_df = pd.DataFrame(
-                matrix_predictor, 
-                columns=['aname', 'bname', 'w'])
-
-    auid = [name2uid[name] for name in matrix_predictor_df['aname']]
-    buid = [name2uid[name] for name in matrix_predictor_df['bname']]
-    matrix_predictor_df.loc[:, 'auid'] = auid
-    matrix_predictor_df.loc[:, 'buid'] = buid
-    return matrix_predictor_df
-
-def add_names_to_df(x, name2uid):
-    aname = [name2uid[name] for name in x['auid']]
-    bname = [name2uid[name] for name in x['buid']]
-    x.loc[:, 'aname'] = aname
-    x.loc[:, 'bname'] = bname
-    
-
-def plot_benchmark(a, b, c):
-    plt.plot(a.ppr_points, a.tpr_points, label="cocomplex")
-    plt.plot(b.ppr_points, b.tpr_points, label="direct")
-    plt.plot(c.ppr_points, c.tpr_points, label="indirect")
-    plt.legend()
-    
-def get_comparisons(u, dref, iref, cref):
-    direct = gbf.do_benchmark(u, dref)
-    indirect = gbf.do_benchmark(u, iref)
-    cocomplex = gbf.do_benchmark(u, cref)
-    return direct, indirect, cocomplex
-
-def matrix_df_to_edge_list_df(df):
-    a, b = df.shape
-    columns = df.columns
-    an = []
-    bn = []
-    w = []
-    for i in range(a):
-        for j in range(0, i):
-            an.append(columns[i])
-            bn.append(columns[j])
-            w.append(float(df.iloc[i, j]))
-    return pd.DataFrame({'a': an, 'b': bn, 'w': w})
-
-def mymatshow(x, ax=None):
-    plt.matshow(x, cmap='plasma')
-    plt.colorbar(shrink=0.8)
-    
-def heatshow(x, square=True, n=12, shrink=0.8):
-    fig, ax = plt.subplots(figsize=(n, n))
-    cbar_kws = {"shrink": shrink}
-    sns.heatmap(x, square=square, cbar_kws=cbar_kws)
-    
-def get_top_edges_upto_threshold(edgelist_df, threshold=0.5):
-    k = 0
-    top_edges = {}
-    top_node_set = []
-    for i, r in edgelist_df.sort_values('w', ascending=False).iterrows():
-        #print(r['a'], r['b'], round(r['w'], 2))
-        top_node_set.append(r['a'])
-        top_node_set.append(r['b'])
-        top_edges[k] = r['a'], r['b']
-        if r['w'] < threshold:
-            break
-        k += 1
-    return list(set(top_node_set)), top_edges
-
-def pyvis_plot_network(top_edges):
-    G = nx.Graph()
-    G.add_edges_from([(val[0], val[1]) for i, val in top_edges.items()])
-    net = pyvis.network.Network(notebook = True)
-    net.from_nx(G)
-    return net
-
-def cluster_map_from_clustergrid(data, clustergrid, n_clusters, criterion):
-    row_clusters, col_clusters = get_cluster_assignments(clustergrid, n_clusters, criterion)
-    row_order = clustergrid.dendrogram_row.reordered_ind
-    col_order = clustergrid.dendrogram_col.reordered_ind
-    return remap_to_cluster_maps(data, row_clusters, col_clusters, row_order, col_order)
-
-def get_cluster_assignments(clustergrid, n_clusters, criterion="maxclust"):
-    # Assuming you want to cut by a specific number of clusters, for example, 2 clusters
-    row_clusters = fcluster(clustergrid.dendrogram_row.linkage, n_clusters, criterion='maxclust')
-    col_clusters = fcluster(clustergrid.dendrogram_col.linkage, n_clusters, criterion='maxclust')
-    return row_clusters, col_clusters
-
-def remap_to_cluster_maps(data, row_clusters, col_clusters, row_order, col_order):
-    # Create a dictionary mapping from cluster number to rows/columns
-    row_cluster_map = {i + 1: [] for i in range(row_clusters.max())}
-    for idx, cluster_id in enumerate(row_clusters):
-        row_cluster_map[cluster_id].append(data.index[row_order[idx]])
-
-    col_cluster_map = {i + 1: [] for i in range(col_clusters.max())}
-    for idx, cluster_id in enumerate(col_clusters):
-        col_cluster_map[cluster_id].append(data.columns[col_order[idx]])
-    return {"row" : row_cluster_map, "col": col_cluster_map}
-
-def min_max_scale_to_01(a):
-    return (a - np.min(a)) / (np.max(a)-np.min(a))
-
-def get_results(path):
-    mcmc = pkl_load(path / "0_model23_se_sr_13.pkl")
-    model_data = pkl_load(path / "0_model23_se_sr_13_model_data.pkl")
-
-    samples = mcmc['samples']
-    As = mv.Z2A(samples['z'])
-    As_av = np.mean(As, axis=0)
-    A = mv.flat2matrix(As_av, model_data['N'])
-    u = gbf.model23_matrix2u(A, model_data)
-    A_df = pd.DataFrame(A, 
-    index =   [model_data['node_idx2name'][k] for k in range(model_data['N'])],
-    columns = [model_data['node_idx2name'][k] for k in range(model_data['N'])])
-    
-    edgelist_df = matrix_df_to_edge_list_df(A_df)
-    
-    return Results(
-      path = path,
-      mcmc = mcmc,
-      samples = samples,
-      model_data = model_data,
-      As = As,
-      As_av = As_av,
-      A = A,
-      u = u,
-      A_df = A_df,
-      edgelist_df = edgelist_df,
-    )
-    
-
-
-# +
-# Globals
-u20_base_path = Path("../results/se_sr_low_prior_1_uniform_all_20k/")
-
-name2uid = gbf.get_cullin_reindexer()
-uid2name = {val: key for key, val in name2uid.items()}
-
-pdb_direct = gbf.get_pdb_ppi_predict_direct_reference()
-pdb_cocomplex = gbf.get_pdb_ppi_predict_cocomplex_reference()
-pdb_indirect = pdb_cocomplex.edge_identity_difference(pdb_direct)
-
-
-# Paths
-BasePaths = namedtuple("BasePaths",
-        "wt vif u20")
-
-base_paths = BasePaths(
-    wt = Path("../results/se_sr_wt_ctrl_20k/"),
-    vif = Path("../results/se_sr_vif_ctrl_20k/"),
-    u20 = Path("../results/se_sr_low_prior_1_uniform_all_20k/"),
-    )
-
-wt_path = "../results/se_sr_wt_ctrl_20k/"
-vif_path = "../results/se_sr_vif_ctrl_20k/"
-mock_path = "../results/se_sr_mock_ctrl_20k/"
-all_u_20 = "../results/se_sr_low_prior_1_uniform_all_20k/"
-
-
-
-
-u20_mcmc = pkl_load(u20_base_path / "0_model23_se_sr_13.pkl")
-u20_model_data = pkl_load(
-    u20_base_path / "0_model23_se_sr_13_model_data.pkl")
+u20_mcmc = dcc.pkl_load(dcc.u20_base_path / "0_model23_se_sr_13.pkl")
+u20_model_data = dcc.pkl_load(
+    dcc.u20_base_path / "0_model23_se_sr_13_model_data.pkl")
 
 u20_samples = u20_mcmc['samples']
 u20_As = mv.Z2A(u20_samples['z'])
@@ -293,191 +63,96 @@ u_u20_control = gbf.model23_results2edge_list(
 Results = namedtuple("Results",
     "path mcmc model_data samples As As_av A u A_df edgelist_df")
 
-wt_results = get_results(Path(wt_path))
+wt_results = dcc.get_results(Path(dcc.wt_path))
 
-mock_results = get_results(Path(mock_path))
-vif_results = get_results(Path(vif_path))
+mock_results = dcc.get_results(Path(dcc.mock_path))
+vif_results = dcc.get_results(Path(dcc.vif_path))
 
-mock_lp1_uniform_results = get_results(Path("../results/se_sr_low_prior_1_uniform_mock_20k/"))
-
-wt_results.As[0, :]
+mock_lp1_uniform_results = dcc.get_results(Path(dcc.mock_lp1_uniform_results))
 
 wt_flat2matrix = jax.jit(Partial(mv.flat2matrix, n=wt_results.model_data['N']))
 
 co_structure_reference = gbf.get_pdb_ppi_predict_cocomplex_reference()
 
-# +
 cullin_reindexer = gbf.get_cullin_reindexer()
-def results_frame2u(results, frame_index, from_average = False):
-    u = gbf.UndirectedEdgeList()
-    N = results.model_data['N']
-    M = results.model_data['M']
-    a = np.zeros(M, dtype="U14")
-    b = np.zeros(M, dtype="U14")
-    w = np.zeros(M, dtype=np.float32)
-    node_idx2name = results.model_data['node_idx2name']
-    As = np.array(results.As)
-    k = 0
-    for i in range(N):
-        for j in range(i+1, N):
-            a[k] = node_idx2name[i]
-            b[k] = node_idx2name[j]
-            if isinstance(frame_index, int):
-                w[k] = As[frame_index, k]
-            elif frame_index == "all":
-                w[k] = np.mean(As[:, k])
-            else:
-                raise ValueError
-            k += 1
-    #print("done")
-    u.update_from_df(pd.DataFrame({"auid": a, "buid": b, "w": w}), 
-                     multi_edge_value_merge_strategy = "max",
-                    edge_value_colname = "w")
-    u.reindex(cullin_reindexer, enforce_coverage = False)
-    return u
 
-def assessment_of_scoring(results, uref, every = 1):
-    nframes, nedges = results.As.shape
-    aucs = []
-    for frame_index in range(nframes):
-        if frame_index % every == 0:
-            u_pred = results_frame2u(results, frame_index)
-            benchmark_results = gbf.do_benchmark(pred = u_pred, ref = uref)
-            aucs.append(benchmark_results.auc)
-            print(frame_index)
-    return aucs
-    
-    
-# -
-
-def get_u_from_results_at_position(results, position_idx):
-    a = []
-    b = []
-    w = []
-    N = results.model_data['N']
-    M = results.model_data['M']
-    idmap = results.model_data['node_idx2name']
-    samples = results.samples
-    k = 0
-    for i in range(N):
-        for j in range(i+1, N):
-            a.append(idmap[i])
-            b.append(idmap[j])
-            w.append(float(results.As[position_idx, k]))
-            k += 1
-    u = gbf.UndirectedEdgeList()
-    df = pd.DataFrame({"auid": a, "buid": b, "w": np.array(w)})
-    reindexer = gbf.get_cullin_reindexer()
-    u.update_from_df(df, edge_value_colname="w", multi_edge_value_merge_strategy="max")
-    u.reindex(reindexer, enforce_coverage = False)
-    return u
-            
-
+dcc.get_u_from_results_at_position
 
 mock_lp1_uniform_results.As.shape
 
 # Assessment of scoring
-wt_assessment_of_scoring = assessment_of_scoring(wt_results, co_structure_reference, 
-                                                 every=1000)
+wt_assessment_of_scoring = dcc.assessment_of_scoring(
+    wt_results,
+    co_structure_reference, 
+    every=1000)
 
-scores = [float(wt_results.mcmc['extra_fields']['potential_energy'][k]) for k in range(0, 20_000, 1000)]
+wt_scores = [float(wt_results.mcmc['extra_fields']['potential_energy'][k]) for k in range(0, 20_000, 1000)]
 
-plt.plot(wt_assessment_of_scoring, scores, 'k.')
+plt.plot(wt_assessment_of_scoring, wt_scores, 'k.', alpha=0.5)
 plt.xlim(0, 1)
 plt.xlabel("Co-structure accuracy (AUC)")
 plt.ylabel("Score")
 
-wt_results.model_data.keys()
+# +
+#wt_results.model_data.keys()
 
 # +
-import numpyro
-import numpyro.distributions as dist
-import jax
-
-def model():
-    x = numpyro.sample('x', dist.Normal(0, 1))
-    y = numpyro.sample('y', dist.Normal(2, 3))
 
 model = mv.model23_se_sr
 # Initialize the model: this also provides a callable that computes the potential energy
 rng_key = jax.random.PRNGKey(0)
 wt_model_kwargs = {"model_data": wt_results.model_data}
-model_init = numpyro.infer.util.initialize_model(rng_key, model, model_kwargs=wt_model_kwargs)
+wt_model_init = numpyro.infer.util.initialize_model(rng_key, model, model_kwargs=wt_model_kwargs)
 
 #(init_params, potential_fn, _, model_trace, _) = model_init
 # -
 
-numpyro.infer.util.transform_fn(
-    model_init.model_trace,
-    params=get_params_at_frame(wt_results, 0))
-
-help(model_init.postprocess_fn)
-
-numpyro.infer.util.transform_fn(model_trace=model_init.model_trace)
-
-help(numpyro.infer.util.transform_fn)
-
-
-def get_params_at_frame(results, frame_idx):
-    samples = results.samples
-    return {"u": samples['u'][frame_idx],
-            "z": samples['z'][frame_idx, :]
-           }
-
-
 params = numpyro.infer.util.constrain_fn(
     model, 
+    model_args = (),
     model_kwargs=wt_model_kwargs, 
-    params = get_params_at_frame(wt_results, 0))
-
-help(numpyro.infer.util.constrain_fn)
-
-get_params_at_frame(wt_results, 0)
+    params = dcc.get_params_at_frame(wt_results, 0))
 
 r_range = range(0, 20_000, 100)
-scores2 = [float(model_init.potential_fn(get_params_at_frame(wt_results, k))) for k in r_range]
+scores2 = [float(model_init.potential_fn(dcc.get_params_at_frame(wt_results, k))) for k in r_range]
 av_position = {"u": np.mean(wt_results.samples['u']), "z": np.mean(wt_results.samples['z'], axis=0)}
 av_score = float(model_init.potential_fn(av_position))
 
-import copy
-
-
 # +
-def decoy_scores(zedge_values, model_init, model_data, ref=co_structure_reference):
-    decoy = copy.deepcopy(u_pred_temp)
-    decoy.edge_values = mv.Z2A(zedge_values)
-    decoy_position = {"u": 0., "z": zedge_values}
-    decoy_score = float(model_init.potential_fn(decoy_position))
-    decoy_auc = gbf.do_benchmark(pred=decoy, ref=ref).auc
-    return decoy_score, decoy_auc
 
-def get_auc(position, model_init, ref=co_structure_reference):
-    score = float(model_init.potential_fn(position))
-    
-    #decoy = copy.deepcopy(u_pred_temp)
-    #decoy.edge_values = mv.Z2A(position['z'])
-    auc = gbf.do_benchmark(pred=decoy, ref=ref).auc
-    return score, auc
-
-
-# +
 zedge_values = np.ones(wt_results.model_data['M']) * 0.51
-decoy_all_score, decoy_all_accuracy = decoy_scores(zedge_values, wt_results.model_data)
+decoy_all_score, decoy_all_accuracy = dcc.decoy_scores(
+    zedge_values,
+    wt_model_init,
+    wt_results.model_data,
+    ref=co_structure_reference)
 
 zedge_values = np.zeros(wt_results.model_data['M'])
-decoy_none_score, decoy_none_accuracy = decoy_scores(zedge_values, wt_results.model_data)
+decoy_none_score, decoy_none_accuracy = dcc.decoy_scores(
+    zedge_values,
+    wt_model_init,
+    wt_results.model_data,
+    ref=co_structure_reference)
 
 zedge_values = np.array([float(i % 2 == 0) for i in range(wt_results.model_data['M'])], dtype=np.float32) * 0.51
-decoy_half_score, decoy_half_accuracy = decoy_scores(zedge_values, wt_results.model_data)
+decoy_half_score, decoy_half_accuracy = dcc.decoy_scores(
+    zedge_values,
+    wt_model_init,
+    wt_model_init,
+    wt_results.model_data,
+    ref=co_structure_reference)
 
 zedge_values = np.array([float(i % 3 == 0) for i in range(wt_results.model_data['M'])], dtype=np.float32) * 0.51
-decoy_third_score, decoy_third_accuracy = decoy_scores(zedge_values, wt_results.model_data)
+decoy_third_score, decoy_third_accuracy = dcc.decoy_scores(
+    zedge_values,
+    wt_model_init,
+    wt_results.model_data)
 
 zedge_values = np.array([float(i % 4 != 0) for i in range(wt_results.model_data['M'])], dtype=np.float32) * 0.51
-decoy_3_4_score, decoy_3_4_accuracy = decoy_scores(zedge_values, wt_results.model_data)
+decoy_3_4_score, decoy_3_4_accuracy = dcc.decoy_scores(zedge_values, wt_results.model_data, ref=co_structure_reference)
 # -
 
-zedge_values[0:10]
+# ?dcc.decoy_scores
 
 pd.DataFrame({"score": [decoy_all_score, decoy_none_score, decoy_half_score, decoy_third_score, decoy_3_4_score],
               "auc": [decoy_all_accuracy, decoy_none_accuracy, decoy_half_accuracy, decoy_third_accuracy, decoy_3_4_accuracy]},
@@ -688,7 +363,9 @@ decoy_none_score, decoy_half_score, decoy_all_score
 with open("../results/se_sr_low_prior_1_uniform_mock_20k/0_model23_se_sr_hmc_warmup.pkl", "rb") as f:
     hmc_warmup = pkl.load(f)
 
-hmc_warmup.adapt_state.
+# +
+#hmc_warmup.adapt_state.
+# -
 
 potential_energy_scores = [float(wt_results.mcmc['extra_fields']['potential_energy'][k]) for k in range(100)]
 
