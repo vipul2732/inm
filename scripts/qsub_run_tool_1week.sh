@@ -3,9 +3,9 @@
 #$ -S /bin/bash       # the shell language when run via the job scheduler [IMPORTANT]
 #$ -cwd               # job should run in the current working directory
 #$ -j y               # STDERR and STDOUT should be joined
-#$ -l mem_free=8G     # job requires up to 1 GiB of RAM per slot
+#$ -l mem_free=64G     # job requires up to 1 GiB of RAM per slot
 #$ -l scratch=2G      # job requires up to 2 GiB of local /scratch space
-#$ -l h_rt=24:00:00   # job requires up to 24 hours of runtime
+#$ -l h_rt=168:00:00   # job requires up to 24 hours of runtime
 ##$ -t 1-10           # array job with 10 tasks (remove first '#' to enable)
 #$ -r y               # if job crashes, it should be restarted
 
