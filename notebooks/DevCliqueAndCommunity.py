@@ -12,16 +12,14 @@
 #     name: python3
 # ---
 
-# +
-
 import importlib
 import dev_clique_and_community_src as dcc
 import numpyro
 import numpyro.distributions as dist
 import jax
 importlib.reload(dcc)
+import copy
 # %matplotlib inline
-# -
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -41,7 +39,7 @@ import _model_variations as mv
 import pickle as pkl
 from collections import namedtuple
 import pyvis
-
+from functools import partial
 
 # +
 u20_mcmc = dcc.pkl_load(dcc.u20_base_path / "0_model23_se_sr_13.pkl")
@@ -66,6 +64,7 @@ Results = namedtuple("Results",
 wt_results = dcc.get_results(Path(dcc.wt_path))
 
 mock_results = dcc.get_results(Path(dcc.mock_path))
+
 vif_results = dcc.get_results(Path(dcc.vif_path))
 
 mock_lp1_uniform_results = dcc.get_results(Path(dcc.mock_lp1_uniform_results))
@@ -97,7 +96,6 @@ plt.ylabel("Score")
 #wt_results.model_data.keys()
 
 # +
-
 model = mv.model23_se_sr
 # Initialize the model: this also provides a callable that computes the potential energy
 rng_key = jax.random.PRNGKey(0)
@@ -118,74 +116,95 @@ scores2 = [float(model_init.potential_fn(dcc.get_params_at_frame(wt_results, k))
 av_position = {"u": np.mean(wt_results.samples['u']), "z": np.mean(wt_results.samples['z'], axis=0)}
 av_score = float(model_init.potential_fn(av_position))
 
-# +
+u_pred_temp = dcc.results_frame2u(wt_results, 19_000)
 
+# +
 zedge_values = np.ones(wt_results.model_data['M']) * 0.51
 decoy_all_score, decoy_all_accuracy = dcc.decoy_scores(
     zedge_values,
     wt_model_init,
     wt_results.model_data,
-    ref=co_structure_reference)
+    ref=co_structure_reference, 
+    u_pred_temp = u_pred_temp)
 
 zedge_values = np.zeros(wt_results.model_data['M'])
 decoy_none_score, decoy_none_accuracy = dcc.decoy_scores(
     zedge_values,
     wt_model_init,
     wt_results.model_data,
-    ref=co_structure_reference)
+    ref=co_structure_reference,
+    u_pred_temp = u_pred_temp)
 
 zedge_values = np.array([float(i % 2 == 0) for i in range(wt_results.model_data['M'])], dtype=np.float32) * 0.51
 decoy_half_score, decoy_half_accuracy = dcc.decoy_scores(
     zedge_values,
     wt_model_init,
-    wt_model_init,
     wt_results.model_data,
-    ref=co_structure_reference)
+    ref=co_structure_reference,
+    u_pred_temp = u_pred_temp,)
 
 zedge_values = np.array([float(i % 3 == 0) for i in range(wt_results.model_data['M'])], dtype=np.float32) * 0.51
 decoy_third_score, decoy_third_accuracy = dcc.decoy_scores(
     zedge_values,
     wt_model_init,
-    wt_results.model_data)
-
-zedge_values = np.array([float(i % 4 != 0) for i in range(wt_results.model_data['M'])], dtype=np.float32) * 0.51
-decoy_3_4_score, decoy_3_4_accuracy = dcc.decoy_scores(zedge_values, wt_results.model_data, ref=co_structure_reference)
+    wt_results.model_data,
+    ref = co_structure_reference,
+    u_pred_temp = u_pred_temp)
 # -
 
-# ?dcc.decoy_scores
+zedge_values = np.array([float(i % 4 != 0) for i in range(
+    wt_results.model_data['M'])], dtype=np.float32) * 0.51
+decoy_3_4_score, decoy_3_4_accuracy = dcc.decoy_scores(
+    zedge_values, 
+    wt_model_init,
+    wt_results.model_data, 
+    ref=co_structure_reference,
+    u_pred_temp = u_pred_temp,)
 
-pd.DataFrame({"score": [decoy_all_score, decoy_none_score, decoy_half_score, decoy_third_score, decoy_3_4_score],
-              "auc": [decoy_all_accuracy, decoy_none_accuracy, decoy_half_accuracy, decoy_third_accuracy, decoy_3_4_accuracy]},
-             index=["1", "0", "1/2", "1/3", "3/4"]).sort_values("score")
+pd.DataFrame(
+    {"score": [decoy_all_score, decoy_none_score, decoy_half_score, decoy_third_score, decoy_3_4_score],
+     "auc": [decoy_all_accuracy, decoy_none_accuracy, decoy_half_accuracy, decoy_third_accuracy, decoy_3_4_accuracy]},
+     index=["1", "0", "1/2", "1/3", "3/4"]).sort_values("score")
 
 av_auc = 0.796 # Read from benchmark results
 
-wt_assesment_of_scoring = assessment_of_scoring(wt_results, co_structure_reference, 
-                                                 every=100)
+wt_assesment_of_scoring = dcc.assessment_of_scoring(
+    wt_results, 
+    co_structure_reference, 
+    every=100)
 
-from functools import partial
 
+# +
+def plot_and_save_assassment_of_scoring(
+    assessment_of_scoring,
+    scores,
+    av_auc,
+    av_score,
+    savename="co_structure_accuracy"):
+    plt.plot(assessment_of_scoring, scores, 'ko', alpha=0.05)
+    plt.plot(av_auc, av_score, 'rx', label="average")
+    #plt.plot(decoy_all_accuracy, decoy_all_score, 'b^', label="Decoy all")
+    #plt.plot(decoy_none_accuracy, decoy_none_score, 'g^', label="Decoy none") # off plot
+    #plt.plot(decoy_half_accuracy, decoy_half_score, 'y^', label="Decoy half") # off plot
+    #plt.plot(decoy_th)
+    plt.xlabel("Co-structure accuracy (AUC)")
+    plt.ylabel("Score")
+    plt.xlim(0, 1)
+    plt.ylim(50_000, 70_000)
+    plt.savefig(f"{savename}_300.png", dpi=300)
+    plt.savefig(f"{savename}_1200.png", dpi=1200)
+    
+plot_and_save_assassment_of_scoring(
+    wt_assesment_of_scoring,
+    scores2,
+    av_auc,
+    av_score)
+# -
 
-
-plt.plot(wt_assessment_of_scoring, scores2, 'ko', alpha=0.05)
-plt.plot(av_auc, av_score, 'rx', label="average")
-#plt.plot(decoy_all_accuracy, decoy_all_score, 'b^', label="Decoy all")
-#plt.plot(decoy_none_accuracy, decoy_none_score, 'g^', label="Decoy none") # off plot
-#plt.plot(decoy_half_accuracy, decoy_half_score, 'y^', label="Decoy half") # off plot
-#plt.plot(decoy_th)
-plt.xlabel("Co-structure accuracy (AUC)")
-plt.ylabel("Score")
-plt.xlim(0, 1)
-plt.ylim(50_000, 70_000)
-plt.savefig("co_structure_accuracy_300.png", dpi=300)
-plt.savefig("co_structure_accuracy_1200.png", dpi=1200)
-
-mock_lp1_uniform_assessment_of_scoring  = assessment_of_scoring(mock_lp1_uniform_results, co_structure_reference, 
-                                                 every=100)
-
-mock_lp1_uniform_assessment_of_scoring
-
-mock_
+mock_lp1_uniform_assessment_of_scoring  = dcc.assessment_of_scoring(
+    mock_lp1_uniform_results, 
+    co_structure_reference, 
+    every=100)
 
 model = mv.model23_se_sr
 # Initialize the model: this also provides a callable that computes the potential energy
@@ -200,7 +219,7 @@ mock_lp1_uniform_model_init = numpyro.infer.util.initialize_model(
 r_range = range(0, 20_000, 100)
 mock_lp1_uniform_scores2 = [float(
     mock_lp1_uniform_model_init.potential_fn(
-    get_params_at_frame(mock_lp1_uniform_results, k))) for k in r_range]
+    dcc.get_params_at_frame(mock_lp1_uniform_results, k))) for k in r_range]
 mock_lp1_uniform_av_position = {
     "u": np.mean(mock_lp1_uniform_results.samples['u']),
     "z": np.mean(mock_lp1_uniform_results.samples['z'],
@@ -209,19 +228,15 @@ mock_lp1_uniform_av_position = {
 mock_lp1_uniform_av_score = float(mock_lp1_uniform_model_init.potential_fn(mock_lp1_uniform_av_position))
 # -
 
-mock_lp1_uniform_av_score
-
 mock_lp1_uniform_av_auc = 0.77 # read from benchmark_pub.tsv
 
 # +
-ftemp = partial(decoy_scores,
+ftemp = partial(dcc.decoy_scores,
                 model_init = mock_lp1_uniform_model_init,
-                model_data = mock_lp1_uniform_results.model_data)
+                model_data = mock_lp1_uniform_results.model_data,
+                ref = co_structure_reference,
+                u_pred_temp = u_pred_temp)
 
-def ftemp(z):
-    return decoy_scores(
-        z, model_init = mock_lp1_uniform_model_init,
-        model_data = mock_lp1_uniform_results.model_data)
 
 
 results = mock_lp1_uniform_results
@@ -251,24 +266,21 @@ mock_lp1_min_score = np.min(mock_lp1_uniform_results.mcmc['extra_fields']['poten
 mock_lp1_min_score_idx = np.where(
     mock_lp1_uniform_results.mcmc['extra_fields']['potential_energy'] == mock_lp1_min_score)[0].item()
 
-mock_lp1_min_score_position = get_params_at_frame(mock_lp1_uniform_results,
+mock_lp1_min_score_position = dcc.get_params_at_frame(mock_lp1_uniform_results,
                     mock_lp1_min_score_idx)
 
-mock_lp1_uniform_best_model_score, mock_lp1_uniform_best_model_score_auc = get_auc(
+mock_lp1_uniform_best_model_score, mock_lp1_uniform_best_model_score_auc = dcc.get_auc(
     position = mock_lp1_min_score_position,
-    model_init = mock_lp1_uniform_model_init)
+    model_init = mock_lp1_uniform_model_init,
+    ref = co_structure_reference,
+    u_pred_temp=u_pred_temp)
 
-u_best_model = get_u_from_results_at_position(mock_lp1_uniform_results, mock_lp1_min_score_idx)
+u_best_model = dcc.get_u_from_results_at_position(mock_lp1_uniform_results, mock_lp1_min_score_idx)
 
-u_best_model.edge_values
-
-u_best_model_auc = gbf.do_benchmark(u_best_model, co_structure_reference)
-
-u_best_model_auc.auc
+u_best_model_auc = dcc.gbf.do_benchmark(u_best_model, co_structure_reference)
 
 mock_lp1_uniform_best_model_score, mock_lp1_uniform_min_score_auc
 
-# +
 # Create a u that perfectly aligns with the benchmark and evaluate the score
 name2node_idx = {val : key for key, val in mock_lp1_uniform_results.model_data['node_idx2name'].items()}
 node_idx2name = mock_lp1_uniform_results.model_data['node_idx2name']
@@ -287,36 +299,18 @@ for i in range(N):
         k += 1
         
 
+0.49 + np.array(edges) * 0.2
 
-
-perfect_position1 = {"u": 0., "z" : np.array(edges) } # approximate 
+perfect_position1 = {"u": 0., "z" : 0.49 + np.array(edges) * 0.2} # approximate 
 perfect_position1 = {"u": np.median(mock_lp1_uniform_results.samples['u']), "z" : np.array(edges) } 
 perfect_position2 = {"u": -0.5, "z": np.array(edges) }
 perfect_position3 = {"u": 0.5, "z": np.array(edges) }
-
-
-# -
 
 pp1_score = float(mock_lp1_uniform_model_init.potential_fn(perfect_position1))
 pp2_score = float(mock_lp1_uniform_model_init.potential_fn(perfect_position2))
 pp3_score = float(mock_lp1_uniform_model_init.potential_fn(perfect_position3))
 
-pp1_score, pp2_score, pp3_score
-
-mv.Z2A(0.51)
-
-
-def A2Z(a):
-    return 0.5 + jax.scipy.special.logit(a) * 1/1000
-
-
-# +
-#A2Z(0.99999)
-# -
-
-np.log(0.51/ (1-0.51))
-
-len(co_structure_reference._edge_dict)
+mock_lp1_uniform_model_init.potential_fn
 
 plt.plot(mock_lp1_uniform_assessment_of_scoring, mock_lp1_uniform_scores2, 'ko', alpha=0.05)
 plt.plot(mock_lp1_uniform_av_auc, mock_lp1_uniform_av_score, 'rx', label="average")
@@ -340,40 +334,16 @@ co_structure_pred.edge_values = np.array([co_structure_pred._edge_dict[
   frozenset([co_structure_pred.a_nodes[k], co_structure_pred.b_nodes[k]])]
  for k in range(len(co_structure_pred.a_nodes))])
 
-co_structure_pred.edge_values
-
-gbf.do_benchmark(co_structure_pred, co_structure_reference)
-
-mock_lp1_uniform_av_score
-
-plt.plot(u_best_model_auc.ppr_points, u_best_model_auc.tpr_points)
-plt.xlim(0, 1)
-plt.ylim(0, 1)
-
-plt.hist(mock_lp1_uniform_assessment_of_scoring, bins=20)
-plt.show()
-np.median(mock_lp1_uniform_assessment_of_scoring)
-
-
-
-decoy_all_score
-
-decoy_none_score, decoy_half_score, decoy_all_score
-
 with open("../results/se_sr_low_prior_1_uniform_mock_20k/0_model23_se_sr_hmc_warmup.pkl", "rb") as f:
     hmc_warmup = pkl.load(f)
 
-# +
-#hmc_warmup.adapt_state.
-# -
-
 potential_energy_scores = [float(wt_results.mcmc['extra_fields']['potential_energy'][k]) for k in range(100)]
 
-plt.plot(potential_energy_scores, scores2, 'k.')
+wt_scores
+
+plt.plot(potential_energy_scores, wt_scores, 'k.')
 plt.xlabel("Potential energy from mcmc")
 plt.ylabel("Potential energy from model_init")
-
-help(numpyro)
 
 # +
 # Define a position at which you want to evaluate the potential energy
@@ -387,43 +357,9 @@ energy = potential_fn(params)
 print("Potential Energy:", energy)
 # -
 
-u_pred_temp = results_frame2u(wt_results, 19_000)
-
-cullin_reindexer
-
 results = gbf.do_benchmark(pred = u_pred_temp, ref = co_structure_reference)
 
-results.auc
-
 plt.plot(results.ppr_points, results.tpr_points)
-
-co_structure_reference
-
-u_pred_temp
-
-help(gbf.do_benchmark)
-
-N = 6
-k = 0
-for i in range(N):
-    for j in range(i+1, N):
-        print(i, j)
-        k += 1
-print(k, math.comb(N, 2))
-
-wt_results.model_data['M']
-
-results_frame2u(wt_results, 0)
-
-wt_results.As[]
-
-plt.plot(wt_results.mcmc['extra_fields']['potential_energy'])
-
-np.array(wt_flat2matrix(wt_results.As[0, :]))
-
-help(mv.flat2matrix)
-
-wt_results.
 
 SKIP = True
 if not SKIP:
@@ -437,7 +373,7 @@ if not SKIP:
         As_av = u20_As_av,
         A = u20_A)
 
-av_u20, av_u20_spec_counts = get_results_df_spec_counts(all_u_20)
+av_u20, av_u20_spec_counts = ddc.get_results_df_spec_counts(all_u_20)
 
 # +
 # Frames and counts
@@ -1398,10 +1334,28 @@ sns.heatmap(Av_u20_matrix, cmap='plasma')
 
 weighted_degree = jnp.sum(Av_u20_matrix, axis=1)
 
+sns.barplot(mock_results.spec_table)
 
+
+def repsel(name, condition="mock"):
+    return [f"{name}{condition}_r{i}" for i in range(4)]
+np.ravel(mock_results.spec_table.loc[:, [f"CBFBmock_r{i}" for i in range(4)]]).mean()
+
+means = []
+var = []
+spec_table = mock_results.spec_table
+for name in ["CBFB", "CUL5", "ELOB"]:
+    means.append(np.mean(np.ravel(spec_table.loc[:, repsel(name)])))
+    var.append(  np.var( np.ravel(spec_table.loc[:, repsel(name)])))
+
+plt.plot(means, 'r.')
+#plt.plot(var, 'b.')
+
+mock_results.spec_table
 
 plt.plot(weighted_degree)
 plt.ylabel("Weighted Degree")
 plt.xlabel("Node ID")
 
-d
+# Maximal scaling
+mock_results['spect_table']
