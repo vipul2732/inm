@@ -665,6 +665,26 @@ def cullin_standard(model_output_dirpath, fbasename, with_humap_as_predictions_a
     minimal_saint_table = get_minimal_saint_table()
 
 
+def model23_matrix2u(A, model_data):
+    N = model_data['N']
+    a = []
+    b = []
+    w = []
+    for i in range(N):
+        for j in range(0, i):
+            a_name = model_data['node_idx2name'][i]
+            b_name = model_data['node_idx2name'][j]
+            assert a_name != b_name
+            weight = float(A[i, j])
+            a.append(a_name)
+            b.append(b_name)
+            w.append(weight)
+    df = pd.DataFrame({'auid': a, 'buid': b, 'w': w})        
+    u = UndirectedEdgeList()
+    u.update_from_df(df, edge_value_colname="w", multi_edge_value_merge_strategy="max")
+    reindexer = get_cullin_reindexer()
+    u.reindex(reindexer, enforce_coverage = False)
+    return u
     # Calculate the node intersection table for all nodes
 
     # Calculate the edge intersection table for all edges
