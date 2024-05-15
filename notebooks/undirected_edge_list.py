@@ -74,6 +74,29 @@ class UndirectedEdgeList:
         v = UndirectedEdgeList()
         v.update_from_edge_dict(new_edge_dict)
         return v
+    def edge_select(self, edges: set, a_colname="auid", b_colname="buid", edge_value_colname = "w"):
+        """
+        Given a list of edges, select the subset of edges in self
+        that correspond to the edges
+        """
+        self._build_edge_dict()
+        anodes = []
+        bnodes = []
+        ws = []
+        for edge in edges:
+            if edge in self._edge_dict:
+                a, b = edge
+                w = self._edge_dict[edge]
+                anodes.append(a)
+                bnodes.append(b)
+                ws.append(w)
+        df = pd.DataFrame({a_colname : anodes, b_colname : bnodes, edge_value_colname : ws})
+        u = UndirectedEdgeList()
+        u.update_from_df(df, a_colname = a_colname, b_colname = b_colname, edge_value_colname = edge_value_colname, multi_edge_value_mergre_strategy = "max")
+        return u
+        
+
+
     def get_node_list(self):
         return list(set(list(self.a_nodes)).union(set(list(self.b_nodes))))
 
