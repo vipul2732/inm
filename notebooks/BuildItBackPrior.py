@@ -33,10 +33,9 @@ import pyvis
 import sampling_assessment as sa
 from collections import defaultdict
 import importlib
+import dev_clique_and_community_src as dcc
 importlib.reload(gbf)
 # %matplotlib inline
-
-
 
 # +
 def pklload(x):
@@ -97,7 +96,14 @@ def get_saint_prior(r):
     max_prey_scores = temp
     return calculate_pairwise_maximal_saint(max_prey_scores)
 
-
+def u_from_edgelist_df(e):
+    u = gbf.UndirectedEdgeList()
+    u.update_from_df(
+        e, a_colname='a', b_colname='b',
+        edge_value_colname='w', multi_edge_value_merge_strategy='max')
+    u.reindex(reindexer, enforce_coverage=False)
+    return u
+    
 
 # -
 
@@ -107,6 +113,17 @@ saint_prior = saint_prior.sort_index(axis=0)
 saint_prior = saint_prior.sort_index(axis=1)
 r1.A_df.sort_index(axis=0, inplace=True)
 r1.A_df.sort_index(axis=1, inplace=True)
+
+
+def get_degree_prior_from_matrix_df(matrix_df):
+    N, _ = matrix_df.shape
+    degree = np.sum(matrix_df.values, axis=0).reshape((N, 1)) / N
+    degree = degree * degree.T
+    degree_prior = 1 - degree
+    return pd.DataFrame(degree_prior, columns = matrix_df.columns, index=matrix_df.index)
+
+
+sns.heatmap(get_degree_prior_from_matrix_df(r1.A_df) * r1.A_df)
 
 sns.heatmap(r1.A_df)
 
@@ -126,10 +143,12 @@ sns.heatmap(pairwise_product)
 
 sns.heatmap(pairwise_average)
 
+degree_prior = get_degree_prior_from_matrix_df(r1.A_df)
+
 
 def hist(ax, x):
     ax.hist(x, bins=100)
-fig, ax = plt.subplots(4, 1)
+fig, ax = plt.subplots(6, 1)
 tril_indices = np.tril_indices_from(r1.A_df, k=-1)
 hist(ax[0], np.ravel(r1.A_df.values[tril_indices]))
 ax[0].set_xlabel("Average edge score")
@@ -139,7 +158,15 @@ hist(ax[2], np.ravel(pairwise_product.values[tril_indices]))
 ax[2].set_xlabel("Pairwise product")
 hist(ax[3], np.ravel(pairwise_average.values[tril_indices]))
 ax[3].set_xlabel("Pairwise addition")
+hist(ax[4], np.ravel(degree_prior.values[tril_indices]))
+ax[4].set_xlabel("degree_prior")
+hist(ax[5], np.ravel(degree_prior * pairwise_average))
+ax[5].set_xlabel("deg_x_av")
 plt.tight_layout()
+
+m3 = (saint_prior + degree_prior * pairwise_average)
+m3_edgelist_df = sa.matrix_df_to_edge_list_df(m3)
+u_m3 = u_from_edgelist_df(m3_edgelist_df)
 
 pairwise_product_edgelist_df = sa.matrix_df_to_edge_list_df(pairwise_product)
 
@@ -147,7 +174,17 @@ pairwise_average_edgelist_df = sa.matrix_df_to_edge_list_df(pairwise_average)
 
 saint_prior_edgelist_df = sa.matrix_df_to_edge_list_df(saint_prior)
 
+degree_prior_edgelist_df = sa.matrix_df_to_edge_list_df(degree_prior)
+
 reindexer = gbf.get_cullin_reindexer()
+
+u_degree_prior = u_from_edgelist_df(degree_prior_edgelist_df)
+
+degree_prior_x_pair_edgelist_df = sa.matrix_df_to_edge_list_df(degree_prior * pairwise_product)
+u_degree_prior_x_pair_prod = u_from_edgelist_df(degree_prior_x_pair_edgelist_df)
+
+degree_prior_x_pair_av_edgelist_df = sa.matrix_df_to_edge_list_df((degree_prior * pairwise_average))
+u_degree_prior_x_pair_av = u_from_edgelist_df(degree_prior_x_pair_av_edgelist_df)
 
 u = gbf.UndirectedEdgeList()
 u.update_from_df(
@@ -183,36 +220,91 @@ predictions = dict(
     pair_prod = u_pairwise,
     average_edge = r1.u,
     pair_av = u_pairwise_average,
+    degree_prior = u_degree_prior,
+    deg_x_prod = u_degree_prior_x_pair_prod,
+    deg_x_av = u_degree_prior_x_pair_av,
+    m3 = u_m3,
 )
 
 references = dict(
-  pdb_costructure = gbf.get_pdb_ppi_predict_cocomplex_reference(),
-  pdb_direct = gbf.get_pdb_ppi_predict_direct_reference()
+  costructure = gbf.get_pdb_ppi_predict_cocomplex_reference(),
+  direct = gbf.get_pdb_ppi_predict_direct_reference()
 )
 
 importlib.reload(gbf)
+
 gbf.write_roc_curves_and_table(
     model_output_dirpath = Path("BuildItBackPriorDir/"),
     references=references,
     predictions=predictions,
     pairs_to_plot_on_one_graph = (
-    ("saint_prior", "pdb_costructure"),
-    ("saint_prior", "pdb_direct"),
-    ("average_edge", "pdb_costructure"),
-    ("average_edge", "pdb_direct"),
-    ("pair_prod", "pdb_costructure"),
-    ("pair_prod", "pdb_direct"),
-    ("pair_av", "pdb_direct"),
-    ("pair_av", "pdb_costructure")
-    ))
+    ("saint_prior", "costructure"),
+    ("average_edge", "costructure"),
+    ("pair_prod", "costructure"),
+    ("pair_av", "costructure"),
+    ("degree_prior", "costructure"),
+    ("deg_x_prod", "costructure"),
+    ("deg_x_av", "costructure"),
+    #("m3", "costructure",)
+    ),
+    multi_save_suffix="_co_structure")
+
+predictions['m3']
+
+gbf.write_roc_curves_and_table(
+    model_output_dirpath = Path("BuildItBackPriorDir/"),
+    references=references,
+    predictions=predictions,
+    pairs_to_plot_on_one_graph = (
+    ("saint_prior", "direct"),
+    ("average_edge", "direct"),
+    ("pair_prod", "direct"),
+    ("pair_av", "direct"),
+    ("degree_prior", "direct"),
+    ("deg_x_prod", "direct"),
+    ("deg_x_av", "direct"),
+    #("m3", "direct"),
+    ),
+    multi_save_suffix="_direct")
+
+
 
 # +
 # Let's say we want to predict a network based on the ROC type curve
 # 1% of the total interaction space
+# -
+
+pp_top_node_set, pp_top_edge_set = dcc.get_top_edges_upto_threshold(pairwise_product_edgelist_df, threshold=0.9997)
+
+deg_x_av_top_node_set, deg_x_av_top_edge_set = dcc.get_top_edges_upto_threshold(
+    degree_prior_x_av_edgelist_df, threshold=0.9)
+
+
+# +
+def fraction_of_all_pairs(n_nodes, nedges):
+    all_pairs = math.comb(n_nodes, 2)
+    return nedges / all_pairs
+
+f(len(pp_top_node_set), len(pp_top_edge_set))
+# -
+
+len(pp_top_node_set), len(pp_top_edge_set), (len(pp_top_edge_set) / 27261) * 100
+
+len(deg_x_av_top_node_set), len(deg_x_av_top_edge_set), (len(deg_x_av_top_edge_set) / 27261) * 100
 
 # +
 # Build a network using the top edges
 # -
+
+net_pp = dcc.pyvis_plot_network(pp_top_edge_set)
+
+# +
+#net_pp.show("pp.html")
+# -
+
+net_deg_x_av = dcc.pyvis_plot_network(deg_x_av_top_edge_set)
+
+net_deg_x_av.show("deg_x_av.html")
 
 np.sum(pairwise_product_edgelist_df['w'] >= 0.9995)
 
