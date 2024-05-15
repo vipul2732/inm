@@ -176,6 +176,11 @@ mini_se_sr_low_prior_1_uniform = from_template(mini_se_sr_run,
     init_strat = "uniform",
     )
 
+mini_se_sr_low_prior_1_uniform_num_warmup_1000 = from_template(mini_se_sr_low_prior_1_uniform,
+    model_output_dirpath = "../results/mini_se_sr_low_prior_1_uniform_num_warmup_1000",
+    num_warmup = 1_000,
+    )
+
 se_sr_low_prior_1_all_20k = from_template(mini_se_sr_low_prior_1,
     model_output_dirpath = "../results/se_sr_low_prior_1_all_20k",
     num_samples = 20_000,
@@ -201,6 +206,14 @@ se_sr_low_prior_1_uniform_mock_20k = from_template(
     model_output_dirpath = "../results/se_sr_low_prior_1_uniform_mock_20k",
     num_samples = 20_000,
     num_warmup = 1_000,
+    filter_kw = "mock",
+    )
+
+se_sr_low_prior_1_uniform_mock_10k_warmup_20k = from_template(
+    mini_se_sr_low_prior_1_uniform,
+    model_output_dirpath = "../results/se_sr_low_prior_1_uniform_mock_10k_20k",
+    num_samples = 10_000,
+    num_warmup = 20_000,
     filter_kw = "mock",
     )
 

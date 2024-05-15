@@ -14,7 +14,7 @@ def main(name, figures, rseed):
     if rseed is not None:
         rseed = int(rseed)
         # update the run configuration dynamically
-        update_rc_dict_rseed(run_configuration, rseed)
+        run_configuration = update_rc_dict_rseed(run_configuration, rseed)
     model_output_dirpath = Path(run_configuration['model_output_dirpath'])
     if not figures: 
         _run.main(**run_configuration)
@@ -27,6 +27,7 @@ def main(name, figures, rseed):
 def update_rc_dict_rseed(rc_dict, rseed):
     rc_dict["rseed"] = rseed
     rc_dict["model_output_dirpath"] = rc_dict["model_output_dirpath"] + f"_rseed_{rseed}"
+    return rc_dict
 
 if __name__ == "__main__":
     main()
