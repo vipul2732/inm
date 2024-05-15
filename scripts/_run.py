@@ -134,8 +134,24 @@ def main(
     logging.info("writing modeler_vars.json")
     with open(str(model_output_dirpath / "modeler_vars.json"), "w") as f:
         json.dump(modeler_vars, f)
-
-
+    
+    save_dir = str(model_output_dirpath)
+    logging.info(f"""Params
+    rseed {rseed}
+    model_name {model_name}
+    num_warmup {num_warmup}
+    num_samples {num_samples}
+    include_potential_energy {include_potential_energy}
+    include_extra_fields {include_extra_fields}
+    progress_bar {progress_bar}
+    save_dir {save_dir}
+    initial_position {initial_position}
+    save_warmup {save_warmup}
+    load_warmup {load_warmup}
+    jax_profile {jax_profile}
+    init_strat {init_strat}
+    thinning {thinning}
+    """)
     logging.info("enter _model_variation._main")
     mv._main(model_id = model_id,
              rseed = rseed,
@@ -147,7 +163,7 @@ def main(
              include_mean_accept_prob = include_mean_accept_prob,
              include_extra_fields = include_extra_fields,
              progress_bar = progress_bar,
-             save_dir = str(model_output_dirpath),
+             save_dir = save_dir,
              initial_position = initial_position,
              save_warmup = save_warmup,
              load_warmup = load_warmup,
