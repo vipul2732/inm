@@ -12,6 +12,7 @@
 #     name: python3
 # ---
 
+# +
 import matplotlib.pyplot as plt
 import seaborn as sns
 import networkx as nx
@@ -37,18 +38,20 @@ import dev_clique_and_community_src as dcc
 importlib.reload(gbf)
 # %matplotlib inline
 
-# +
 def pklload(x):
     with open(x, "rb") as f:
         return pkl.load(f)
-    
 
+print(sa._e1)
 # -
 
-sa._e1
-
 # Low prior mock uniform 20k
-r1 = sa.get_results(sa._e1)
+m_erlp1u20k = sa.get_results(sa._e1)
+
+w_erlp1u20k = sa.get_results("../results/se_sr_low_prior_1_wt_20k/")
+
+# +
+#v_erlp1uv20k = sa.get_results("../results/se_sr_low_prior_1_uniform_")
 
 # +
 # Minimal saint scoring
@@ -104,17 +107,10 @@ def u_from_edgelist_df(e):
     u.reindex(reindexer, enforce_coverage=False)
     return u
     
-
-# -
-
-saint_prior = get_saint_prior(r1)
-
-saint_prior = saint_prior.sort_index(axis=0)
-saint_prior = saint_prior.sort_index(axis=1)
-r1.A_df.sort_index(axis=0, inplace=True)
-r1.A_df.sort_index(axis=1, inplace=True)
-
-
+def sort_matrix_df(mdf):
+    mdf.sort_index(axis=0, inplace=True)
+    mdf.sort_index(axis=1, inplace=True)
+    
 def get_degree_prior_from_matrix_df(matrix_df):
     N, _ = matrix_df.shape
     degree = np.sum(matrix_df.values, axis=0).reshape((N, 1)) / N
@@ -122,55 +118,120 @@ def get_degree_prior_from_matrix_df(matrix_df):
     degree_prior = 1 - degree
     return pd.DataFrame(degree_prior, columns = matrix_df.columns, index=matrix_df.index)
 
+def plot_plotlist(plot_list):
+    nrows = len(plot_list)
+    fig, ax = plt.subplots(nrows, 1, figsize=(12, 10))
+    tril_indices = np.tril_indices_from(m_erlp1u20k.A_df, k=-1)
+    for i in range(nrows):
+        hist(ax[i], np.ravel(plot_list[i][1].values[tril_indices]))
+        ax[i].set_xlabel(plot_list[i][0])
 
-sns.heatmap(get_degree_prior_from_matrix_df(r1.A_df) * r1.A_df)
-
-sns.heatmap(r1.A_df)
-
-sns.heatmap(saint_prior)
-
-# +
-assert np.alltrue(saint_prior.columns == r1.A_df.columns)
-assert np.alltrue(saint_prior.index == r1.A_df.index)
-assert np.alltrue(saint_prior.index == r1.A_df.columns)
-
-pairwise_product = r1.A_df * saint_prior
-# -
-
-pairwise_average = (r1.A_df + saint_prior) / 2
-
-sns.heatmap(pairwise_product)
-
-sns.heatmap(pairwise_average)
-
-degree_prior = get_degree_prior_from_matrix_df(r1.A_df)
-
+    plt.tight_layout()
 
 def hist(ax, x):
-    ax.hist(x, bins=100)
-fig, ax = plt.subplots(6, 1)
-tril_indices = np.tril_indices_from(r1.A_df, k=-1)
-hist(ax[0], np.ravel(r1.A_df.values[tril_indices]))
-ax[0].set_xlabel("Average edge score")
-hist(ax[1], np.ravel(saint_prior.values[tril_indices]))
-ax[1].set_xlabel("Max pair saint score")
-hist(ax[2], np.ravel(pairwise_product.values[tril_indices]))
-ax[2].set_xlabel("Pairwise product")
-hist(ax[3], np.ravel(pairwise_average.values[tril_indices]))
-ax[3].set_xlabel("Pairwise addition")
-hist(ax[4], np.ravel(degree_prior.values[tril_indices]))
-ax[4].set_xlabel("degree_prior")
-hist(ax[5], np.ravel(degree_prior * pairwise_average))
-ax[5].set_xlabel("deg_x_av")
-plt.tight_layout()
+    ax.hist(x, bins=100, range=(0,1))
 
-m3 = (saint_prior + degree_prior * pairwise_average)
-m3_edgelist_df = sa.matrix_df_to_edge_list_df(m3)
-u_m3 = u_from_edgelist_df(m3_edgelist_df)
 
-pairwise_product_edgelist_df = sa.matrix_df_to_edge_list_df(pairwise_product)
+# +
+m_saint_prior = get_saint_prior(m_erlp1u20k)
 
-pairwise_average_edgelist_df = sa.matrix_df_to_edge_list_df(pairwise_average)
+w_saint_prior = get_saint_prior(w_erlp1u20k)
+
+m_degree_prior = get_degree_prior_from_matrix_df(m_erlp1u20k.A_df)
+
+w_degree_prior = get_degree_prior_from_matrix_df(w_erlp1u20k.A_df)
+
+# +
+sort_matrix_df(m_saint_prior)
+sort_matrix_df(w_saint_prior)
+
+sort_matrix_df(m_erlp1u20k.A_df)
+sort_matrix_df(w_erlp1u20k.A_df)
+
+sort_matrix_df(m_degree_prior)
+sort_matrix_df(w_degree_prior)
+# -
+
+m_pairwise_product = m_erlp1u20k.A_df * m_saint_prior # element-wise product
+w_pairwise_product = w_erlp1u20k.A_df * w_saint_prior # element-wise product
+
+m_pairwise_average = (m_erlp1u20k.A_df + m_saint_prior) / 2
+w_pairwise_average = (w_erlp1u20k.A_df + w_saint_prior) / 2
+
+m_deg_x_av = m_degree_prior * m_pairwise_average
+w_deg_x_av = w_degree_prior * w_pairwise_average
+
+m_deg_x_prod = m_degree_prior * m_pairwise_product
+w_deg_x_prod = w_degree_prior * w_pairwise_product
+
+# +
+assert np.alltrue(m_saint_prior.columns == m_erlp1u20k.A_df.columns)
+assert np.alltrue(m_saint_prior.index == m_erlp1u20k.A_df.index)
+assert np.alltrue(m_saint_prior.index == m_erlp1u20k.A_df.columns)
+
+assert np.alltrue(w_saint_prior.columns == w_erlp1u20k.A_df.columns)
+assert np.alltrue(w_saint_prior.index == w_erlp1u20k.A_df.index)
+assert np.alltrue(w_saint_prior.index == w_erlp1u20k.A_df.columns)
+
+assert np.alltrue(m_pairwise_product.columns == m_erlp1u20k.A_df.columns)
+assert np.alltrue(m_pairwise_average.columns == m_erlp1u20k.A_df.columns)
+# -
+
+## Uncomment to plot various networks in matrix form
+h = lambda x: sns.heatmap(x, vmin=0, vmax=1)
+#h(m_erlp1u20k.A_df)
+#h(w_erlp1u20k.A_df)
+#h(m_degree_prior * m_erlp1u20k.A_df)
+#h(w_degree_prior * w_erlp1u20k.A_df)
+#h(m_degree_prior)
+#h(w_degree_prior)
+#h(m_saint_prior)
+#h(w_saint_prior)
+#h(m_pairwise_product)
+#h(w_pairwise_product)
+#h(m_pairwise_average)
+#h(w_pairwise_average)
+#h(m_deg_x_av)
+#h(m_deg_x_)
+del h
+
+# +
+m_plot_list = [
+    ("m average edge score", m_erlp1u20k.A_df),
+    ("m max pair saint score", m_saint_prior),
+    ("m degree score", m_degree_prior),
+    ("m pairwise product (edge & saint)", m_pairwise_product),
+    ("m pairwise av (edge & saint)", m_pairwise_average),
+    ("m deg_x_av", m_degree_prior * m_pairwise_average),
+    ("m deg_x_prod", m_degree_prior * m_pairwise_product),
+    ("m deg dist", (m_degree_prior-1) * -1)
+    ]
+w_plot_list = [
+    ("w average edge score", w_erlp1u20k.A_df),
+    ("w max pair saing score", w_saint_prior),
+    ("w degree score", w_degree_prior),
+    ("w pairwise product (edge & saint)", w_pairwise_product),
+    ("w pairwise av (edge & saint)", w_pairwise_average),
+    ("w deg_x_av", w_degree_prior * w_pairwise_average),
+    ("w deg_x_prod", w_degree_prior * w_pairwise_product)    
+]
+
+plot_plotlist(m_plot_list)
+    
+# -
+
+plot_plotlist(w_plot_list)
+
+del plot_list
+
+# +
+m_pairwise_product_edgelist_df = sa.matrix_df_to_edge_list_df(m_pairwise_product)
+w_pairwise_product_edgelist_df = sa.matrix_df_to_edge_list_df(w_pairwise_product)
+m_pairwise_average_edgelist_df = sa.matrix_df_to_edge_list_df(m_pairwise_average)
+w_pairwise_average_edgelist_df = sa.matrix_df_to_edge_list_df(w_pairwise_average)
+
+
+# -
 
 saint_prior_edgelist_df = sa.matrix_df_to_edge_list_df(saint_prior)
 
@@ -215,6 +276,26 @@ u_pairwise.reindex(reindexer, enforce_coverage=False)
 
 u_pairwise.node_intersection(r1.u)
 
+# +
+saint_prior_wt = get_saint_prior(r_wt)
+
+saint_prior_wt = saint_prior_wt.sort_index(axis=0)
+saint_prior_wt = saint_prior_wt.sort_index(axis=1)
+r_wt.A_df.sort_index(axis=0, inplace=True)
+r_wt.A_df.sort_index(axis=1, inplace=True)
+
+assert np.alltrue(saint_prior_wt.columns == r_wt.A_df.columns)
+assert np.alltrue(saint_prior_wt.index == r_wt.A_df.index)
+assert np.alltrue(saint_prior_wt.index == r_wt.A_df.columns)
+
+degree_prior_wt = get_degree_prior_from_matrix_df(r_wt.A_df)
+
+pairwise_average_wt = (r_wt.A_df + saint_prior_wt) / 2
+
+degree_prior_x_pair_av_wt_edgelist_df = sa.matrix_df_to_edge_list_df((degree_prior_wt * pairwise_average_wt))
+u_degree_prior_x_pair_av_wt = u_from_edgelist_df(degree_prior_x_pair_av_wt_edgelist_df)
+# -
+
 predictions = dict(
     saint_prior = u_saint_prior,
     pair_prod = u_pairwise,
@@ -223,13 +304,28 @@ predictions = dict(
     degree_prior = u_degree_prior,
     deg_x_prod = u_degree_prior_x_pair_prod,
     deg_x_av = u_degree_prior_x_pair_av,
+    humap2_hc = gbf.get_humap_high_reference(),
+    saint_max = gbf.get_cullin_saint_scores_edgelist(),
+    humap2_med = gbf.get_humap_medium_reference(),
     m3 = u_m3,
 )
 
+predictions['humap2_hc']._edge_dict
+
 references = dict(
   costructure = gbf.get_pdb_ppi_predict_cocomplex_reference(),
-  direct = gbf.get_pdb_ppi_predict_direct_reference()
+  direct = gbf.get_pdb_ppi_predict_direct_reference(),
+  huri = gbf.get_huri_reference(),
 )
+
+references = references | {"indirect" : references['costructure'].edge_identity_difference(
+    references['direct'])}
+
+references = references | {
+    "decoy149" : gbf.get_decoys_from_u(jax.random.PRNGKey(303), predictions['average_edge'], 149)}
+
+references = references | {
+    "decoy23" : gbf.get_decoys_from_u(jax.random.PRNGKey(404), predictions['average_edge'], 23)}
 
 importlib.reload(gbf)
 
@@ -245,11 +341,12 @@ gbf.write_roc_curves_and_table(
     ("degree_prior", "costructure"),
     ("deg_x_prod", "costructure"),
     ("deg_x_av", "costructure"),
+    ("saint_max", "costructure"),
+    #("humap2_hc", "costructure"),
+    #("humap2_med", "costructure"),
     #("m3", "costructure",)
     ),
     multi_save_suffix="_co_structure")
-
-predictions['m3']
 
 gbf.write_roc_curves_and_table(
     model_output_dirpath = Path("BuildItBackPriorDir/"),
@@ -263,9 +360,92 @@ gbf.write_roc_curves_and_table(
     ("degree_prior", "direct"),
     ("deg_x_prod", "direct"),
     ("deg_x_av", "direct"),
+    ("saint_max", "direct",)
+    #("humap2_hc", "direct"),
+    #("humap2_med", "direct")
     #("m3", "direct"),
     ),
     multi_save_suffix="_direct")
+
+ref_key = "indirect"
+gbf.write_roc_curves_and_table(
+    model_output_dirpath = Path("BuildItBackPriorDir/"),
+    references=references,
+    predictions=predictions,
+    pairs_to_plot_on_one_graph = (
+    ("saint_prior", ref_key),
+    ("average_edge", ref_key),
+    ("pair_prod", ref_key),
+    ("pair_av", ref_key),
+    ("degree_prior", ref_key),
+    ("deg_x_prod", ref_key),
+    ("deg_x_av", ref_key),
+    ("saint_max", ref_key,)
+    #("humap2_hc", ref_key),
+    #("humap2_all", ref_key)
+    #("m3", "direct"),
+    ),
+    multi_save_suffix=f"_{ref_key}")
+
+ref_key = "huri"
+gbf.write_roc_curves_and_table(
+    model_output_dirpath = Path("BuildItBackPriorDir/"),
+    references=references,
+    predictions=predictions,
+    pairs_to_plot_on_one_graph = (
+    ("saint_prior", ref_key),
+    ("average_edge", ref_key),
+    ("pair_prod", ref_key),
+    ("pair_av", ref_key),
+    ("degree_prior", ref_key),
+    ("deg_x_prod", ref_key),
+    ("deg_x_av", ref_key),
+    ("saint_max", ref_key,)
+    #("humap2_hc", ref_key),
+    #("humap2_all", ref_key)
+    #("m3", "direct"),
+    ),
+    multi_save_suffix=f"_{ref_key}")
+
+ref_key = "decoy149"
+gbf.write_roc_curves_and_table(
+    model_output_dirpath = Path("BuildItBackPriorDir/"),
+    references=references,
+    predictions=predictions,
+    pairs_to_plot_on_one_graph = (
+    ("saint_prior", ref_key),
+    ("average_edge", ref_key),
+    ("pair_prod", ref_key),
+    ("pair_av", ref_key),
+    ("degree_prior", ref_key),
+    ("deg_x_prod", ref_key),
+    ("deg_x_av", ref_key),
+    ("saint_max", ref_key,)
+    #("humap2_hc", ref_key),
+    #("humap2_all", ref_key)
+    #("m3", "direct"),
+    ),
+    multi_save_suffix=f"_{ref_key}")
+
+ref_key = "decoy23"
+gbf.write_roc_curves_and_table(
+    model_output_dirpath = Path("BuildItBackPriorDir/"),
+    references=references,
+    predictions=predictions,
+    pairs_to_plot_on_one_graph = (
+    ("saint_prior", ref_key),
+    ("average_edge", ref_key),
+    ("pair_prod", ref_key),
+    ("pair_av", ref_key),
+    ("degree_prior", ref_key),
+    ("deg_x_prod", ref_key),
+    ("deg_x_av", ref_key),
+    ("saint_max", ref_key,)
+    #("humap2_hc", ref_key),
+    #("humap2_all", ref_key)
+    #("m3", "direct"),
+    ),
+    multi_save_suffix=f"_{ref_key}")
 
 
 
@@ -304,7 +484,22 @@ net_pp = dcc.pyvis_plot_network(pp_top_edge_set)
 
 net_deg_x_av = dcc.pyvis_plot_network(deg_x_av_top_edge_set)
 
-net_deg_x_av.show("deg_x_av.html")
+# +
+#net_deg_x_av.show("deg_x_av.html")
+# -
+
+deg_x_av_wt_top_node_set, deg_x_av_wt_top_edge_set = dcc.get_top_edges_upto_threshold(
+    degree_prior_x_pair_av_wt_edgelist_df, threshold=0.85)
+
+net_dev_x_av_wt = dcc.pyvis_plot_network(deg_x_av_wt_top_edge_set)
+
+net_dev_x_av_wt.show("deg_x_av_wt.html")
+
+x = degree_prior_x_pair_av_wt_edgelist_df
+sel = x['a'] == 'vifprotein'
+x.sort_values("w", ascending=False).loc[sel, :]
+
+
 
 np.sum(pairwise_product_edgelist_df['w'] >= 0.9995)
 
