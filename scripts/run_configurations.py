@@ -28,6 +28,11 @@ class RunConfiguration(NamedTuple):
     filter_kw : str 
     init_strat : str = ""
     thinning : int = 1
+    adapt_step_size : bool = True
+    step_size : float = 1.0
+    adapt_mass_matrix : bool = True
+    target_accept_prob : float = 0.8):
+
 
 def from_template(template: RunConfiguration, **kwargs) -> RunConfiguration:
     """
@@ -239,9 +244,12 @@ se_sr_low_prior_1_uniform_mock_5k_diagnose = from_template(
     mini_se_sr_low_prior_1_uniform,
     model_output_dirpath = "../results/se_sr_low_prior_1_uniform_mock_5k_diagnose",
     num_warmup = 0,
-    num_samples = 5000,
+    num_samples = 500,
     filter_kw = "mock",
-    progress_bar = False,
+    progress_bar = True,
+    adapt_step_size = False,
+    adapt_mass_matrix = False,
+    step_size = 1.,
     )
 
 se_sr_low_prior_1_uniform_vif_100k_no_thin = from_template(
