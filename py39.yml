@@ -168,6 +168,7 @@ dependencies:
   - joblib=1.2.0=pyhd8ed1ab_0
   - jraph=0.0.6.dev0=pyhd8ed1ab_1
   - jsonpatch=1.32=pyhd8ed1ab_0
+  - jsonpickle=3.0.4=pyhd8ed1ab_0
   - jsonpointer=2.0=py_0
   - jsonschema=4.17.3=pyhd8ed1ab_0
   - jupyter=1.0.0=py39h2804cbe_8
@@ -295,7 +296,7 @@ dependencies:
   - openjdk=17.0.3=hf913c23_6
   - openjpeg=2.5.0=hbc2ba62_2
   - openpyxl=3.0.9=pyhd8ed1ab_0
-  - openssl=3.2.1=h0d3ecfb_1
+  - openssl=3.3.0=h0d3ecfb_0
   - opt_einsum=3.3.0=pyhd8ed1ab_1
   - optax=0.1.4=pyhd8ed1ab_0
   - orc=1.8.3=ha98e9e8_1
@@ -356,6 +357,7 @@ dependencies:
   - python-tzdata=2023.3=pyhd8ed1ab_0
   - python_abi=3.9=3_cp39
   - pytz=2023.3=pyhd8ed1ab_0
+  - pyvis=0.3.1=pyhd8ed1ab_0
   - pyyaml=6.0=py39h02fc5c5_5
   - pyzmq=25.0.2=py39h0553236_0
   - re2=2023.02.02=hb7217d7_0
@@ -443,7 +445,7 @@ dependencies:
       - gast==0.5.3
       - gviz-api==1.10.0
       - networkit==10.1
-      - numpy==1.22.4
+      - numpy==1.23.5
       - pdbecif==1.5
       - prody==2.4.0
       - tensorflow-probability==0.19.0
