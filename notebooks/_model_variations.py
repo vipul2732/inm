@@ -2662,6 +2662,10 @@ def trace_model_shapes(model, arg):
 @click.option("--jax-profile", default=False, is_flag=True)
 @click.option("--init-strat", default="")
 @click.option("--thinning", type=int, default=1)
+@click.option("--adapt-step-size", type=bool, default=True)
+@click.option("--step-size", type=float, defulat=1.0)
+@click.option("--adapt-mass-matrix", type=bool, default=True)
+@click.option("--target_accept_prob", type=float, default=0.8)
 def main(model_id,
          rseed,
          model_name,
@@ -2678,7 +2682,10 @@ def main(model_id,
          load_warmup,
          jax_profile,
          init_strat,
-         thinning,):
+         thinning,
+         adapt_step_size,
+         adapt_mass_matrix,
+         target_accept_prob,):
     _main(model_id = model_id,
           rseed = rseed,
           model_name = model_name,
@@ -2695,7 +2702,11 @@ def main(model_id,
           load_warmup = load_warmup,
           jax_profile = jax_profile,
           init_strat = init_strat,
-          thinning = thinning)
+          thinning = thinning,
+          step_size = step_size,
+          adapt_step_size = adapt_step_size,
+          adapt_mass_matrix = adapt_mass_matrix,
+          target_accept_prob = target_accept_prob,)
 
 def _main(model_id,
          rseed,
@@ -2713,7 +2724,11 @@ def _main(model_id,
          load_warmup,
          jax_profile,
          init_strat,
-         thinning,):
+          thinning : int = 1,
+          step_size : float = 1.0,
+          adapt_step_size : bool = True,
+          adapt_mass_matrix  : bool = True,
+          target_accept_prob : float = 0.8,):
     log_path = Path(save_dir) / "_model_variations.log"
     #logging.basicConfig(filename=log_path, filemode='w')
     logger = logging.getLogger(__name__)
@@ -2757,9 +2772,16 @@ def _main(model_id,
         init_strategy = init_position_dispatcher(initial_position, model_name)
     warmup_savename = model_id + "_" + model_name + "_" + "hmc_warmup.pkl"
     warmup_savename = str(Path(save_dir) / warmup_savename)
-    nuts = NUTS(model, init_strategy=init_strategy)
+    nuts = NUTS(
+            model,
+            init_strategy=init_strategy,
+            step_size = step_size,
+            adapt_step_size=adapt_step_size,
+            adapt_mass_matrix = adapt_mass_matrix,
+            target_accept_prob = target_accept_prob,)
     # Do the warmup
-    mcmc = MCMC(nuts, num_warmup=num_warmup, num_samples=num_samples, progress_bar=progress_bar, thinning=thinning)
+    mcmc = MCMC(nuts, num_warmup=num_warmup, num_samples=num_samples, progress_bar=progress_bar, thinning=thinning,
+                )
     if save_warmup:
         rng_key, key = jax.random.split(rng_key)
         mcmc.warmup(key, model_data = model_data)
