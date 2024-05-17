@@ -75,6 +75,11 @@ def postprocess_samples(i, fbasename):
 
     
 def _main(o, i):
+    logger = logging.getLogger(__name__)
+    logger.info("Enter generate_sampling_figures")
+    logging.info(f"Params")
+    logging.info(f"    i:{i}")
+    logging.info(f"    o:{o}")
 
     i = Path(i)
     o = Path(o)
@@ -259,7 +264,9 @@ def _main(o, i):
             ylabel = "condition",
             title = "Spectral counts",
             savename = "spec_table",)
-
+    
+    # Get concatenated samples
+    o = postprocess_samples(i.parent, fbasename=i.stem) 
 
     with open(i, "rb") as f:
         x = pkl.load(f)

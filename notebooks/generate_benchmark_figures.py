@@ -650,7 +650,26 @@ def n_fps_from_samples(samples, refij):
     aij_mat = aij_mat > 0.5
     return n_fps(aij_mat, refij)
 
+def pklload(x):
+    with open(x, "rb") as f:
+        return pkl.load(f)
 
+def concatenate_warmup_samples(model_output_dirpath, fbasename="0_model_23_se_sr_13"):
+    p1 = model_output_dirpath / (fbasename + "_warmup_samples.pkl")
+    p2 = model_output_dirpath / (fbasename + ".pkl")
+
+    p1 = pklload(p1)
+    p2 = pklload(p2)
+    
+    p2_samples = p2.mcmc['samples']
+    p2_ef = p2.mcmc['extra_fields']
+
+    found_keys = []
+    for key, val in p1.items():
+        # concatenate samples along first axis
+        val2 = p2[key]
+        result = np.concatenate(val, val2)
+        found_keys.append()
 
 def cullin_standard(model_output_dirpath, fbasename, with_humap_as_predictions_at_cullin=True):
     references = dict( 
@@ -761,6 +780,11 @@ def main(i, fbasename):
     _main(i, fbasename)
 
 def _main(i, fbasename):
+    logger = logging.getLogger(__name__)
+    logging.info("Enter generate_benchmark_figures")
+    logging.info(f"Params")
+    logging.info(f"    i:{i}")
+    logging.info(f"    fbasename:{fbasename}")
     i = Path(i)
     cullin_standard(i, fbasename)
 
