@@ -43,6 +43,36 @@ def rc_context(rc = None, fname = None):
                 return func(*args, **kwargs)
         return wrapper
     return rc_decorator
+
+def input_load(i, fbasename, suffix):
+    with open(i / f"{fbasename}{suffix}.pkl", "rb") as f:
+        return pkl.load(f)
+
+def postprocess_samples(i, fbasename):
+    # Get the model data
+    warmup_out_dict = input_load(i, fbasename, "_warmup_samples") 
+    sample_out_dict = input_load(i, fbasename, "")
+
+    def concat_warmup_samples(w, s):
+        ws = w['samples']
+        ss = s['samples']
+
+        we = w['extra_fields']
+        se = s['extra_fields']
+
+        # concatenate along the first axis with warmup first 
+        os = {}
+        oe = {}
+
+        for key in ws:
+            os[key] = np.concatenate([ws[key], ss[key]])
+        for key in we:
+            oe[key] = np.concatenate([we[key], se[key]])
+        return {"samples" : os, "extra_fields" : oe}
+
+    results = concat_warmup_samples(warmup_out_dict, sample_out_dict) 
+    return results
+
     
 def _main(o, i):
 
