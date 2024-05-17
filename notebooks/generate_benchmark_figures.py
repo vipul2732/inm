@@ -534,7 +534,14 @@ def humap_bench(bench_output = "../results/humap_bench", topN=None):
 
     write_roc_curves_and_table(bench_output, predictions=predictions, references=references)
 
-def write_roc_curves_and_table(model_output_dirpath, predictions, references):
+def write_roc_curves_and_table(model_output_dirpath, predictions, references,
+                               pairs_to_plot_on_one_graph =( 
+        ("average_edge", "humap2_high"),
+        ("average_edge", "huri"),
+        ("average_edge", "pdb_direct"),
+        ("average_edge", "pdb_cocomplex"),
+        ("cullin_max_saint", "pdb_cocomplex")
+                                   ), multi_save_suffix=""):
     plotter = tpr_ppr.PprTprPlotter()
     # Summary Table
     ref_name_lst = []
@@ -542,14 +549,8 @@ def write_roc_curves_and_table(model_output_dirpath, predictions, references):
     auc = []   
     shuff_auc = []
     n_reference_positives = []
+    n_predicted_positives = []
 
-    pairs_to_plot_on_one_graph = [
-        ("average_edge", "humap2_high"),
-        ("average_edge", "huri"),
-        ("average_edge", "pdb_direct"),
-        ("average_edge", "pdb_cocomplex"),
-        ("cullin_max_saint", "pdb_cocomplex")
-        ]
     fig_multi, ax_multi = plt.subplots(1, 1)
     tpr_ppr.set_roc_limits(ax_multi) 
     for pred_name, prediction in predictions.items():
@@ -562,14 +563,17 @@ def write_roc_curves_and_table(model_output_dirpath, predictions, references):
             ref_name_lst.append(ref_name)
             auc.append(compare_results.auc)
             shuff_auc.append(compare_results.shuff_auc)
-            n_reference_positives.append(compare_results.n_total_positives)
+            n_ref_pos = compare_results.n_total_positives
+            n_reference_positives.append(n_ref_pos)
+            n_pred_pos = compare_results.n_predicted_positives
+            n_predicted_positives.append(n_pred_pos)
             if (pred_name, ref_name) in pairs_to_plot_on_one_graph:
-                ax_multi.plot(compare_results.ppr_points, compare_results.tpr_points, label=f"{round(compare_results.auc, 3)} {pred_name} {ref_name}")
+                ax_multi.plot(compare_results.ppr_points, compare_results.tpr_points, label=f"{round(compare_results.auc, 3)} {pred_name} N={n_pred_pos} {ref_name} N={n_ref_pos}")
     
     ax_multi.legend()
     ax_multi.set_xlabel("Positive predictive rate")
     ax_multi.set_ylabel("True positive rate")
-    multi_savepath = str(model_output_dirpath / "roc_multi")
+    multi_savepath = str(model_output_dirpath / ("roc_multi" + multi_save_suffix))
     tpr_ppr.dpi_save(multi_savepath, fig_multi, 300)
     tpr_ppr.dpi_save(multi_savepath, fig_multi, 1200)
     plt.close(fig=fig_multi)
@@ -595,6 +599,7 @@ def write_roc_curves_and_table(model_output_dirpath, predictions, references):
                        "w" : u.edge_values})
     df = df.sort_values("w", ascending=False)
     df.to_csv(str(model_output_dirpath / "average_predicted_edge_scores.tsv"), sep="\t", index=None)
+    plt.close()
 
 def get_indirect_edges():
     pdb_direct = get_pdb_ppi_predict_direct_reference()
@@ -614,6 +619,37 @@ def get_decoys_from_u(rng_key, u, N_decoys, a_colname="auid", b_colname="buid"):
     df = pd.DataFrame({a_colname : a_nodes, b_colname : b_nodes})
     decoy.update_from_df(df, a_colname = a_colname, b_colname = b_colname)
     return decoy
+
+def n_tp(aij, refij):
+    """
+    Return the values of the array where both are 1
+    Boolean arrays
+    """
+    return np.sum(aij & refij)
+
+def n_fp(aij, refij):
+    return np.sum((aij == 1) & (refij == 0))
+
+def _loop(aij_mat, refij, f):
+    N, _ = aij_mat.shape
+    output = np.zeros(N)
+    for i in range(N):
+        output[i] = f(aij_mat[i, :], refij)
+    return output
+
+n_tps = partial(_loop, f=n_tp)
+n_fps = partial(_loop, f=n_fp)
+
+def n_tps_from_samples(samples, refij):
+    aij_mat = mv.Z2A(samples['z'])
+    aij_mat = aij_mat > 0.5
+    return n_tps(aij_mat, refij)
+
+def n_fps_from_samples(samples, refij):
+    aij_mat = mv.Z2A(samples['z'])
+    aij_mat = aij_mat > 0.5
+    return n_fps(aij_mat, refij)
+
 
 
 def cullin_standard(model_output_dirpath, fbasename, with_humap_as_predictions_at_cullin=True):
