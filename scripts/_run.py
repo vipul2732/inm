@@ -67,6 +67,10 @@ def main(
     filter_kw,
     init_strat = "",
     thinning = 1,
+    step_size : float = 1.0,
+    adapt_step_size : bool = True,
+    adapt_mass_matrix  : bool = True,
+    target_accept_prob : float = 0.8,
 ):
     """
     Params:

@@ -2663,7 +2663,7 @@ def trace_model_shapes(model, arg):
 @click.option("--init-strat", default="")
 @click.option("--thinning", type=int, default=1)
 @click.option("--adapt-step-size", type=bool, default=True)
-@click.option("--step-size", type=float, defulat=1.0)
+@click.option("--step-size", type=float, default=1.0)
 @click.option("--adapt-mass-matrix", type=bool, default=True)
 @click.option("--target_accept_prob", type=float, default=0.8)
 def main(model_id,
@@ -2684,6 +2684,7 @@ def main(model_id,
          init_strat,
          thinning,
          adapt_step_size,
+         step_size,
          adapt_mass_matrix,
          target_accept_prob,):
     _main(model_id = model_id,

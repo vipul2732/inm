@@ -31,7 +31,7 @@ class RunConfiguration(NamedTuple):
     adapt_step_size : bool = True
     step_size : float = 1.0
     adapt_mass_matrix : bool = True
-    target_accept_prob : float = 0.8):
+    target_accept_prob : float = 0.8
 
 
 def from_template(template: RunConfiguration, **kwargs) -> RunConfiguration:
@@ -238,6 +238,66 @@ se_sr_low_prior_1_uniform_mock_100k_no_thin = from_template(
     num_warmup = 5_000,
     filter_kw = "mock",
     thinning = 1,
+    )
+
+se_sr_low_prior_1_uniform_mock_2k_diagnose = from_template(
+    mini_se_sr_low_prior_1_uniform,
+    model_output_dirpath = "../results/se_sr_low_prior_1_uniform_mock_5k_diagnose",
+    num_warmup = 0,
+    num_samples = 2000,
+    filter_kw = "mock",
+    progress_bar = False,
+    adapt_step_size = False,
+    adapt_mass_matrix = False,
+    step_size = 1.,
+    )
+
+se_sr_low_prior_1_uniform_mock_2k_diagnose = from_template(
+    mini_se_sr_low_prior_1_uniform,
+    model_output_dirpath = "../results/se_sr_low_prior_1_uniform_mock_2k_diagnose",
+    num_warmup = 0,
+    num_samples = 2000,
+    filter_kw = "mock",
+    progress_bar = False,
+    adapt_step_size = False,
+    adapt_mass_matrix = False,
+    step_size = 1.,
+    )
+
+se_sr_low_prior_1_uniform_mock_2k_diagnose_small_step = from_template(
+    mini_se_sr_low_prior_1_uniform,
+    model_output_dirpath = "../results/se_sr_low_prior_1_uniform_mock_2k_diagnose_small_step",
+    num_warmup = 0,
+    num_samples = 2000,
+    filter_kw = "mock",
+    progress_bar = False,
+    adapt_step_size = False,
+    adapt_mass_matrix = False,
+    step_size = 5.2e-4,
+    )
+
+se_sr_low_prior_1_uniform_mock_2k_diagnose_small_step_27 = from_template(
+    mini_se_sr_low_prior_1_uniform,
+    model_output_dirpath = "../results/se_sr_low_prior_1_uniform_mock_2k_diagnose_small_step_27",
+    num_warmup = 0,
+    num_samples = 2000,
+    filter_kw = "mock",
+    progress_bar = False,
+    adapt_step_size = False,
+    adapt_mass_matrix = False,
+    step_size = 2.7e-4,
+    )
+
+se_sr_low_prior_1_uniform_mock_2k_diagnose_target_06 = from_template(
+    mini_se_sr_low_prior_1_uniform,
+    model_output_dirpath = "../results/se_sr_low_prior_1_uniform_mock_2k_diagnose_t06",
+    num_warmup = 1_000,
+    num_samples = 2_000,
+    filter_kw = "mock",
+    progress_bar = False,
+    adapt_step_size = True,
+    adapt_mass_matrix = True,
+    target_accept_prob = 0.6,  
     )
 
 se_sr_low_prior_1_uniform_mock_5k_diagnose = from_template(
