@@ -88,6 +88,18 @@ def _main(o, i):
         ax.set_title(title)
         save(savename)
 
+    @rc_context(rc = _matrix_rc)
+    def plot_binary_matrix(matrix):
+        fig, ax = plt.subplots()
+        fig, ax = plt.subplots()
+        cax = ax.matshow(matrix, vmin=0, vmax=1)
+        plt.colorbar(shrink = 0.95, mappable = cax, ax = ax)
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        save(savename)
+
+
     def plot_histogram(x, xlabel, ylabel, savename, title = None, bins = 100, hist_range=(-1, 1),
                        text = None, textx = None, texty = None,): 
             
