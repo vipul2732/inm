@@ -2346,7 +2346,6 @@ def model23_se_sr(model_data):
             aij = aij,
             null_log_like = null_log_like)
 
-
 def model23_se_sc(model_data):
     """
     $S(M) = S_E(M) + S_C(M)$
@@ -2364,6 +2363,8 @@ def model23_se_sc(model_data):
             N = N, 
             disconectivity_distance = disconectivity_distance,
             max_distance = max_distance)
+
+
 
 def calculate_degree_from_edgelist(edgelist, degree_vector, n_nodes):
     edgelist_idx = 0
@@ -2397,6 +2398,26 @@ def model23_SE_score(alpha, beta, M):
     z = numpyro.sample('z', dist.Normal(mu+0.5).expand([M,])) #(M, ) shifted normal, sigma must be 1. latent edges
     aij = Z2A(z)
     return aij
+
+def model23_SAINT_score(aij, saint_ij, M):
+    """
+    A SAINT bait-prey link classifies a node as "co-purifying"
+    The score is between [0, 1].
+    A maximal saint score is the maximal SAINT score for a given prey over
+    the input purifications used for modeling (condition).
+
+    The saint_ij is a pair score of the maximal saint scores of prey i and prey j.
+    saint_ij = saint_i * saint_j
+    The symmetric pairwise matrix of pair scores is flattened to an edgelist saint_ij 
+    
+    p(saint_ij | aij) is the likelihood of a saint pair score given an edge aij.
+    p(aij | saint_ij) is a prior
+
+    if saint_ij == 0, the direct edge aij cannot occur
+    if saint_ij is 1, the edge may be direct or indirect
+    """
+
+    score = -jnp.sum((1-aij) * saint_ij) / M
 
 def model23_SC_score(aij, composite_dict_norm_approx, composite_dict_p_is_1, N, disconectivity_distance,
                      max_distance):
@@ -2459,8 +2480,6 @@ def model23_unpack_model_data(model_data):
     max_distance = model_data['max_distance']
     return (N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx,
             R, R0, null_dist, null_log_like, disconectivity_distance, max_distance)
-
-
 
 def model23_se_sr_sc(model_data):
     """
@@ -2666,6 +2685,7 @@ def trace_model_shapes(model, arg):
 @click.option("--step-size", type=float, default=1.0)
 @click.option("--adapt-mass-matrix", type=bool, default=True)
 @click.option("--target_accept_prob", type=float, default=0.8)
+@click.option("--collect-warmup", type=bool, default=False)
 def main(model_id,
          rseed,
          model_name,
@@ -2686,7 +2706,8 @@ def main(model_id,
          adapt_step_size,
          step_size,
          adapt_mass_matrix,
-         target_accept_prob,):
+         target_accept_prob,
+         collect_warmup,):
     _main(model_id = model_id,
           rseed = rseed,
           model_name = model_name,
@@ -2707,7 +2728,8 @@ def main(model_id,
           step_size = step_size,
           adapt_step_size = adapt_step_size,
           adapt_mass_matrix = adapt_mass_matrix,
-          target_accept_prob = target_accept_prob,)
+          target_accept_prob = target_accept_prob,
+          collect_warmup = collect_warmup)
 
 def _main(model_id,
          rseed,
@@ -2725,16 +2747,34 @@ def _main(model_id,
          load_warmup,
          jax_profile,
          init_strat,
-          thinning : int = 1,
-          step_size : float = 1.0,
-          adapt_step_size : bool = True,
-          adapt_mass_matrix  : bool = True,
-          target_accept_prob : float = 0.8,):
-    log_path = Path(save_dir) / "_model_variations.log"
+         thinning : int = 1,
+         step_size : float = 1.0,
+         adapt_step_size : bool = True,
+         adapt_mass_matrix  : bool = True,
+         target_accept_prob : float = 0.8,
+         collect_warmup = False,):
+    #log_path = Path(save_dir) / "_model_variations.log"
     #logging.basicConfig(filename=log_path, filemode='w')
     logger = logging.getLogger(__name__)
+    logging.info(f"""Params
+    rseed {rseed}
+    model_name {model_name}
+    num_warmup {num_warmup}
+    num_samples {num_samples}
+    include_potential_energy {include_potential_energy}
+    include_extra_fields {include_extra_fields}
+    progress_bar {progress_bar}
+    save_dir {save_dir}
+    initial_position {initial_position}
+    save_warmup {save_warmup}
+    load_warmup {load_warmup}
+    jax_profile {jax_profile}
+    init_strat {init_strat}
+    thinning {thinning}
+    collect_warmup {collect_warmup}
+    """)
+
     entered_main_time = time.time()
-    rng_key = jax.random.PRNGKey(rseed)
     eprint(f"Model ID: {model_id}")
     eprint(f"Model Name: {model_name}")
     eprint(jax.devices())
@@ -2780,12 +2820,18 @@ def _main(model_id,
             adapt_step_size=adapt_step_size,
             adapt_mass_matrix = adapt_mass_matrix,
             target_accept_prob = target_accept_prob,)
-    # Do the warmup
     mcmc = MCMC(nuts, num_warmup=num_warmup, num_samples=num_samples, progress_bar=progress_bar, thinning=thinning,
                 )
+
+    # Do the warmup
+    mcmc_warmup_kwargs = dict(
+            collect_warmup = collect_warmup,
+            )
+    rng_key = jax.random.PRNGKey(rseed)
+    rng_key, warmup_key = jax.random.split(rng_key)
+    mcmc.warmup(warmup_key, model_data = model_data, **mcmc_warmup_kwargs)
+
     if save_warmup:
-        rng_key, key = jax.random.split(rng_key)
-        mcmc.warmup(key, model_data = model_data)
         warmup_state = mcmc.last_state
         with open(warmup_savename, "wb") as f:
             pkl.dump(warmup_state, f)
