@@ -300,11 +300,11 @@ se_sr_low_prior_1_uniform_mock_2k_diagnose_t06 = from_template(
     target_accept_prob = 0.6,  
     )
 
-se_sr_low_prior_1_uniform_mock_20k_t06 = from_template(
+se_sr_low_prior_1_uniform_mock_60k_t06 = from_template(
     mini_se_sr_low_prior_1_uniform,
-    model_output_dirpath = "../results/se_sr_low_prior_1_uniform_mock_20k_t06",
+    model_output_dirpath = "../results/se_sr_low_prior_1_uniform_mock_60k_t06",
     num_warmup = 1_000,
-    num_samples = 20_000,
+    num_samples = 60_000,
     filter_kw = "mock",
     progress_bar = False,
     adapt_step_size = True,
