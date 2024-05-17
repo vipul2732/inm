@@ -288,7 +288,7 @@ se_sr_low_prior_1_uniform_mock_2k_diagnose_small_step_27 = from_template(
     step_size = 2.7e-4,
     )
 
-se_sr_low_prior_1_uniform_mock_2k_diagnose_target_06 = from_template(
+se_sr_low_prior_1_uniform_mock_2k_diagnose_target_t06 = from_template(
     mini_se_sr_low_prior_1_uniform,
     model_output_dirpath = "../results/se_sr_low_prior_1_uniform_mock_2k_diagnose_t06",
     num_warmup = 1_000,
