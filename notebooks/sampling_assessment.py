@@ -49,12 +49,12 @@ def guard_path(path):
     else:
         raise ValueError
 
-def get_results(path, rseed=13):
+def get_results(path, rseed=13, mname="0_model23_se_sr"):
     path = guard_path(path)
 
-    mcmc = pkl_load(path / f"0_model23_se_sr_{rseed}.pkl")
-    model_data = pkl_load(path / f"0_model23_se_sr_{rseed}_model_data.pkl")
-    hmc_warmup = pkl_load(path / f"0_model23_se_sr_hmc_warmup.pkl")
+    mcmc = pkl_load(path / f"{mname}_{rseed}.pkl")
+    model_data = pkl_load(path / f"{mname}_{rseed}_model_data.pkl")
+    hmc_warmup = pkl_load(path / f"{mname}_hmc_warmup.pkl")
 
     samples = mcmc['samples']
     As = mv.Z2A(samples['z'])
