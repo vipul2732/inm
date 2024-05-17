@@ -240,11 +240,11 @@ se_sr_low_prior_1_uniform_mock_100k_no_thin = from_template(
     thinning = 1,
     )
 
-se_sr_low_prior_1_uniform_mock_2k_diagnose = from_template(
+se_sr_low_prior_1_uniform_mock_5k_diagnose = from_template(
     mini_se_sr_low_prior_1_uniform,
     model_output_dirpath = "../results/se_sr_low_prior_1_uniform_mock_5k_diagnose",
     num_warmup = 0,
-    num_samples = 2000,
+    num_samples = 5000,
     filter_kw = "mock",
     progress_bar = False,
     adapt_step_size = False,
@@ -300,9 +300,9 @@ se_sr_low_prior_1_uniform_mock_2k_diagnose_target_06 = from_template(
     target_accept_prob = 0.6,  
     )
 
-se_sr_low_prior_1_uniform_mock_5k_diagnose = from_template(
+se_sr_low_prior_1_uniform_mock_500_diagnose = from_template(
     mini_se_sr_low_prior_1_uniform,
-    model_output_dirpath = "../results/se_sr_low_prior_1_uniform_mock_5k_diagnose",
+    model_output_dirpath = "../results/se_sr_low_prior_1_uniform_mock_500_diagnose",
     num_warmup = 0,
     num_samples = 500,
     filter_kw = "mock",
