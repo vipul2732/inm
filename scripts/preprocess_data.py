@@ -398,18 +398,23 @@ def preprocess_spec_table(input_path,
                           enforce_bait_remapping = False,
                           filter_kw = None,
                           mode = "cullin"):
-    spec_table, composites = get_spec_table_and_composites(
+    spec_table, composites, prey_condition_dict, sid_dict, sim_dict = get_spec_table_and_composites(
             input_path,
             sheet_nums,
             prey_colname=prey_colname,
-            enforce_bait_remapping=enforce_bait_remapping) 
+            enforce_bait_remapping=enforce_bait_remapping,
+            return_many = True) 
 
     spec_table = get_spec_table(xlsx_path = input_path,
                                 sheet_nums = sheet_nums,
                                 prey_colname = prey_colname,
                                 enforce_bait_remapping = enforce_bait_remapping)
     spec_table = filter_spec_table(spec_table, filter_kw, mode = mode)
-    #composites = filter_composite_table(composites, filter_kw)
+    composites = filter_composite_table(
+            composites,
+            filter_kw,
+            sid_dict)
+
     log_unmapped_bait(composites)
     composites.to_csv(output_dir / "composite_table.tsv", sep="\t", index=False)
     spec_table.to_csv(output_dir / "spec_table.tsv", sep="\t", index=True, header=True)
@@ -480,19 +485,32 @@ def filter_spec_table(spec_table, filter_kw = None, mode = "cullin") -> pd.DataF
         return spec_table
 
    
-def filter_composite_table(composites, filter_kw):
+def filter_composite_table(composites, filter_kw, sid_dict, mode):
     """
     Filters the composite_table if the filter_kw is set.
     """
-    if filter_kw:
-        if mode == "cullin":
-            row_sel = get_conditions_sel_cullin_composites(composites, filter_kw)
+    if mode == "cullin":
+        if filter_kw:
+            def get_conditions_sel_cullin_composites(composites, filter_kw, sid_dict):
+                allowed_purifications = []
+                assert filter_kw in ("vif", "mock", "wt", "all")
+                keylist = list(sid_dict.keys())
+                assert len(keylist) == 10, "Expected 10 types of conditions in cullin input"
+                for key, value in sid_dict.items():
+                    if filter_kw in key:
+                        allowed_purifications.append(value)
+                    elif filter_kw == "all":
+                        allowed_purifications.append(value)
+                sel = [r['SID'] in allowed_purifications for i,r in composites.iterrows()]
+                return sel
+            row_sel = get_conditions_sel_cullin_composites(composites, filter_kw, sid_dict)
             composites = composites.loc[row_sel, :]
-            ...
+            return composites
         else:
-            raise NotImplementedError
+            return composites
     else:
-        return composites
+        raise NotImplementedError("IO for non cullin datasets is not implemented")
+
 
 def get_conditions_sel_cullin_composites(composites, filter_kw):
     def validate_filter_kw(filter_kw):
@@ -502,7 +520,6 @@ def get_conditions_sel_cullin_composites(composites, filter_kw):
     def get_filter_kw2_sid_mapping():
         def read_in_xlsx_sheets():
             ...
-
         ...
 
 
