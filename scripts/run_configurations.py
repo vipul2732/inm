@@ -223,6 +223,59 @@ se_sr_low_prior_1_uniform_mock_20k = from_template(
     filter_kw = "mock",
     )
 
+se_low_prior_1_uniform_mock_10k = from_template(
+    mini_se_sr_low_prior_1_uniform,
+    model_output_dirpath = "se_low_prior_1_uniform_mock_10k",  
+    model_name = "model23_se",
+    num_samples = 10_000,
+    num_wamrup = 1_000,
+    filter_kw = "mock",
+    )
+
+se_low_prior_1_uniform_vif_10k = from_template(
+    mini_se_sr_low_prior_1_uniform,
+    model_output_dirpath = "se_low_prior_1_uniform_vif_10k",  
+    model_name = "model23_se",
+    num_samples = 10_000,
+    num_wamrup = 1_000,
+    filter_kw = "vif",
+    )
+
+
+se_low_prior_2_uniform_mock_10k = from_template(
+    mini_se_sr_low_prior_1_uniform,
+    model_output_dirpath = "se_low_prior_2_uniform_mock_10k",  
+    model_name = "model23_se",
+    num_samples = 10_000,
+    num_wamrup = 1_000,
+    hyper_param_alpha = 0.0001,
+    hyper_param_beta = 0.001,
+    )
+
+se_low_prior_3_uniform_mock_10k = from_template(
+    mini_se_sr_low_prior_1_uniform,
+    model_output_dirpath = "se_low_prior_3_uniform_mock_10k",  
+    model_name = "model23_se",
+    num_samples = 10_000,
+    num_wamrup = 1_000,
+    hyper_param_alpha = 0.00001,
+    hyper_param_beta = 0.0001,
+    )
+
+se_high_prior_1_uniform_mock_10k = from_template(
+    mini_se_sr_low_prior_1_uniform,
+    model_output_dirpath = "se_high_prior_1_uniform_mock_10k",  
+    model_name = "model23_se",
+    num_samples = 10_000,
+    num_wamrup = 1_000,
+    hyper_param_alpha = 0.45,
+    hyper_param_beta = 0.55,
+    )
+
+
+
+
+
 se_sr_low_prior_1_uniform_mock_10k_warmup_20k = from_template(
     mini_se_sr_low_prior_1_uniform,
     model_output_dirpath = "../results/se_sr_low_prior_1_uniform_mock_10k_20k",
