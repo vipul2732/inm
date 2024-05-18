@@ -2,10 +2,12 @@
 Given an file of samples write figures visualing samples to an output directory
 """
 import click
+from functools import partial
 from pathlib import Path
 import matplotlib.pyplot as plt
 import pickle as pkl
 import _model_variations as mv
+import data_io
 import numpy as np
 import pandas as pd
 import jax
@@ -32,6 +34,7 @@ _histogram_rc = ""
 _scatter_plot_rc = ""
 _caterpillar_rc = ""
 
+_dev = True
 
 def rc_context(rc = None, fname = None):
     """
@@ -48,6 +51,41 @@ def input_load(i, fbasename, suffix):
     with open(i / f"{fbasename}{suffix}.pkl", "rb") as f:
         return pkl.load(f)
 
+
+def n_tp(aij, refij):
+    """
+    Return the values of the array where both are 1
+    Boolean arrays
+    """
+    return np.sum(aij & refij)
+
+def n_fp(aij, refij):
+    return np.sum((aij == 1) & (refij == 0))
+
+def n_edge(aij):
+    return np.sum(aij > 0.5)
+
+def _loop(aij_mat, refij, f):
+    N, _ = aij_mat.shape
+    output = np.zeros(N)
+    for i in range(N):
+        output[i] = f(aij_mat[i, :], refij)
+    return output
+
+n_tps = partial(_loop, f=n_tp)
+n_fps = partial(_loop, f=n_fp)
+n_edges = partial(_loop, f=lambda x, _: n_edge(x), refij=None)
+
+def n_tps_from_samples(samples, refij):
+    aij_mat = mv.Z2A(samples['z'])
+    aij_mat = aij_mat > 0.5
+    return n_tps(aij_mat, refij)
+
+def n_fps_from_samples(samples, refij):
+    aij_mat = mv.Z2A(samples['z'])
+    aij_mat = aij_mat > 0.5
+    return n_fps(aij_mat, refij)
+
 def postprocess_samples(i, fbasename):
     # Get the model data
     warmup_out_dict = input_load(i, fbasename, "_warmup_samples") 
@@ -63,15 +101,53 @@ def postprocess_samples(i, fbasename):
         # concatenate along the first axis with warmup first 
         os = {}
         oe = {}
-
+        found_keys = []
         for key in ws:
             os[key] = np.concatenate([ws[key], ss[key]])
+            found_keys.append(key)
         for key in we:
             oe[key] = np.concatenate([we[key], se[key]])
-        return {"samples" : os, "extra_fields" : oe}
+            found_keys.append(key)
+        found_keys = list(set(found_keys))
+
+        out = {"samples" : os, "extra_fields" : oe}
+
+        # add keys not in warmup
+        for key in se:
+            if key not in found_keys:
+                out['extra_fields'][key] = se[key]
+        for key in ss:
+            if key not in found_keys:
+                out['samples'][key] = ss[key]
+        for key in s:
+            if key not in found_keys:
+                if key not in ("samples", "extra_fields"):
+                    out[key] = s[key]
+        return out 
 
     results = concat_warmup_samples(warmup_out_dict, sample_out_dict) 
     return results
+
+
+def align_reference_to_model(model_data, uref):
+    """
+    Order edges in the reference according to the model.
+    """
+    n_possible_edges = model_data['M']
+    node_idx2name = model_data["node_idx2name"]
+    n_nodes = model_data['N']
+    uref._build_edge_dict()
+    reflist_out = np.zeros(n_possible_edges, dtype=np.int64)
+    for k in range(n_possible_edges):
+        i, j = mv.ij_from(k, n_nodes)
+        i_node_name = node_idx2name[i]
+        j_node_name = node_idx2name[j]
+        edge = frozenset([i_node_name, j_node_name])
+        if edge in uref._edge_dict:
+            reflist_out[k] = 1
+        k += 1
+    assert j == n_nodes -1
+    return reflist_out
 
     
 def _main(o, i):
@@ -166,110 +242,122 @@ def _main(o, i):
         ax.set_ylabel(ylabel)
         ax.set_title(title)
         save(savename)
+
+    def model_data_plots():
     
+    
+        # Correlation matrix
+        plot_correlation_matrix(
+                matrix = model_data['corr'],
+                xlabel = 'node',
+                savename = 'corr',
+                title = "$R$",)
+    
+        # Correlation matrix
+        plot_correlation_matrix(
+                matrix = model_data['shuff_corr'],
+                xlabel = "node",
+                savename = "shuff_corr",
+                title = "$R^{0}$",)
+    
+        # Composite dict - skip
+    
+        # Matrix plot of shuffled spec table
+        plot_spec_count_table(
+                table = model_data['selected_shuff_spec_table'],
+                xlabel = "condition",
+                ylabel = "node",
+                savename = "selected_shuff_spec_table",
+                title = "Shuffled spectral counts"),
+    
+        # Matrix plot of spec table
+        plot_spec_count_table(
+                table = model_data['selected_spec_table'],
+                xlabel = "condition",
+                ylabel = "node",
+                savename = "selected_spec_table",
+                title = "Spectral counts",)
+    
+        # lower_edge_prob - skip
+        # uppder_edge_prob - skip
+        # thresholds - skip
+    
+        # Matrix plot of correlation matrix after shuffling 
+        plot_correlation_matrix(
+                matrix = model_data['shuff_corr_all'],
+                xlabel = "node",
+                savename = "shuff_corr_all",
+                title = "$R^0$",) 
+        
+        # name2node_idx - skip
+        # node_idx2name - skip
+    
+        # N skip
+        # M skip
+    
+        # Histogram of profile correlations 
+        plot_histogram(
+                x = model_data['apms_corr_flat'],
+                title = "AP-MS profile correlations",
+                xlabel = "$R_{ij}$",
+                ylabel = "Frequency",
+                savename = "apms_corr_flat")
+    
+        # Histogram of Null all
+        n_null_bins = model_data['n_null_bins']
+        R0 = model_data['apms_shuff_corr_all_flat']
+        plot_histogram(
+                x = R0, 
+                title = "AP-MS permuted correlations",
+                xlabel = "$R_{ij}^{0}$",
+                ylabel = "Frequency",
+                bins = n_null_bins,
+                text = f"N {len(R0)}\nbins : {n_null_bins}",
+                textx = 0.1,
+                texty = 0.5,
+                savename = "apms_shuff_corr_all_flat")
+    
+        # Histogram of Null from selected columns 
+        R0 = model_data['apms_shuff_corr_flat']
+        plot_histogram(
+                x = R0, 
+                title = "AP-MS permuted correlations",
+                xlabel = "$R_{ij}^{0}$",
+                ylabel = "Frequency",
+                bins = n_null_bins,
+                text = f"N {len(R0)}\nbins : {n_null_bins}",
+                textx = 0.1,
+                texty = 0.5,
+                savename = "apms_shuff_corr_flat")
+    
+        # Plot the spec_table
+        spec_table = pd.read_csv(str(o / "spec_table.tsv"), sep="\t", index_col=0)
+        plot_spec_count_table(
+                table = spec_table,
+                xlabel = "node",
+                ylabel = "condition",
+                title = "Spectral counts",
+                savename = "spec_table",)
+
     # Get the model data
     with open(str(i.parent / i.stem) + "_model_data.pkl", "rb") as f:
         model_data = pkl.load(f)
     i_ = i
-
-    # Correlation matrix
-    plot_correlation_matrix(
-            matrix = model_data['corr'],
-            xlabel = 'node',
-            savename = 'corr',
-            title = "$R$",)
-
-    # Correlation matrix
-    plot_correlation_matrix(
-            matrix = model_data['shuff_corr'],
-            xlabel = "node",
-            savename = "shuff_corr",
-            title = "$R^{0}$",)
-
-    # Composite dict - skip
-
-    # Matrix plot of shuffled spec table
-    plot_spec_count_table(
-            table = model_data['selected_shuff_spec_table'],
-            xlabel = "condition",
-            ylabel = "node",
-            savename = "selected_shuff_spec_table",
-            title = "Shuffled spectral counts"),
-
-    # Matrix plot of spec table
-    plot_spec_count_table(
-            table = model_data['selected_spec_table'],
-            xlabel = "condition",
-            ylabel = "node",
-            savename = "selected_spec_table",
-            title = "Spectral counts",)
-
-    # lower_edge_prob - skip
-    # uppder_edge_prob - skip
-    # thresholds - skip
-
-    # Matrix plot of correlation matrix after shuffling 
-    plot_correlation_matrix(
-            matrix = model_data['shuff_corr_all'],
-            xlabel = "node",
-            savename = "shuff_corr_all",
-            title = "$R^0$",) 
     
-    # name2node_idx - skip
-    # node_idx2name - skip
-
-    # N skip
-    # M skip
-
-    # Histogram of profile correlations 
-    plot_histogram(
-            x = model_data['apms_corr_flat'],
-            title = "AP-MS profile correlations",
-            xlabel = "$R_{ij}$",
-            ylabel = "Frequency",
-            savename = "apms_corr_flat")
-
-    # Histogram of Null all
-    n_null_bins = model_data['n_null_bins']
-    R0 = model_data['apms_shuff_corr_all_flat']
-    plot_histogram(
-            x = R0, 
-            title = "AP-MS permuted correlations",
-            xlabel = "$R_{ij}^{0}$",
-            ylabel = "Frequency",
-            bins = n_null_bins,
-            text = f"N {len(R0)}\nbins : {n_null_bins}",
-            textx = 0.1,
-            texty = 0.5,
-            savename = "apms_shuff_corr_all_flat")
-
-    # Histogram of Null from selected columns 
-    R0 = model_data['apms_shuff_corr_flat']
-    plot_histogram(
-            x = R0, 
-            title = "AP-MS permuted correlations",
-            xlabel = "$R_{ij}^{0}$",
-            ylabel = "Frequency",
-            bins = n_null_bins,
-            text = f"N {len(R0)}\nbins : {n_null_bins}",
-            textx = 0.1,
-            texty = 0.5,
-            savename = "apms_shuff_corr_flat")
-
-    # Plot the spec_table
-    spec_table = pd.read_csv(str(o / "spec_table.tsv"), sep="\t", index_col=0)
-    plot_spec_count_table(
-            table = spec_table,
-            xlabel = "node",
-            ylabel = "condition",
-            title = "Spectral counts",
-            savename = "spec_table",)
-    
+    if not _dev:
+        model_data_plots()
     # Get concatenated samples
-    o = postprocess_samples(i.parent, fbasename=i.stem) 
+    x : dict = postprocess_samples(i.parent, fbasename=i.stem) 
 
-    with open(i, "rb") as f:
-        x = pkl.load(f)
+    direct_ref = data_io.get_pdb_ppi_predict_direct_reference()
+    direct_ij = align_reference_to_model(model_data, direct_ref) 
+    
+    rng_key = jax.random.PRNGKey(122387)
+    shuff_direct_ij = np.array(jax.random.permutation(rng_key, direct_ij))
+
+
+    #with open(i, "rb") as f:
+    #    x = pkl.load(f)
     
     # Unpack
     samples = x['samples']
@@ -278,6 +366,27 @@ def _main(o, i):
     N = model_data['N']
     a = jax.nn.sigmoid((samples['z']-0.5)*1_000)
     mean = np.mean(a, axis=0) 
+    a_typed = np.array(a > 0.5)
+
+    direct_tps = np.array(n_tps(a_typed, direct_ij))
+    direct_fps = np.array(n_fps(a_typed, direct_ij))
+
+    shuff_direct_tps = np.array(n_tps(a_typed, shuff_direct_ij))
+    shuff_direct_fps = np.array(n_tps(a_typed, shuff_direct_ij))
+    
+    n_total_edges = np.array(n_edges(a_typed))
+    score = np.array(ef['potential_energy'])
+    
+    def scatter(x, y, style, xlabel, ylabel, savename):                           
+        plt.plot(x, y, style)
+        plt.xlabel(xlabel)
+        plt.ylabel(ylabel)
+        save(savename)
+
+    scatter(direct_tps,       score, "k.", "direct tp edges",       "score", "direct_tp_vs_score") 
+    scatter(direct_fps,       score, "k.", "direct fp edges",       "score", "direct_fp_vs_score") 
+    scatter(shuff_direct_tps, score, "k.", "shuff direct tp edges", "score", "shuff_direct_tp_vs_score") 
+    scatter(shuff_direct_fps, score, "k.", "shuff direct fp edges", "score", "shuff_direct_fp_vs_score") 
 
     # Plot a table of the average value of every composite N
     if "new_composite_dict_norm_approx" in model_data:
@@ -287,6 +396,7 @@ def _main(o, i):
     # Plot the average adjacency matrix  
 
     # Plot a histogram of edges
+
     plot_histogram(
             x = mean,
             xlabel = "Mean edge value",
@@ -329,7 +439,6 @@ def _main(o, i):
             title = None,
             savename = "mean_accept_prob",)
 
-    
     # potential energy 
     pe = np.array(ef['potential_energy'])
 
@@ -430,6 +539,7 @@ def _main(o, i):
     # Count the number of Viral-Viral interactions 
 
     return samples
+
 
 def save_composite_table(model_data, o, samples):
     Ns = []
