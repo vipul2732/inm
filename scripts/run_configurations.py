@@ -407,8 +407,8 @@ se_sr_low_prior_2_uniform_mock_100k = from_template(
     )
 
 se_sr_low_prior_2_uniform_mock_100k_no_thin = from_template(
-    model_output_dirpath = "../results/se_sr_low_prior_2_uniform_mock_100k",
     se_sr_low_prior_2_uniform_mock_100k,
+    model_output_dirpath = "../results/se_sr_low_prior_2_uniform_mock_100k_no_thin",
     thinning = 1)
 
 se_sr_low_prior_1_uniform_wt_20k = from_template(mini_se_sr_low_prior_1_uniform,
