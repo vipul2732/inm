@@ -32,6 +32,7 @@ class RunConfiguration(NamedTuple):
     step_size : float = 1.0
     adapt_mass_matrix : bool = True
     target_accept_prob : float = 0.8
+    collect_warmup : bool = False
 
 
 def from_template(template: RunConfiguration, **kwargs) -> RunConfiguration:
@@ -139,6 +140,12 @@ mini_dev_run_w_thinning = from_template(mini_dev_run,
     model_output_dirpath = "../results/mini_dev_run_w_thinning",
     thinning = 2,
     )
+
+mini_dev_run_collect_warmup = from_template(mini_dev_run,
+    model_output_dirpath = "../results/mini_dev_run_collect_warmup",
+    collect_warmup = True,
+    load_warmup = False,)
+
 
 mini_se_sr_run = RunConfiguration(
     model_output_dirpath = "../results/mini_se_sr_run",

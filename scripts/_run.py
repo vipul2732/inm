@@ -71,6 +71,7 @@ def main(
     adapt_step_size : bool = True,
     adapt_mass_matrix  : bool = True,
     target_accept_prob : float = 0.8,
+    collect_warmup : bool = False,
 ):
     """
     Params:
@@ -155,6 +156,7 @@ def main(
     jax_profile {jax_profile}
     init_strat {init_strat}
     thinning {thinning}
+    collect_warmup {collect_warmup}
     """)
     logging.info("enter _model_variation._main")
     mv._main(model_id = model_id,
@@ -173,7 +175,8 @@ def main(
              load_warmup = load_warmup,
              jax_profile = jax_profile,
              init_strat = init_strat,
-             thinning = thinning)
+             thinning = thinning,
+             collect_warmup = collect_warmup)
 
     figures(model_id = model_id,
             model_name = model_name,
