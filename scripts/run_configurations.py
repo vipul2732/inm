@@ -98,7 +98,7 @@ mini_template = dict(
     progress_bar = True,
     initial_position = None,
     save_warmup = True,
-    load_warmup = True,
+    load_warmup = False,
     jax_profile = False,
     hyper_param_alpha = 0.02,
     hyper_param_beta = 0.1,
@@ -106,6 +106,7 @@ mini_template = dict(
     hyper_param_n_null_bins = 80,
     hyper_param_disconectivity_distance = 10,
     hyper_param_max_distance = 11,
+    collect_warmup = True,
 )
 
 mini_dev_run = RunConfiguration(
@@ -173,6 +174,7 @@ mini_se_sr_run = RunConfiguration(
     hyper_param_disconectivity_distance = 10,
     hyper_param_max_distance = 11,
     filter_kw = "all",
+    collect_warmup = True,
 )
 
 mini_se_sr_low_prior_1 = from_template(mini_se_sr_run,
