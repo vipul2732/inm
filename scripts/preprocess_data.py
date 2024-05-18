@@ -268,10 +268,12 @@ def get_spec_table_and_composites(xlsx_path,
     logging.info(f"    enforce_bait_rempapping: {enforce_bait_remapping}")
     if enforce_bait_remapping:
         bait_mapping_dict = get_mapping_dict(xlsx_path)
+    # lists for composite table
     sid = []
     cb = []
     cp = []
     mscore = []
+    # end lists for composite table
     sid_dict = {}
     k = 0
     prey_condition_dict = {}
@@ -407,6 +409,7 @@ def preprocess_spec_table(input_path,
                                 prey_colname = prey_colname,
                                 enforce_bait_remapping = enforce_bait_remapping)
     spec_table = filter_spec_table(spec_table, filter_kw, mode = mode)
+    #composites = filter_composite_table(composites, filter_kw)
     log_unmapped_bait(composites)
     composites.to_csv(output_dir / "composite_table.tsv", sep="\t", index=False)
     spec_table.to_csv(output_dir / "spec_table.tsv", sep="\t", index=True, header=True)
@@ -475,7 +478,36 @@ def filter_spec_table(spec_table, filter_kw = None, mode = "cullin") -> pd.DataF
             raise NotImplementedError(f"Filtering of other datasets not implemented. See get_conditions_mask_cullin")
     else:
         return spec_table
-    
+
+   
+def filter_composite_table(composites, filter_kw):
+    """
+    Filters the composite_table if the filter_kw is set.
+    """
+    if filter_kw:
+        if mode == "cullin":
+            row_sel = get_conditions_sel_cullin_composites(composites, filter_kw)
+            composites = composites.loc[row_sel, :]
+            ...
+        else:
+            raise NotImplementedError
+    else:
+        return composites
+
+def get_conditions_sel_cullin_composites(composites, filter_kw):
+    def validate_filter_kw(filter_kw):
+        if filter_kw not in ("mock", "vif", "wt"):
+            raise NotImplementedError
+
+    def get_filter_kw2_sid_mapping():
+        def read_in_xlsx_sheets():
+            ...
+
+        ...
+
+
+    validate_filter_kw(filter_kw)
+    filter_kw2_sid_mapping = get_filter_kw2_sid_mapping()
             
 def preprocess_dub(prey_colname="Prey", enforce_bait_remapping=False):
     spec_table, composites = get_spec_table_and_composites(
