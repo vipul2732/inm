@@ -2829,7 +2829,28 @@ def _main(model_id,
             )
     rng_key = jax.random.PRNGKey(rseed)
     rng_key, warmup_key = jax.random.split(rng_key)
-    mcmc.warmup(warmup_key, model_data = model_data, **mcmc_warmup_kwargs)
+    mcmc.warmup(warmup_key, model_data = model_data, extra_fields = extra_fields, **mcmc_warmup_kwargs)
+    
+    # save the warmup samples
+    warmup_fields = mcmc.get_extra_fields()
+    warmup_samples = mcmc.get_samples()
+
+    out = {"extra_fields": warmup_fields, "samples": warmup_samples, 
+           }
+    
+    save_base = model_id + "_" + model_name + "_" + str(rseed)
+    savename = model_id + "_" + model_name + "_" + str(rseed) + ".pkl"
+    if save_dir is not None:
+        savename = Path(save_dir) / savename
+        savename = str(savename)
+
+    with open(str(savename).removesuffix(".pkl") + "_warmup_samples.pkl", "wb") as file:
+        pkl.dump(out, file) 
+   
+    # cleanup
+    del warmup_fields
+    del warmup_samples
+    del out
 
     if save_warmup:
         warmup_state = mcmc.last_state
@@ -2846,16 +2867,14 @@ def _main(model_id,
             mcmc.run(rng_key, model_data, extra_fields=extra_fields)
     else:
         mcmc.run(rng_key, model_data, extra_fields=extra_fields)
+
     finished_mcmc_time = time.time()
     elapsed_time = finished_mcmc_time - entered_main_time
     eprint(f"{num_samples} sampling steps complete")
     eprint(f"elapsed time (s): {elapsed_time}")
     eprint(f"elapsed time (m): {elapsed_time / 60}")
     eprint(f"elapsed time (h): {elapsed_time / (60 * 60)}")
-    savename = model_id + "_" + model_name + "_" + str(rseed) + ".pkl"
-    if save_dir is not None:
-        savename = Path(save_dir) / savename
-        savename = str(savename)
+
     fields = mcmc.get_extra_fields()
     samples = mcmc.get_samples()
 
@@ -2863,5 +2882,6 @@ def _main(model_id,
            }
     with open(savename, "wb") as file:
         pkl.dump(out, file) 
+
 if __name__ == "__main__":
     main()
