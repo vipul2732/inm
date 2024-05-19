@@ -372,7 +372,7 @@ def _main(o, i):
     direct_fps = np.array(n_fps(a_typed, direct_ij))
 
     shuff_direct_tps = np.array(n_tps(a_typed, shuff_direct_ij))
-    shuff_direct_fps = np.array(n_tps(a_typed, shuff_direct_ij))
+    shuff_direct_fps = np.array(n_fps(a_typed, shuff_direct_ij))
     
     n_total_edges = np.array(n_edges(a_typed))
     score = np.array(ef['potential_energy'])
@@ -387,6 +387,7 @@ def _main(o, i):
     scatter(direct_fps,       score, "k.", "direct fp edges",       "score", "direct_fp_vs_score") 
     scatter(shuff_direct_tps, score, "k.", "shuff direct tp edges", "score", "shuff_direct_tp_vs_score") 
     scatter(shuff_direct_fps, score, "k.", "shuff direct fp edges", "score", "shuff_direct_fp_vs_score") 
+    scatter(n_total_edges, score, "k.", "N edges", "score", "n_edges_vs_score")
 
     # Plot a table of the average value of every composite N
     if "new_composite_dict_norm_approx" in model_data:
