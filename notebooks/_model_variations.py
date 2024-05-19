@@ -2367,13 +2367,14 @@ def model23_p(model_data):
     #
     N_EXPECTED_EDGES = (beta - alpha) * M
     N_EDGES_SIGMA = 20 # N_EXPECTED_EDGES / jnp.sqrt(N_EXPECTED_EDGES) 
-
-    z = numpyro.sample('z', dist.Normal(0.5).expand([M,]))
+    
+    mu = -1.8 # mu is set such that about 1.1 % of total edges may exist.
+    z = numpyro.sample('z', dist.Normal(mu).expand([M,]))
     u = numpyro.sample('u', dist.Uniform(low=alpha, high=beta))
     aij = Z2A(z)
     n_expected_edges = u * M
     nedges = jnp.sum(aij)
-    numpyro.sample("nedges", dist.Normal(nedges, N_EDGES_SIGMA), obs=n_expected_edges)
+    #numpyro.sample("nedges", dist.Normal(nedges, N_EDGES_SIGMA), obs=n_expected_edges)
 
 def model23_se(model_data):
     """
@@ -2590,6 +2591,10 @@ def call_and_sum2(x, z, len_z):
         v = x, val, z
         return v
     return jax.lax.fori_loop(0, len_z, body, (x, 0, z))
+
+def prob_mass_past(x):
+    """Amount of probability mass past x for standard normal"""
+    return 1-jsp.stats.norm.cdf(x)
 
 def edge_prob2mu(edge_prob):
     """
