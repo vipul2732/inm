@@ -34,35 +34,37 @@ Composite connectivity
 6. Compare
 """
 
+from collections import defaultdict
+from functools import partial
+from itertools import combinations
+import json
+import logging
+import math
+import pdb
+import pickle as pkl
+import sys
+import time
+from typing import Any, Tuple, NamedTuple, Optional
+
+import click
 import jax
 import jax.numpy as jnp
 import jax.scipy as jsp
 from jax.tree_util import Partial
 import numpy as np
 import numpyro
+from numpyro.contrib.funsor import config_enumerate
 import numpyro.distributions as dist
-from functools import partial
-from itertools import combinations
 from numpyro.infer import (
     MCMC,
     NUTS,
     init_to_value,
     init_to_uniform,
     )
-from numpyro.contrib.funsor import config_enumerate
 from numpyro.util import format_shapes
-import click
 from pathlib import Path
 import pandas as pd
-import pickle as pkl
-import time
-import math
-import sys
 import xarray as xr
-import logging
-import json
-from typing import Any, Tuple, NamedTuple, Optional
-import pdb
 
 Array = Any
 
@@ -1411,6 +1413,40 @@ def model23_ll_lp_data_getter(save_dir):
     dd['shuff_corr_all'] = shuffled_apms_correlation_matrix
     return dd
 
+def get_composite_table(model_output_dirpath: Path) -> pd.DataFrame:
+    if isinstance(model_output_dirpath, str):
+        model_output_dirpath = Path(model_output_dirpath)
+    elif isinstance(model_output_dirpath, Path):
+        ...
+    else:
+        raise TypeError
+    return pd.read_csv(model_output_dirpath / "composite_table.tsv", sep="\t")
+
+def get_maximal_composite_dict_from_composite_table(composite_table: pd.DataFrame) -> dict:
+    """ keyed by Prey name, values are the maximal saint scores for each prey """
+    composite_dict = defaultdict(float) 
+    for i, row in composite_table.iterrows():
+        prey_name = row["Prey"]
+        score = row["MSscore"]
+        val = composite_dict[prey_name]
+        if score > val:
+            composite_dict[prey_name] = score
+    return composite_dict
+
+
+def get_saint_max_pair_score_edgelist(dd):
+    """
+    Given the composite table corresponding to the input purifications,
+    get the matrix of pairwise maximal saint scores, flattened according to
+    the ordering of the edges used in modeling.
+    """
+
+    def get_max_saint_score_dict(dd) -> dict:
+        """
+        key : prey name
+        value : score
+        """
+
 def model23_data_transformer(data_dict, calculate_composites = True):
     """
     Transforms input data to be ready for modeling. Performs some checks.
@@ -2330,9 +2366,9 @@ def model23_p(model_data):
 
     #
     N_EXPECTED_EDGES = (beta - alpha) * M
-    N_EDGES_SIGMA = N_EXPECTED_EDGES / jnp.sqrt(N_EXPECTED_EDGES) 
+    N_EDGES_SIGMA = 20 # N_EXPECTED_EDGES / jnp.sqrt(N_EXPECTED_EDGES) 
 
-    z = numpyro.sample('z', dist.Normal().expand([M,]))
+    z = numpyro.sample('z', dist.Normal(0.5).expand([M,]))
     u = numpyro.sample('u', dist.Uniform(low=alpha, high=beta))
     aij = Z2A(z)
     n_expected_edges = u * M

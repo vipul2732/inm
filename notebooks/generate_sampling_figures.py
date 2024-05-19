@@ -213,7 +213,6 @@ def _main(o, i):
 
     def plot_histogram(x, xlabel, ylabel, savename, title = None, bins = 100, hist_range=(-1, 1),
                        text = None, textx = None, texty = None,): 
-            
         if title is None:
             N = len(x)
             title = f"N={N}    {bins} bins"
@@ -300,7 +299,7 @@ def _main(o, i):
                 x = model_data['apms_corr_flat'],
                 title = "AP-MS profile correlations",
                 xlabel = "$R_{ij}$",
-                ylabel = "Frequency",
+                ylabel = "count",
                 savename = "apms_corr_flat")
     
         # Histogram of Null all
@@ -310,7 +309,7 @@ def _main(o, i):
                 x = R0, 
                 title = "AP-MS permuted correlations",
                 xlabel = "$R_{ij}^{0}$",
-                ylabel = "Frequency",
+                ylabel = "count",
                 bins = n_null_bins,
                 text = f"N {len(R0)}\nbins : {n_null_bins}",
                 textx = 0.1,
@@ -323,7 +322,7 @@ def _main(o, i):
                 x = R0, 
                 title = "AP-MS permuted correlations",
                 xlabel = "$R_{ij}^{0}$",
-                ylabel = "Frequency",
+                ylabel = "count",
                 bins = n_null_bins,
                 text = f"N {len(R0)}\nbins : {n_null_bins}",
                 textx = 0.1,
@@ -347,199 +346,259 @@ def _main(o, i):
     if not _dev:
         model_data_plots()
     # Get concatenated samples
-    x : dict = postprocess_samples(i.parent, fbasename=i.stem) 
 
     direct_ref = data_io.get_pdb_ppi_predict_direct_reference()
+    costructure_ref = data_io.get_pdb_ppi_predict_cocomplex_reference()
+
     direct_ij = align_reference_to_model(model_data, direct_ref) 
-    
+    costructure_ij = align_reference_to_model(model_data, costructure_ref)
+
     rng_key = jax.random.PRNGKey(122387)
     shuff_direct_ij = np.array(jax.random.permutation(rng_key, direct_ij))
 
 
-    #with open(i, "rb") as f:
-    #    x = pkl.load(f)
-    
-    # Unpack
-    samples = x['samples']
-    ef = x['extra_fields']
-    nsamples, M = samples['z'].shape
+    x : dict = postprocess_samples(i.parent, fbasename=i.stem) 
+    with open(i, "rb") as f:
+        x2 = pkl.load(f)
+
     N = model_data['N']
-    a = jax.nn.sigmoid((samples['z']-0.5)*1_000)
-    mean = np.mean(a, axis=0) 
-    a_typed = np.array(a > 0.5)
+    def run_plots(x, suffix=""):
+        # Unpack
+        samples = x['samples']
+        ef = x['extra_fields']
+        nsamples, M = samples['z'].shape
+        a = jax.nn.sigmoid((samples['z']-0.5)*1_000)
+        mean = np.mean(a, axis=0) 
+        a_typed = np.array(a > 0.5)
+        control_ij = a_typed[0, :]
 
-    direct_tps = np.array(n_tps(a_typed, direct_ij))
-    direct_fps = np.array(n_fps(a_typed, direct_ij))
+        direct_tps = np.array(n_tps(a_typed, direct_ij))
+        direct_fps = np.array(n_fps(a_typed, direct_ij))
 
-    shuff_direct_tps = np.array(n_tps(a_typed, shuff_direct_ij))
-    shuff_direct_fps = np.array(n_fps(a_typed, shuff_direct_ij))
-    
-    n_total_edges = np.array(n_edges(a_typed))
-    score = np.array(ef['potential_energy'])
-    
-    def scatter(x, y, style, xlabel, ylabel, savename):                           
-        plt.plot(x, y, style)
-        plt.xlabel(xlabel)
-        plt.ylabel(ylabel)
-        save(savename)
+        costructure_tps = np.array(n_tps(a_typed, costructure_ij))
+        costructure_fps = np.array(n_fps(a_typed, costructure_ij))
 
-    scatter(direct_tps,       score, "k.", "direct tp edges",       "score", "direct_tp_vs_score") 
-    scatter(direct_fps,       score, "k.", "direct fp edges",       "score", "direct_fp_vs_score") 
-    scatter(shuff_direct_tps, score, "k.", "shuff direct tp edges", "score", "shuff_direct_tp_vs_score") 
-    scatter(shuff_direct_fps, score, "k.", "shuff direct fp edges", "score", "shuff_direct_fp_vs_score") 
-    scatter(n_total_edges, score, "k.", "N edges", "score", "n_edges_vs_score")
+        control_tps = np.array(n_tps(a_typed, control_ij))
+        control_fps = np.array(n_fps(a_typed, control_ij))
 
-    # Plot a table of the average value of every composite N
-    if "new_composite_dict_norm_approx" in model_data:
-        save_composite_table(model_data, o, samples)
-    # Plot a graph of composite data satisfaction
+        shuff_direct_tps = np.array(n_tps(a_typed, shuff_direct_ij))
+        shuff_direct_fps = np.array(n_fps(a_typed, shuff_direct_ij))
+        
+        n_total_edges = np.array(n_edges(a_typed))
+        score = np.array(ef['potential_energy'])
+        
 
-    # Plot the average adjacency matrix  
+        plot_plot(direct_tps,       score, "k.", "direct tp edges",       "score", "direct_tp_vs_score" + suffix) 
+        plot_plot(direct_fps,       score, "k.", "direct fp edges",       "score", "direct_fp_vs_score" + suffix) 
+        
+        plot_plot(costructure_tps,  score, "k.", "costructure tp edges",  "score", "costructure_tp_vs_score" + suffix) 
+        plot_plot(costructure_fps,  score, "k.", "costructure fp edges",  "score", "costructure_fp_vs_score" + suffix) 
 
-    # Plot a histogram of edges
+        plot_plot(control_tps,      score, "k.", "CONTROL first position tp edges", "score", "control_tp_vs_score" + suffix) 
+        plot_plot(control_fps,      score, "k.", "CONTROL first position fp edges", "score", "control_fp_vs_score" + suffix) 
 
-    plot_histogram(
-            x = mean,
-            xlabel = "Mean edge value",
-            ylabel = "Frequency",
-            savename = "edge_score_hist",
-            hist_range = (0, 1),)
+        plot_plot(shuff_direct_tps, score, "k.", "shuff direct tp edges", "score", "shuff_direct_tp_vs_score" + suffix) 
+        plot_plot(shuff_direct_fps, score, "k.", "shuff direct fp edges", "score", "shuff_direct_fp_vs_score" + suffix) 
 
-    var = np.var(a, axis=0) 
-    A = mv.flat2matrix(mean, N)
-    V = mv.flat2matrix(var, N)
+        plot_plot(n_total_edges,    score, "k.", "N edges", "score", "n_edges_vs_score")
 
-    plot_matrix(
-            matrix = np.array(A),
-            xlabel = "node",
-            title = "Average edge score",
-            savename = "mean_adjacency",)
+        # Plot a table of the average value of every composite N
+        if "new_composite_dict_norm_approx" in model_data:
+            save_composite_table(model_data, o, samples)
+        # Plot a graph of composite data satisfaction
 
-    # Energy histogram
-    plot_histogram(
-            x = np.array(ef["energy"]),
-            xlabel = "Energy",
-            ylabel = "Frequency",
-            title = "E = U + K", 
-            savename = "energy",)
-    
-    x_cater = np.arange(len(ef['energy'])) 
-    # Energy Caterpillar
-    plot_caterpillar(
-            y = np.array(ef['energy']), 
-            xlabel = "Post warmup MCMC step",
-            ylabel = "Energy",
-            title = "E = U + k",
-            savename = "energy_caterpill",)
+        # Plot the average adjacency matrix  
 
-    # Mean acceptance histogram
-    plot_histogram(
-            x = np.array(ef['mean_accept_prob']),
-            xlabel = "Mean acceptance probability",
-            ylabel = "Frequency",
-            title = None,
-            savename = "mean_accept_prob",)
+        # Plot a histogram of edges
 
-    # potential energy 
-    pe = np.array(ef['potential_energy'])
-
-    plot_histogram(
-            x = pe,
-            xlabel = "Potential energy",
-            ylabel = "Frequency",
-            title = "U",
-            savename = "potential_energy",)
-
-    plot_caterpillar(
-            y = pe,
-            xlabel = "Post warmup MCMC step",
-            ylabel = "Potential energy",
-            title = "U",
-            savename = "potential_energy_caterpill",)
-    
-    plot_histogram(
-            x = np.array(ef['diverging']),
-            xlabel = "Diverging",
-            ylabel = "Frequency",
-            savename = "diverging",)
-    
-    plot_histogram(
-            x = np.array(ef['accept_prob']),
-            xlabel = "Acceptance probability",
-            ylabel = "Frequency",
-            savename = "accept_prob",)
-
-    # Plot the hist
-    """
-    # Animation 
-    fig, ax = plt.subplots()
-    mat = ax.matshow(np.zeros((N, N)))
-    
-    def animate(i):
-        a_i = mv.flat2matrix(a[i, :], N)
-        mat = ax.matshow(np.array(a_i))
-        return mat,
-
-    nsamples, nedges = samples['z'].shape 
-    ani = animation.FuncAnimation(fig, animate, repeat=True,
-       frames=nsamples, interval=50)
-
-    # To save the animation using Pillow as a gif
-    writer = animation.PillowWriter(fps=15,
-                                     metadata=dict(artist='Me'),
-                                     bitrate=1800)
-
-    ani.save('edge_matrix.gif', writer=writer)
-    """
-    plot_matrix(
-            matrix = np.array(V),
-            title = "Edge variance",
-            xlabel = "node",
-            savename = "var_adjacency",)
-
-    # Mean Variance correlation plot
-    plot_plot(
-            x = mean,
-            y = var,
-            fmt = 'k.',
-            xlabel = "Edge mean",
-            ylabel = "Edge variance",
-            savename = "mean_var_scatter",)
-
-    # Distribution of u 
-    if 'u' in samples:
-        u = samples['u']
         plot_histogram(
-                x = u,
-                xlabel = "$u$",
-                ylabel = "Frequency",
-                title = "Nuisance variable $u$",
-                savename = "hist_u",) 
+                x = mean,
+                xlabel = "mean edge value",
+                ylabel = "count",
+                savename = "edge_score_hist" + suffix,
+                hist_range = (0, 1),)
 
+        var = np.var(a, axis=0) 
+        A = mv.flat2matrix(mean, N)
+        V = mv.flat2matrix(var, N)
+        plot_matrix(
+                matrix = mv.flat2matrix(a[0, :] , N), 
+                xlabel = "node",
+                title = "Initial value",
+                savename = "initial_value" + suffix,
+                )
+        plot_matrix(
+                matrix = np.array(A),
+                xlabel = "node",
+                title = "Average edge score",
+                savename = "mean_adjacency" + suffix,)
+
+        # Energy histogram
+        energy = np.array(ef["energy"])
+        plot_histogram(
+                x = energy,
+                xlabel = "energy",
+                ylabel = "count",
+                title = "H(q,p) = U(q) + K(p)", 
+                hist_range = None,
+                savename = "energy" + suffix,)
+        
+        x_cater = np.arange(len(ef['energy'])) 
+        # Energy Caterpillar
+        plot_caterpillar(
+                y = energy, 
+                xlabel = "iteration",
+                ylabel = "energy",
+                title = "H(q,p) = U(q) + K(p)",
+                savename = "energy_caterpill" + suffix,)
+
+        # Mean acceptance histogram
+        plot_histogram(
+                x = np.array(ef['mean_accept_prob']),
+                xlabel = "mean acceptance probability",
+                ylabel = "count",
+                title = None,
+                hist_range = (0.5, 1.),
+                savename = "mean_accept_prob" + suffix,)
+
+        # Nedges caterpillar
+
+        plot_caterpillar(
+                y = n_total_edges,
+                xlabel = "iteration",
+                ylabel = "n edges",
+                title = "N edges",
+                savename = "n_edges_caterpill" + suffix,)
+
+        # potential energy 
+        pe = np.array(ef['potential_energy'])
+
+        plot_histogram(
+                x = pe,
+                xlabel = "potential energy",
+                ylabel = "count",
+                title = "U",
+                hist_range = None,
+                savename = "potential_energy" + suffix,)
+
+        plot_caterpillar(
+                y = pe,
+                xlabel = "iteration",
+                ylabel = "potential energy",
+                title = "Score",
+                savename = "potential_energy_caterpill" + suffix,)
+
+        ke = energy - pe
+        plot_histogram(
+                x = ke,
+                xlabel = "kinetic energy",
+                ylabel = "count",
+                title = "k",
+                hist_range = None,
+                savename = "kinetic_energy" + suffix,)
+        
+        plot_caterpillar(
+                y = ke,
+                xlabel = "iteration",
+                ylabel = "kinetic energy",
+                title = "k",
+                savename = "kinetic_energy_caterpill" + suffix,)
+        
+        plot_histogram(
+                x = np.array(ef['diverging']),
+                xlabel = "diverging",
+                ylabel = "count",
+                savename = "diverging" + suffix,)
+        
+        plot_histogram(
+                x = np.array(ef['accept_prob']),
+                xlabel = "acceptance probability",
+                ylabel = "count",
+                savename = "accept_prob" + suffix,)
+
+        for key in ("accept_prob", "mean_accept_prob", "diverging", "num_steps"):
+            if key in ef:
+                val = ef[key]
+                plot_caterpillar(
+                        y = val,
+                        xlabel = "iteration",
+                        ylabel = key,
+                        savename = f"{key}_caterpill" + suffix,)
+
+        # Plot the hist
+        """
+        # Animation 
+        fig, ax = plt.subplots()
+        mat = ax.matshow(np.zeros((N, N)))
+        
+        def animate(i):
+            a_i = mv.flat2matrix(a[i, :], N)
+            mat = ax.matshow(np.array(a_i))
+            return mat,
+
+        nsamples, nedges = samples['z'].shape 
+        ani = animation.FuncAnimation(fig, animate, repeat=True,
+           frames=nsamples, interval=50)
+
+        # To save the animation using Pillow as a gif
+        writer = animation.PillowWriter(fps=15,
+                                         metadata=dict(artist='Me'),
+                                         bitrate=1800)
+
+        ani.save('edge_matrix.gif', writer=writer)
+        """
+        plot_matrix(
+                matrix = np.array(V),
+                title = "Edge variance",
+                xlabel = "node",
+                savename = "var_adjacency" + suffix,)
+
+        # Mean Variance correlation plot
+        plot_plot(
+                x = mean,
+                y = var,
+                fmt = 'k.',
+                xlabel = "Edge mean",
+                ylabel = "Edge variance",
+                savename = "mean_var_scatter" + suffix,)
+
+        # Distribution of u 
+        if 'u' in samples:
+            u = samples['u']
+            plot_histogram(
+                    x = u,
+                    xlabel = "$u$",
+                    ylabel = "count",
+                    title = "Nuisance variable $u$",
+                    hist_range = None, #(0, 0.005),
+                    savename = "hist_u" + suffix,) 
+        w = []
+        a = []
+        b = []
+        node_idx2name = model_data['node_idx2name']
+
+        viral_proteins = ["vifprotein", "tatprotein", "nefprotein", "gagprotein",
+                          "polpolyprotein"]
+
+        for i in range(N):
+            for j in range(0, i):
+                w.append(A[i, j])
+                a.append(node_idx2name[i])
+                b.append(node_idx2name[j])
+        
+        df = pd.DataFrame({'a': a, 'b': b, 'w': w})
+        base_name = str(o / i_.stem)
+        df.to_csv(base_name + f"edge_score_table{suffix}.tsv", sep="\t", index=None)
+
+    run_plots(x, suffix="_w_warmup")
+    run_plots(x2)
     # Write an edge list table of scores
-    w = []
-    a = []
-    b = []
-    node_idx2name = model_data['node_idx2name']
-
-    viral_proteins = ["vifprotein", "tatprotein", "nefprotein", "gagprotein",
-                      "polpolyprotein"]
-
-    for i in range(N):
-        for j in range(0, i):
-            w.append(A[i, j])
-            a.append(node_idx2name[i])
-            b.append(node_idx2name[j])
-    
-    df = pd.DataFrame({'a': a, 'b': b, 'w': w})
-    base_name = str(o / i_.stem)
-    df.to_csv(base_name + "edge_score_table.tsv", sep="\t", index=None)
 
     # Analysis
 
     # Count the number of Viral-Viral interactions 
 
-    return samples
+    #return samples
 
 
 def save_composite_table(model_data, o, samples):
