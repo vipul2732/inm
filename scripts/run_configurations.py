@@ -36,20 +36,7 @@ class RunConfiguration(NamedTuple):
 
 
 def from_template(template: RunConfiguration, **kwargs) -> RunConfiguration:
-    """
-    Initialize a RunConfiguration from a 'template' run configuration and keyword arguments.
-
-    e.g., mini_dev_run2 = from_template(mini_dev_run, rseed = 20, num_samples = 500)
-    """
-    if isinstance(template, RunConfiguration):
-        template = template._asdict()  
-    assert isinstance(template, dict)
-    kwargs = locals()['kwargs']
-    for key in kwargs: 
-        template[key] = kwargs[key]
-    return RunConfiguration(**template)
-
-def from_template_list(template_list, **kwargs) -> RunConfiguration:
+ from_template_list(template_list, **kwargs) -> RunConfiguration:
     """
     Initialize a run configuration from a list of partial run configurations.
     Each partial run configuration is an dict or NamedTuple with the appropriate keywords.
@@ -137,6 +124,20 @@ mini_dev_run = RunConfiguration(
     filter_kw = "all",
 )
 
+mini_model23_p = from_template(
+    mini_dev_run,
+    model_output_dirpath = "../results/mini_model23_p",
+    model_name = "model23_p",
+    num_warmup = 50,
+    num_samples = 100,
+    progress_bar = False,
+    load_warmup = False,
+    hyper_param_alpha = 0.001, # 27.73 edges
+    hyper_param_beta = 0.005,  # 138.65 edges
+    filter_kw = "mock",
+    )
+    
+
 mini_dev_run_w_thinning = from_template(mini_dev_run,
     model_output_dirpath = "../results/mini_dev_run_w_thinning",
     thinning = 2,
@@ -194,6 +195,8 @@ mini_se_sr_low_prior_1_uniform_num_warmup_1000 = from_template(mini_se_sr_low_pr
     model_output_dirpath = "../results/mini_se_sr_low_prior_1_uniform_num_warmup_1000",
     num_warmup = 1_000,
     )
+
+
 
 se_sr_low_prior_1_all_20k = from_template(mini_se_sr_low_prior_1,
     model_output_dirpath = "../results/se_sr_low_prior_1_all_20k",
