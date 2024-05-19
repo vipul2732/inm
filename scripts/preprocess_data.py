@@ -413,7 +413,8 @@ def preprocess_spec_table(input_path,
     composites = filter_composite_table(
             composites,
             filter_kw,
-            sid_dict)
+            sid_dict,
+            mode = mode)
 
     log_unmapped_bait(composites)
     composites.to_csv(output_dir / "composite_table.tsv", sep="\t", index=False)
