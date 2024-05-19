@@ -61,7 +61,7 @@ import sys
 import xarray as xr
 import logging
 import json
-from typing import Any, NamedTuple
+from typing import Any, Tuple, NamedTuple, Optional
 import pdb
 
 Array = Any
@@ -1423,7 +1423,8 @@ def model23_data_transformer(data_dict, calculate_composites = True):
         assert dd['corr'].ndim == 2
         assert r == c
     def update_name2node_idx(dd):
-        name2node_idx = {name : i for i, name in enumerate(dd['corr'].index)}
+        name2node_idx = {
+                name : i for i, name in enumerate(dd['corr'].index)}
         node_idx2name = {i: name for name, i in name2node_idx.items()}
         dd['name2node_idx'] = name2node_idx
         dd['node_idx2name'] = node_idx2name
@@ -1983,7 +1984,7 @@ def model20_test6e_1b():
     s1 = bp1.log_prob(e)
     numpyro.factor('bp1', s1)
 
-def calc_shuff_correlations(spec_table, rseed):
+def calc_shuff_correlations(spec_table, rseed) -> Tuple[pd.DataFrame]:
     null_sc = spec_table.copy()
     nrows, ncolumns = null_sc.shape
     temp = np.zeros(null_sc.shape)
@@ -2009,12 +2010,12 @@ def data_from_spec_table_and_composite_table(data_path, ms_thresholds, sep="\t",
         assert np.alltrue(spec_table.values >= 0)
         assert np.alltrue(spec_table.values <= 1000)
 
-    def check_composite_table(composite_table):
+    def check_composite_table(composite_table: pd.DataFrame):
         assert np.all(np.isreal(composite_table['MSscore'].values))
         assert np.all(composite_table['MSscore'] >= 0)
 
-    def remove_prey(composite_table, ms_thresholds):
-        # Remove prey below threshold
+    def remove_prey(composite_table : pd.DataFrame, ms_thresholds) -> pd.DataFrame:
+        """ Remove prey below MS threshold """
         min_threshold = np.min(ms_thresholds)
         assert min_threshold >= 0
         sel = composite_table['MSscore'] >= min_threshold
@@ -2060,9 +2061,9 @@ def data_from_spec_table_and_composite_table(data_path, ms_thresholds, sep="\t",
         spec_path = Path(data_path) / "spec_table.tsv" 
         composite_path = Path(data_path) / "composite_table.tsv"
     
-    composite_table = pd.read_csv(composite_path, sep=sep)
+    composite_table : pd.DataFrame = pd.read_csv(composite_path, sep=sep)
     check_composite_table(composite_table)
-    composite_table = remove_prey(composite_table, ms_thresholds)
+    composite_table : pd.DataFrame = remove_prey(composite_table, ms_thresholds)
     if calc_composites:
         composites = populate_composites_dict(composite_table, ms_thresholds)
     
@@ -2091,7 +2092,8 @@ def data_from_spec_table_and_composite_table(data_path, ms_thresholds, sep="\t",
             "corr" : corr,
             "shuff_corr" : shuff_corr,
             "selected_shuff_spec_table" : null_sc,
-            "selected_spec_table" : spec_table} 
+            "selected_spec_table" : spec_table,
+            "composite_table" : composite_table} 
 
     if calc_composites:
         return base | {"composite_dict" : composites}
@@ -2323,6 +2325,17 @@ def model23_ll_lp(model_data):
     #numpyro.factor("R_ll", R_ll)
     ##numpyro.sample("obs", mixtures, obs=R)
 
+def model23_p(model_data):
+    N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx, R, R0, null_dist, null_log_like, disconectivity_distance, max_distance = model23_unpack_model_data(model_data)
+
+    #
+    n_edges_sigma = 0.5 * (beta - alpha) * M / 5
+    z = numpyro.sample('z', dist.Normal().expand([M,]))
+    u = numpyro.sample('u', dist.Uniform(low=alpha, high=beta))
+    aij = Z2A(z)
+    n_expected_edges = u * M
+    numpyro.sample("nedges", dist.Normal(nedges, nedges_sigma), obs=n_expected_edges)
+
 def model23_se(model_data):
     """
     $S(M) = S_E(M)$
@@ -2366,6 +2379,8 @@ def model23_se_sc(model_data):
 
 
 
+
+
 def calculate_degree_from_edgelist(edgelist, degree_vector, n_nodes):
     edgelist_idx = 0
     for u in range(n_nodes):
@@ -2399,7 +2414,7 @@ def model23_SE_score(alpha, beta, M):
     aij = Z2A(z)
     return aij
 
-def model23_SAINT_score(aij, saint_ij, M):
+def model23_SAINT_score(aij, saint_ij, M, k=2):
     """
     A SAINT bait-prey link classifies a node as "co-purifying"
     The score is between [0, 1].
@@ -2415,9 +2430,15 @@ def model23_SAINT_score(aij, saint_ij, M):
 
     if saint_ij == 0, the direct edge aij cannot occur
     if saint_ij is 1, the edge may be direct or indirect
-    """
 
-    score = -jnp.sum((1-aij) * saint_ij) / M
+    y = k * a ** (2 * (1 - s))
+    """
+    exponent = 2 * (1-saint_ij)
+    x = 2 * aij
+    y = k * jnp.power(x, exponent) - k
+    score = jnp.sum(y)
+    numpyro.factor("sij", score)
+
 
 def model23_SC_score(aij, composite_dict_norm_approx, composite_dict_p_is_1, N, disconectivity_distance,
                      max_distance):
@@ -2626,7 +2647,7 @@ def model_dispatcher(model_name, model_data, save_dir, init_strat_dispatch_key="
         model_data = model22_ll_lp_data_getter(save_dir)
         init_strategy = init_to_uniform
     elif model_name in  ("model23_ll_lp", "model23_se", "model23_se_sc",
-                         "model23_se_sr", "model23_se_sr_sc",
+                         "model23_se_sr", "model23_se_sr_sc", "model23_p",
                          ):
         model = dict(model23_ll_lp = model23_ll_lp,
                      model23_se = model23_se,
@@ -2635,7 +2656,7 @@ def model_dispatcher(model_name, model_data, save_dir, init_strat_dispatch_key="
                      model23_se_sr_sc = model23_se_sr_sc)[model_name] 
         model_data = model23_ll_lp_data_getter(save_dir)
         # Don't calculate compoistes for models that don't need it
-        if model_name in ("model23_se_sr", "model23_se"):
+        if model_name in ("model23_se_sr", "model23_se", "model23_p"):
             model_data = model23_data_transformer(model_data, calculate_composites = False)
         else:
             model_data = model23_data_transformer(model_data, calculate_composites = True)
