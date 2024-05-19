@@ -40,7 +40,7 @@ def get_cullin_saint_scores_edgelist():
                      multi_edge_value_merge_strategy = "max")
     # Reindex
     reindexer = get_cullin_reindexer()
-    c.reindex(reindexer)
+    c.reindex(reindexer, enforce_coverage = False)
     return c
 
 def get_sars2_reindexer():
