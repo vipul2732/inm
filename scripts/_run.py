@@ -72,6 +72,7 @@ def main(
     adapt_mass_matrix  : bool = True,
     target_accept_prob : float = 0.8,
     collect_warmup : bool = False,
+    mode = "cullin",
 ):
     """
     Params:
@@ -157,40 +158,50 @@ def main(
     init_strat {init_strat}
     thinning {thinning}
     collect_warmup {collect_warmup}
+    mode {mode}
     """)
-    logging.info("enter _model_variation._main")
-    mv._main(model_id = model_id,
-             rseed = rseed,
-             model_name = model_name,
-             model_data = model_data,
-             num_warmup = num_warmup,
-             num_samples = num_samples,
-             include_potential_energy = include_potential_energy,
-             include_mean_accept_prob = include_mean_accept_prob,
-             include_extra_fields = include_extra_fields,
-             progress_bar = progress_bar,
-             save_dir = save_dir,
-             initial_position = initial_position,
-             save_warmup = save_warmup,
-             load_warmup = load_warmup,
-             jax_profile = jax_profile,
-             init_strat = init_strat,
-             thinning = thinning,
-             collect_warmup = collect_warmup)
+    if mode == "cullin":
+        logging.info("enter _model_variation._main")
+        mv._main(model_id = model_id,
+                 rseed = rseed,
+                 model_name = model_name,
+                 model_data = model_data,
+                 num_warmup = num_warmup,
+                 num_samples = num_samples,
+                 include_potential_energy = include_potential_energy,
+                 include_mean_accept_prob = include_mean_accept_prob,
+                 include_extra_fields = include_extra_fields,
+                 progress_bar = progress_bar,
+                 save_dir = save_dir,
+                 initial_position = initial_position,
+                 save_warmup = save_warmup,
+                 load_warmup = load_warmup,
+                 jax_profile = jax_profile,
+                 init_strat = init_strat,
+                 thinning = thinning,
+                 collect_warmup = collect_warmup)
+    
+        cullin_figures(model_id = model_id,
+                model_name = model_name,
+                rseed = rseed,
+                model_output_dirpath = model_output_dirpath)
+    else:
+        raise NotImplementedError
 
-    figures(model_id = model_id,
-            model_name = model_name,
-            rseed = rseed,
-            model_output_dirpath = model_output_dirpath)
+def figures(model_id, model_name, rseed, model_output_dirpath, mode = "cullin", **kwargs):
+    if mode == "cullin":
+        cullin_figures(model_id, model_name, rseed, model_output_dirpath, mode=mode, **kwargs)
+    else:
+        raise NotImplementedError
 
-def figures(model_id, model_name, rseed, model_output_dirpath, **kwargs):
+def cullin_figures(model_id, model_name, rseed, model_output_dirpath, **kwargs):
     if isinstance(model_output_dirpath, str):
         model_output_dirpath = Path(model_output_dirpath)
     fbasename = f"{model_id}_{model_name}_{rseed}"
     input_file = model_output_dirpath / f"{fbasename}.pkl"
     logging.info("enter generate_sampling_figures")
     gsf._main(o = str(model_output_dirpath),
-              i = input_file)
+              i = input_file, mode="cullin")
     logging.info("enter generate_benchmark_figures")
     gbf.cullin_standard(model_output_dirpath, fbasename)
     logging.info("enter generate_analysis_figures")

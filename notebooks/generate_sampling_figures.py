@@ -23,8 +23,9 @@ hist_range = (-1, 1)
 @click.command()
 @click.option("--o", type=str, help="output directory")
 @click.option("--i", type=str, help="input file")
-def main(o, i):
-    _main(o, i)
+@click.option("--mode", type=str, default="cullin")
+def main(o, i, mode):
+    _main(o, i, mode)
 
 _base_style = ""
 _corr_rc =   {"image.cmap" : "coolwarm"} 
@@ -57,7 +58,7 @@ def n_tp(aij, refij):
     Return the values of the array where both are 1
     Boolean arrays
     """
-    return np.sum(aij & refij)
+    return np.sum((aij == 1) &  (refij == 1))
 
 def n_fp(aij, refij):
     return np.sum((aij == 1) & (refij == 0))
@@ -129,13 +130,20 @@ def postprocess_samples(i, fbasename):
     return results
 
 
-def align_reference_to_model(model_data, uref):
+def align_reference_to_model(model_data, uref, mode="cullin",):
     """
     Order edges in the reference according to the model.
     """
     n_possible_edges = model_data['M']
     node_idx2name = model_data["node_idx2name"]
     n_nodes = model_data['N']
+    # uref is in UID but model is in names. Reindex
+    if mode == "cullin":
+        reindexer = {val : key for key, val in data_io.get_cullin_reindexer().items()}
+        uref.reindex(reindexer, enforce_coverage = False) 
+    else:
+        raise NotImplementedError("Only cullin has been implemented")
+
     uref._build_edge_dict()
     reflist_out = np.zeros(n_possible_edges, dtype=np.int64)
     for k in range(n_possible_edges):
@@ -150,12 +158,13 @@ def align_reference_to_model(model_data, uref):
     return reflist_out
 
     
-def _main(o, i):
+def _main(o, i, mode):
     logger = logging.getLogger(__name__)
     logger.info("Enter generate_sampling_figures")
     logging.info(f"Params")
     logging.info(f"    i:{i}")
     logging.info(f"    o:{o}")
+    logging.info(f" mode:{mode}")
 
     i = Path(i)
     o = Path(o)
@@ -201,7 +210,6 @@ def _main(o, i):
 
     @rc_context(rc = _matrix_rc)
     def plot_binary_matrix(matrix):
-        fig, ax = plt.subplots()
         fig, ax = plt.subplots()
         cax = ax.matshow(matrix, vmin=0, vmax=1)
         plt.colorbar(shrink = 0.95, mappable = cax, ax = ax)
@@ -349,9 +357,10 @@ def _main(o, i):
 
     direct_ref = data_io.get_pdb_ppi_predict_direct_reference()
     costructure_ref = data_io.get_pdb_ppi_predict_cocomplex_reference()
+    
 
-    direct_ij = align_reference_to_model(model_data, direct_ref) 
-    costructure_ij = align_reference_to_model(model_data, costructure_ref)
+    direct_ij = align_reference_to_model(model_data, direct_ref, mode=mode) 
+    costructure_ij = align_reference_to_model(model_data, costructure_ref, mode=mode)
 
     rng_key = jax.random.PRNGKey(122387)
     shuff_direct_ij = np.array(jax.random.permutation(rng_key, direct_ij))
@@ -370,7 +379,9 @@ def _main(o, i):
         a = jax.nn.sigmoid((samples['z']-0.5)*1_000)
         mean = np.mean(a, axis=0) 
         a_typed = np.array(a > 0.5)
+
         control_ij = a_typed[0, :]
+        control_last_ij = a_typed[-1, :]
 
         direct_tps = np.array(n_tps(a_typed, direct_ij))
         direct_fps = np.array(n_fps(a_typed, direct_ij))
@@ -378,8 +389,11 @@ def _main(o, i):
         costructure_tps = np.array(n_tps(a_typed, costructure_ij))
         costructure_fps = np.array(n_fps(a_typed, costructure_ij))
 
-        control_tps = np.array(n_tps(a_typed, control_ij))
-        control_fps = np.array(n_fps(a_typed, control_ij))
+        control_first_tps = np.array(n_tps(a_typed, control_ij))
+        control_first_fps = np.array(n_fps(a_typed, control_ij))
+
+        control_last_tps = np.array(n_tps(a_typed, control_last_ij))
+        control_last_fps = np.array(n_fps(a_typed, control_last_ij))
 
         shuff_direct_tps = np.array(n_tps(a_typed, shuff_direct_ij))
         shuff_direct_fps = np.array(n_fps(a_typed, shuff_direct_ij))
@@ -387,20 +401,43 @@ def _main(o, i):
         n_total_edges = np.array(n_edges(a_typed))
         score = np.array(ef['potential_energy'])
         
-
         plot_plot(direct_tps,       score, "k.", "direct tp edges",       "score", "direct_tp_vs_score" + suffix) 
         plot_plot(direct_fps,       score, "k.", "direct fp edges",       "score", "direct_fp_vs_score" + suffix) 
         
         plot_plot(costructure_tps,  score, "k.", "costructure tp edges",  "score", "costructure_tp_vs_score" + suffix) 
         plot_plot(costructure_fps,  score, "k.", "costructure fp edges",  "score", "costructure_fp_vs_score" + suffix) 
 
-        plot_plot(control_tps,      score, "k.", "CONTROL first position tp edges", "score", "control_tp_vs_score" + suffix) 
-        plot_plot(control_fps,      score, "k.", "CONTROL first position fp edges", "score", "control_fp_vs_score" + suffix) 
+        plot_plot(control_first_tps,      score, "k.", "CONTROL FIRST position tp edges", "score", "control_tp_vs_score" + suffix) 
+        plot_plot(control_first_fps,      score, "k.", "CONTROL FIRST position fp edges", "score", "control_fp_vs_score" + suffix) 
+
+        plot_plot(control_last_tps,      score, "k.", "CONTROL LAST position tp edges", "score", "control_last_tp_vs_score" + suffix) 
+        plot_plot(control_last_fps,      score, "k.", "CONTROL LAST position fp edges", "score", "control_last_fp_vs_score" + suffix) 
 
         plot_plot(shuff_direct_tps, score, "k.", "shuff direct tp edges", "score", "shuff_direct_tp_vs_score" + suffix) 
         plot_plot(shuff_direct_fps, score, "k.", "shuff direct fp edges", "score", "shuff_direct_fp_vs_score" + suffix) 
 
         plot_plot(n_total_edges,    score, "k.", "N edges", "score", "n_edges_vs_score")
+
+        for key, val in dict(
+                direct_tps = direct_tps,
+                direct_fps = direct_fps,
+                costructure_tps = costructure_tps,
+                costrucutre_fps = costructure_fps,
+                control_first_tps = control_first_tps,
+                control_first_fps = control_first_fps,
+                control_last_tps = control_last_tps,
+                control_last_fps = control_last_fps,
+                shuff_direct_tps = shuff_direct_tps,
+                shuff_direct_fps = shuff_direct_fps,
+                n_total_edges = n_total_edges,
+                ).items():
+            plot_caterpillar(
+                y = val,
+                xlabel = "iteration",
+                ylabel = key,
+                title = key,
+                savename = f"{key}_caterpill" + suffix,)
+
 
         # Plot a table of the average value of every composite N
         if "new_composite_dict_norm_approx" in model_data:
@@ -461,15 +498,6 @@ def _main(o, i):
                 hist_range = (0.5, 1.),
                 savename = "mean_accept_prob" + suffix,)
 
-        # Nedges caterpillar
-
-        plot_caterpillar(
-                y = n_total_edges,
-                xlabel = "iteration",
-                ylabel = "n edges",
-                title = "N edges",
-                savename = "n_edges_caterpill" + suffix,)
-
         # potential energy 
         pe = np.array(ef['potential_energy'])
 
@@ -523,6 +551,7 @@ def _main(o, i):
                         y = val,
                         xlabel = "iteration",
                         ylabel = key,
+                        title = key,
                         savename = f"{key}_caterpill" + suffix,)
 
         # Plot the hist
