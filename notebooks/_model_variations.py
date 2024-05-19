@@ -2329,12 +2329,15 @@ def model23_p(model_data):
     N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx, R, R0, null_dist, null_log_like, disconectivity_distance, max_distance = model23_unpack_model_data(model_data)
 
     #
-    n_edges_sigma = 0.5 * (beta - alpha) * M / 5
+    N_EXPECTED_EDGES = (beta - alpha) * M
+    N_EDGES_SIGMA = N_EXPECTED_EDGES / jnp.sqrt(N_EXPECTED_EDGES) 
+
     z = numpyro.sample('z', dist.Normal().expand([M,]))
     u = numpyro.sample('u', dist.Uniform(low=alpha, high=beta))
     aij = Z2A(z)
     n_expected_edges = u * M
-    numpyro.sample("nedges", dist.Normal(nedges, nedges_sigma), obs=n_expected_edges)
+    nedges = jnp.sum(aij)
+    numpyro.sample("nedges", dist.Normal(nedges, N_EDGES_SIGMA), obs=n_expected_edges)
 
 def model23_se(model_data):
     """
@@ -2653,7 +2656,8 @@ def model_dispatcher(model_name, model_data, save_dir, init_strat_dispatch_key="
                      model23_se = model23_se,
                      model23_se_sc = model23_se_sc,
                      model23_se_sr = model23_se_sr,
-                     model23_se_sr_sc = model23_se_sr_sc)[model_name] 
+                     model23_se_sr_sc = model23_se_sr_sc,
+                     model23_p = model23_p,)[model_name] 
         model_data = model23_ll_lp_data_getter(save_dir)
         # Don't calculate compoistes for models that don't need it
         if model_name in ("model23_se_sr", "model23_se", "model23_p"):
