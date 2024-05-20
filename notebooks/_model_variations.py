@@ -1433,6 +1433,29 @@ def get_maximal_composite_dict_from_composite_table(composite_table: pd.DataFram
             composite_dict[prey_name] = score
     return composite_dict
 
+def maximal_composite_dict_to_max_saint_pair_score_table(max_saint_score_dict):
+    N = len(max_saint_score_dict)
+    table = np.zeros((N, N))
+    for i, (k1, v1) in enumerate(max_saint_score_dict.items()):
+        for j, (k2, v2) in enumerate(max_saint_score_dict.items()):
+            table[i, j] = v1 * v2
+    columns = list(max_saint_score_dict.keys())
+    return pd.DataFrame(table, index=columns, columns=columns)
+
+def align_saint_max_score_table_2_corr_table(saint_max_score_table, corr):
+    columns = corr.columns
+    return saint_max_score_table.loc[columns, columns]
+
+def get_aligned_max_saint_score_table(composite_table, corr):
+    max_saint_dict = get_maximal_composite_dict_from_composite_table(composite_table)
+    saint_max_score_table = maximal_composite_dict_to_max_saint_pair_score_table(max_saint_dict)
+    saint_max_score_table = align_saint_max_score_table_2_corr_table(saint_max_score_table, corr)
+    return saint_max_score_table
+
+def get_saint_max_edgelist(aligned_max_saint_score_table):
+    return matrix2flat(jnp.array(aligned_max_saint_score_table.values, dtype=jnp.float32))
+
+
 
 def get_saint_max_pair_score_edgelist(dd):
     """
@@ -1500,6 +1523,9 @@ def model23_data_transformer(data_dict, calculate_composites = True):
     def update_correlations(dd):
         assert np.all(dd['corr'].index == dd['shuff_corr'].index) 
         # Flatten corr and shuff corr to jax arrays
+        
+        # update corr to the weighted degree
+        dd['corr'] = get_apms_pair_score_matrix(dd['corr'])
         dd['apms_corr_flat'] = matrix2flat(jnp.array(dd['corr'].values, dtype=jnp.float32))
         dd['apms_shuff_corr_flat'] = matrix2flat(jnp.array(dd['shuff_corr'].values, dtype=jnp.float32))
         dd['apms_shuff_corr_all_flat'] = matrix2flat(jnp.array(dd['shuff_corr_all'], dtype=jnp.float32))
@@ -1526,7 +1552,30 @@ def model23_data_transformer(data_dict, calculate_composites = True):
     # Find a number of bins without infinities
     if dd['n_null_bins'] == 'auto':
         dd['n_null_bins'] = auto_find_binning(dd)
+    
+    aligned_max_saint_score_table = get_aligned_max_saint_score_table(dd['composite_table'], dd['corr'])
+    saint_max_pair_score_edgelist = get_saint_max_edgelist(aligned_max_saint_score_table)
+    dd['saint_max_pair_score_edgelist'] = saint_max_pair_score_edgelist
     return dd 
+
+def corr2degree_weighted_corr(corr):
+    degree_matrix = get_degree_matrix_from_corr(corr)
+    return corr / degree_matrix
+
+def get_degree_matrix_from_corr(corr):
+    N, _ = corr.shape
+    mask = np.ones(corr.shape) - np.identity(N)
+    degree = np.sum(corr.values * mask, axis=0).reshape((N, 1)) / N
+    degree_matrix = degree * degree.T
+    return degree_matrix
+
+def get_apms_pair_score_matrix(corr):
+    corr = np.clip(corr, 0, 1)
+    degree_matrix = get_degree_matrix_from_corr(corr)
+    return corr * (1-degree_matrix)
+
+
+
 
 def auto_find_binning(dd, bmin=50, bmax=500):
     x = np.arange(-1, 1, 0.001)
@@ -1537,7 +1586,6 @@ def auto_find_binning(dd, bmin=50, bmax=500):
         if not np.isinf(y):
             return nbins
     raise ValueError(f"Failed to find binning in range {bmin}, {bmax}")
-
 
 def preyu2uid_mapping_dict():
     apms_data_path = "../table1.csv"
@@ -2362,19 +2410,37 @@ def model23_ll_lp(model_data):
     ##numpyro.sample("obs", mixtures, obs=R)
 
 def model23_p(model_data):
-    N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx, R, R0, null_dist, null_log_like, disconectivity_distance, max_distance = model23_unpack_model_data(model_data)
+    (N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx, R,
+     R0, null_dist, null_log_like, disconectivity_distance, max_distance, saint_max_pair_score_edgelist) = model23_unpack_model_data(model_data)
 
     #
-    N_EXPECTED_EDGES = (beta - alpha) * M
+    N_EXPECTED_EDGES = 50 
     N_EDGES_SIGMA = 20 # N_EXPECTED_EDGES / jnp.sqrt(N_EXPECTED_EDGES) 
     
     mu = -1.8 # mu is set such that about 1.1 % of total edges may exist.
     z = numpyro.sample('z', dist.Normal(mu).expand([M,]))
+    #z2 = numpyro.sample('z2', dist.Normal(0).expand([M,]))
     u = numpyro.sample('u', dist.Uniform(low=alpha, high=beta))
+    #r_null = numpyro.sample("r_null", null_dist)
     aij = Z2A(z)
-    n_expected_edges = u * M
+    
+    K = 1
+    EPSILON = 1e-1
+    sigma = K * R + EPSILON
+
+    SAINT_PAIR_SCORE = jnp.log(saint_max_pair_score_edgelist)
+    R_DEGREE_PAIR_SCORE = jnp.log(R + 1e-2)
+    PAIR_SCORE_CONST = SAINT_PAIR_SCORE + R_DEGREE_PAIR_SCORE
+
+    numpyro.sample('x', dist.Normal(0, sigma), obs=aij)
+    #numpyro.sample('y', dist.Normal(0, saint_max_pair_score_edgelist), obs=aij)
+
+    sij = jnp.sum((1-aij) * PAIR_SCORE_CONST) 
+    numpyro.factor("sij", sij)
+
     nedges = jnp.sum(aij)
-    #numpyro.sample("nedges", dist.Normal(nedges, N_EDGES_SIGMA), obs=n_expected_edges)
+    #model23_SR_score(aij = aij, null_log_like = null_log_like, weight=0.2)
+    numpyro.sample("nedges", dist.Normal(nedges, 20), obs=N_EXPECTED_EDGES)
 
 def model23_se(model_data):
     """
@@ -2512,8 +2578,8 @@ def model23_SC_score(aij, composite_dict_norm_approx, composite_dict_p_is_1, N, 
     kth_bait_prey_score_p_is_1(aij, 58, composite_dict_p_is_1, N, k = disconectivity_distance, max_distance = max_distance)
     kth_bait_prey_score_p_is_1(aij, 59, composite_dict_p_is_1, N, k = disconectivity_distance, max_distance = max_distance)
 
-def model23_SR_score(aij, null_log_like):
-    score = (1-aij)*null_log_like # Addition on the log scale
+def model23_SR_score(aij, null_log_like, weight = 1.0):
+    score = (1-aij)*null_log_like * weight # Addition on the log scale
     numpyro.factor("R", score)
 
 def model23_unpack_model_data(model_data):
@@ -2536,11 +2602,12 @@ def model23_unpack_model_data(model_data):
     R0 = d['apms_shuff_corr_flat']  # Use the local correlations 
     R0 = d['apms_shuff_corr_all_flat']  # Use the Global 
     null_dist = Histogram(R0, bins=n_null_bins).expand([M,]) # Normalized
-    null_log_like = null_dist.log_prob(R)
+    zero_clipped_null_log_like = null_dist.log_prob(R)
     disconectivity_distance = model_data['disconectivity_distance']
     max_distance = model_data['max_distance']
+    saint_max_pair_score_edgelist = d["saint_max_pair_score_edgelist"]
     return (N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx,
-            R, R0, null_dist, null_log_like, disconectivity_distance, max_distance)
+            R, R0, null_dist, zero_clipped_null_log_like, disconectivity_distance, max_distance, saint_max_pair_score_edgelist)
 
 def model23_se_sr_sc(model_data):
     """
