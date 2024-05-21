@@ -2411,10 +2411,10 @@ def model23_ll_lp(model_data):
 
 def model23_p(model_data):
     (N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx, R,
-     R0, null_dist, null_log_like, disconectivity_distance, max_distance, saint_max_pair_score_edgelist) = model23_unpack_model_data(model_data)
+     R0, null_dist, zero_clipped_null_log_like, disconectivity_distance, max_distance, saint_max_pair_score_edgelist) = model23_unpack_model_data(model_data)
 
     #
-    N_EXPECTED_EDGES = 50 
+    N_EXPECTED_EDGES = 4_000 
     N_EDGES_SIGMA = 20 # N_EXPECTED_EDGES / jnp.sqrt(N_EXPECTED_EDGES) 
     
     mu = -1.8 # mu is set such that about 1.1 % of total edges may exist.
@@ -2432,14 +2432,16 @@ def model23_p(model_data):
     R_DEGREE_PAIR_SCORE = jnp.log(R + 1e-2)
     PAIR_SCORE_CONST = SAINT_PAIR_SCORE + R_DEGREE_PAIR_SCORE
 
-    numpyro.sample('x', dist.Normal(0, sigma), obs=aij)
+    #numpyro.sample('x', dist.Normal(0, sigma), obs=aij)
     #numpyro.sample('y', dist.Normal(0, saint_max_pair_score_edgelist), obs=aij)
 
-    sij = jnp.sum((1-aij) * PAIR_SCORE_CONST) 
+    #sij = jnp.sum((1-aij) * PAIR_SCORE_CONST) 
+    sij = jnp.sum((1-aij) * SAINT_PAIR_SCORE)
     numpyro.factor("sij", sij)
+    numpyro.deterministic("sij_score", sij)
 
     nedges = jnp.sum(aij)
-    #model23_SR_score(aij = aij, null_log_like = null_log_like, weight=0.2)
+    model23_SR_score(aij = aij, null_log_like = zero_clipped_null_log_like, weight=1.)
     numpyro.sample("nedges", dist.Normal(nedges, 20), obs=N_EXPECTED_EDGES)
 
 def model23_se(model_data):
@@ -2579,8 +2581,9 @@ def model23_SC_score(aij, composite_dict_norm_approx, composite_dict_p_is_1, N, 
     kth_bait_prey_score_p_is_1(aij, 59, composite_dict_p_is_1, N, k = disconectivity_distance, max_distance = max_distance)
 
 def model23_SR_score(aij, null_log_like, weight = 1.0):
-    score = (1-aij)*null_log_like * weight # Addition on the log scale
+    score = jnp.sum((1-aij) * null_log_like) * weight # Addition on the log scale
     numpyro.factor("R", score)
+    numpyro.deterministic("r_score", score)
 
 def model23_unpack_model_data(model_data):
     # Unpack data for tracing
