@@ -251,8 +251,6 @@ def _main(o, i, mode):
         save(savename)
 
     def model_data_plots():
-    
-    
         # Correlation matrix
         plot_correlation_matrix(
                 matrix = model_data['corr'],
@@ -422,7 +420,7 @@ def _main(o, i, mode):
                 direct_tps = direct_tps,
                 direct_fps = direct_fps,
                 costructure_tps = costructure_tps,
-                costrucutre_fps = costructure_fps,
+                costructure_fps = costructure_fps,
                 control_first_tps = control_first_tps,
                 control_first_fps = control_first_fps,
                 control_last_tps = control_last_tps,
@@ -544,9 +542,18 @@ def _main(o, i, mode):
                 ylabel = "count",
                 savename = "accept_prob" + suffix,)
 
-        for key in ("accept_prob", "mean_accept_prob", "diverging", "num_steps"):
-            if key in ef:
-                val = ef[key]
+        for key in ("accept_prob", "mean_accept_prob", "diverging", "num_steps",
+                    "r_score", "sij_score"):
+            plot_stuff = False
+            if (key in ef):  
+                d = ef
+                plot_stuff = True
+            elif (key in samples):
+                d = samples
+                plot_stuff = True
+            
+            if plot_stuff:
+                val = d[key]
                 plot_caterpillar(
                         y = val,
                         xlabel = "iteration",
@@ -621,6 +628,7 @@ def _main(o, i, mode):
 
     run_plots(x, suffix="_w_warmup")
     run_plots(x2)
+    model_data_plots()
     # Write an edge list table of scores
 
     # Analysis
