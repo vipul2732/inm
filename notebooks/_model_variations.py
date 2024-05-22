@@ -2467,7 +2467,8 @@ def model23_saint_score(aij, SAINT_PAIR_SCORE, debug = False):
 
 def model23_nedges_score(aij, N_EDGES_SIGMA, N_EXPECTED_EDGES, debug=False):
     nedges = jnp.sum(aij)
-    numpyro.sample("nedges", dist.Normal(nedges, N_EDGES_SIGMA), obs=N_EXPECTED_EDGES)
+    n_edges_restraint = dist.Normal(nedges, N_EXPECTED_EDGES)
+    numpyro.sample("nedges", n_edges_restraint, obs=N_EXPECTED_EDGES)
     if debug:
         n_edges_restraint_log_prob = n_edges_restraint.log_prob(N_EXPECTED_EDGES)
         numpyro.deterministic("n_edges_score", n_edges_restraint_log_prob)
@@ -2527,17 +2528,70 @@ def model23_d(model_data):
     model23_saint_score(aij, SAINT_PAIR_SCORE, debug = True)
     model23_SR_score(aij = aij, null_log_like = zero_clipped_null_log_like, debug = True)
 
+
 def model23_e(model_data):
     """
-    Prior + profile similarity restraint
+    Prior + nedges 
     """
-    ...
+    (N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx, R,
+     R0, null_dist, zero_clipped_null_log_like, disconectivity_distance, max_distance, saint_max_pair_score_edgelist) = model23_unpack_model_data(model_data)
+    
+    mu = -1.3
+    z = model23_z_score(mu, M, debug = True)
+    aij = Z2A(z)
+
+    model23_nedges_score(aij, 1000, 10, debug = True)
 
 def model23_f(model_data):
     """
-    Prior + profile similarity restraint + number of edges + saint score
+    Prior + nedges + saint
     """
-    ...
+    (N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx, R,
+     R0, null_dist, zero_clipped_null_log_like, disconectivity_distance, max_distance, saint_max_pair_score_edgelist) = model23_unpack_model_data(model_data)
+    
+    mu = -1.3
+    z = model23_z_score(mu, M, debug = True)
+    aij = Z2A(z)
+
+    model23_nedges_score(aij, 1000, 10, debug = True)
+
+    SAINT_PAIR_SCORE = jnp.log(saint_max_pair_score_edgelist)
+
+    model23_saint_score(aij, SAINT_PAIR_SCORE, debug = True)
+
+def model23_g(model_data):
+    """
+    Prior + nedges + R 
+    """
+    (N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx, R,
+     R0, null_dist, zero_clipped_null_log_like, disconectivity_distance, max_distance, saint_max_pair_score_edgelist) = model23_unpack_model_data(model_data)
+    
+    mu = -1.3
+    z = model23_z_score(mu, M, debug = True)
+    aij = Z2A(z)
+
+    model23_nedges_score(aij, 1000, 10, debug = True)
+    model23_SR_score(aij = aij, null_log_like = zero_clipped_null_log_like, debug = True)
+
+def model23_h(model_data):
+    """
+    Prior + nedges + R + saint score 
+    """
+    (N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx, R,
+     R0, null_dist, zero_clipped_null_log_like, disconectivity_distance, max_distance, saint_max_pair_score_edgelist) = model23_unpack_model_data(model_data)
+    
+    mu = -1.3
+    z = model23_z_score(mu, M, debug = True)
+    aij = Z2A(z)
+
+    SAINT_PAIR_SCORE = jnp.log(saint_max_pair_score_edgelist)
+    model23_saint_score(aij, SAINT_PAIR_SCORE, debug = True)
+
+    model23_nedges_score(aij, 1000, 10, debug = True)
+    model23_SR_score(aij = aij, null_log_like = zero_clipped_null_log_like, debug = True)
+
+
+
 
 def model23_se(model_data):
     """
@@ -2855,7 +2909,7 @@ def model_dispatcher(model_name, model_data, save_dir, init_strat_dispatch_key="
     elif model_name in  ("model23_ll_lp", "model23_se", "model23_se_sc",
                          "model23_se_sr", "model23_se_sr_sc", "model23_p",
                          "model23_a", "model23_b", "model23_c", "model23_d",
-                         "model23_e", "model23_f", "model23_g"
+                         "model23_e", "model23_f", "model23_g", "model23_h",
                          ):
         model = dict(model23_ll_lp = model23_ll_lp,
                      model23_se = model23_se,
@@ -2866,11 +2920,16 @@ def model_dispatcher(model_name, model_data, save_dir, init_strat_dispatch_key="
                      model23_a = model23_a,
                      model23_b = model23_b,
                      model23_c = model23_c,
-                     model23_d = model23_d,)[model_name] 
+                     model23_d = model23_d,
+                     model23_e = model23_e,
+                     model23_f = model23_f,
+                     model23_g = model23_g,
+                     model23_h = model23_h,)[model_name] 
         model_data = model23_ll_lp_data_getter(save_dir)
         # Don't calculate compoistes for models that don't need it
         if model_name in ("model23_se_sr", "model23_se", "model23_p",
-                          "model23_a", "model23_b", "model23_c", "model23_d"):
+                          "model23_a", "model23_b", "model23_c", "model23_d",
+                          "model23_e", "model23_f", "model23_g", "model23_h"):
             model_data = model23_data_transformer(model_data, calculate_composites = False)
         else:
             model_data = model23_data_transformer(model_data, calculate_composites = True)
