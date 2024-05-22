@@ -144,7 +144,7 @@ mini_model23_p = from_template(
     num_warmup = 500,
     num_samples = 5000,
     progress_bar = True,
-    load_warmup = False,
+    load_warmup = True,
     hyper_param_alpha = 0.001, 
     hyper_param_beta = 0.003,  
     init_strat = "uniform",
@@ -152,6 +152,26 @@ mini_model23_p = from_template(
     collect_warmup = True,
     target_accept_prob = 0.6,
     )
+
+mini_model23_a = from_template(
+        mini_model23_p,
+        model_name = "model23_a",
+        model_output_dirpath = "../results/mini_model23_a")
+
+mini_model23_b = from_template(
+        mini_model23_p,
+        model_name = "model23_b",
+        model_output_dirpath = "../results/mini_model23_b")
+
+mini_model23_c = from_template(
+        mini_model23_p,
+        model_name = "model23_c",
+        model_output_dirpath = "../results/mini_model23_c")
+
+mini_model23_d = from_template(
+        mini_model23_p,
+        model_name = "model23_d",
+        model_output_dirpath = "../results/mini_model23_d")
     
 
 mini_dev_run_w_thinning = from_template(mini_dev_run,
