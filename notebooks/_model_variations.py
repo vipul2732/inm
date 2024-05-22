@@ -2414,35 +2414,130 @@ def model23_p(model_data):
      R0, null_dist, zero_clipped_null_log_like, disconectivity_distance, max_distance, saint_max_pair_score_edgelist) = model23_unpack_model_data(model_data)
 
     #
-    N_EXPECTED_EDGES = 4_000 
-    N_EDGES_SIGMA = 20 # N_EXPECTED_EDGES / jnp.sqrt(N_EXPECTED_EDGES) 
+    #N_EXPECTED_EDGES = 2_000 
+    #N_EDGES_SIGMA = 100 # N_EXPECTED_EDGES / jnp.sqrt(N_EXPECTED_EDGES) 
     
-    mu = -1.8 # mu is set such that about 1.1 % of total edges may exist.
-    z = numpyro.sample('z', dist.Normal(mu).expand([M,]))
+    mu = -1.3 #-1.8 # mu is set such that about 1.1 % of total edges may exist.
+    z_restraint = dist.Normal(mu).expand([M,])
+    z = numpyro.sample('z', z_restraint) 
+    #z_score = z_restraint.log_prob(z)
+    #numpyro.deterministic("z_score", z_score)
+    
     #z2 = numpyro.sample('z2', dist.Normal(0).expand([M,]))
-    u = numpyro.sample('u', dist.Uniform(low=alpha, high=beta))
-    #r_null = numpyro.sample("r_null", null_dist)
+    #u = numpyro.sample('u', dist.Uniform(low=alpha, high=beta))
+    ##r_null = numpyro.sample("r_null", null_dist)
     aij = Z2A(z)
-    
-    K = 1
-    EPSILON = 1e-1
-    sigma = K * R + EPSILON
+    #
+    #K = 1
+    #EPSILON = 1e-1
+    #sigma = K * R + EPSILON
 
     SAINT_PAIR_SCORE = jnp.log(saint_max_pair_score_edgelist)
-    R_DEGREE_PAIR_SCORE = jnp.log(R + 1e-2)
-    PAIR_SCORE_CONST = SAINT_PAIR_SCORE + R_DEGREE_PAIR_SCORE
+    #R_DEGREE_PAIR_SCORE = jnp.log(R + 1e-2)
+    #PAIR_SCORE_CONST = SAINT_PAIR_SCORE + R_DEGREE_PAIR_SCORE
 
-    #numpyro.sample('x', dist.Normal(0, sigma), obs=aij)
-    #numpyro.sample('y', dist.Normal(0, saint_max_pair_score_edgelist), obs=aij)
+    ##numpyro.sample('x', dist.Normal(0, sigma), obs=aij)
+    ##numpyro.sample('y', dist.Normal(0, saint_max_pair_score_edgelist), obs=aij)
 
-    #sij = jnp.sum((1-aij) * PAIR_SCORE_CONST) 
-    sij = jnp.sum((1-aij) * SAINT_PAIR_SCORE)
+    ##sij = jnp.sum((1-aij) * PAIR_SCORE_CONST) 
+    sij = -jnp.sum((1-aij) * SAINT_PAIR_SCORE) 
     numpyro.factor("sij", sij)
     numpyro.deterministic("sij_score", sij)
 
+    #model23_SR_score(aij = aij, null_log_like = zero_clipped_null_log_like, weight=1.)
+    #n_edges_restraint = dist.Normal(nedges, 20)
+    #nedges = jnp.sum(aij)
+    #numpyro.sample("nedges", dist.Normal(nedges, N_EDGES_SIGMA), obs=N_EXPECTED_EDGES)
+    #n_edges_restraint_log_prob = n_edges_restraint.log_prob(N_EXPECTED_EDGES)
+    #numpyro.deterministic("n_edges_score", n_edges_restraint_log_prob)
+
+def model23_z_score(mu, M, debug = False):
+    z_restraint = dist.Normal(mu).expand([M,])
+    z = numpyro.sample('z', z_restraint) 
+    if debug:
+        z_score = jnp.sum(z_restraint.log_prob(z))
+        numpyro.deterministic("z_score", z_score)
+    return z
+
+def model23_saint_score(aij, SAINT_PAIR_SCORE, debug = False):
+    sij = -jnp.sum((1-aij) * SAINT_PAIR_SCORE) 
+    numpyro.factor("sij", sij)
+    if debug:
+        numpyro.deterministic("sij_score", sij)
+
+def model23_nedges_score(aij, N_EDGES_SIGMA, N_EXPECTED_EDGES, debug=False):
     nedges = jnp.sum(aij)
-    model23_SR_score(aij = aij, null_log_like = zero_clipped_null_log_like, weight=1.)
-    numpyro.sample("nedges", dist.Normal(nedges, 20), obs=N_EXPECTED_EDGES)
+    numpyro.sample("nedges", dist.Normal(nedges, N_EDGES_SIGMA), obs=N_EXPECTED_EDGES)
+    if debug:
+        n_edges_restraint_log_prob = n_edges_restraint.log_prob(N_EXPECTED_EDGES)
+        numpyro.deterministic("n_edges_score", n_edges_restraint_log_prob)
+
+
+def model23_a(model_data):
+    """
+    The prior only
+    """
+    (N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx, R,
+     R0, null_dist, zero_clipped_null_log_like, disconectivity_distance, max_distance, saint_max_pair_score_edgelist) = model23_unpack_model_data(model_data)
+    
+    mu = -1.3
+    z = model23_z_score(mu, M, debug = True)
+
+def model23_b(model_data):
+    """
+    The prior + saint 
+    """
+    (N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx, R,
+     R0, null_dist, zero_clipped_null_log_like, disconectivity_distance, max_distance, saint_max_pair_score_edgelist) = model23_unpack_model_data(model_data)
+    
+    mu = -1.3
+    z = model23_z_score(mu, M, debug = True)
+
+    aij = Z2A(z)
+    SAINT_PAIR_SCORE = jnp.log(saint_max_pair_score_edgelist)
+
+    model23_saint_score(aij, SAINT_PAIR_SCORE, debug = True)
+
+def model23_c(model_data):
+    """
+    Prior + R
+    """
+    (N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx, R,
+     R0, null_dist, zero_clipped_null_log_like, disconectivity_distance, max_distance, saint_max_pair_score_edgelist) = model23_unpack_model_data(model_data)
+    
+    mu = -1.3
+    z = model23_z_score(mu, M, debug = True)
+    aij = Z2A(z)
+
+    model23_SR_score(aij = aij, null_log_like = zero_clipped_null_log_like, debug = True)
+
+def model23_d(model_data):
+    """
+    Prior + saint score + R 
+    """
+    (N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx, R,
+     R0, null_dist, zero_clipped_null_log_like, disconectivity_distance, max_distance, saint_max_pair_score_edgelist) = model23_unpack_model_data(model_data)
+
+    
+    SAINT_PAIR_SCORE = jnp.log(saint_max_pair_score_edgelist)
+    mu = -1.3
+    z = model23_z_score(mu, M, debug = True)
+    aij = Z2A(z)
+
+    model23_saint_score(aij, SAINT_PAIR_SCORE, debug = True)
+    model23_SR_score(aij = aij, null_log_like = zero_clipped_null_log_like, debug = True)
+
+def model23_e(model_data):
+    """
+    Prior + profile similarity restraint
+    """
+    ...
+
+def model23_f(model_data):
+    """
+    Prior + profile similarity restraint + number of edges + saint score
+    """
+    ...
 
 def model23_se(model_data):
     """
@@ -2484,10 +2579,6 @@ def model23_se_sc(model_data):
             N = N, 
             disconectivity_distance = disconectivity_distance,
             max_distance = max_distance)
-
-
-
-
 
 def calculate_degree_from_edgelist(edgelist, degree_vector, n_nodes):
     edgelist_idx = 0
@@ -2580,10 +2671,11 @@ def model23_SC_score(aij, composite_dict_norm_approx, composite_dict_p_is_1, N, 
     kth_bait_prey_score_p_is_1(aij, 58, composite_dict_p_is_1, N, k = disconectivity_distance, max_distance = max_distance)
     kth_bait_prey_score_p_is_1(aij, 59, composite_dict_p_is_1, N, k = disconectivity_distance, max_distance = max_distance)
 
-def model23_SR_score(aij, null_log_like, weight = 1.0):
+def model23_SR_score(aij, null_log_like, weight = 1.0, debug = False):
     score = jnp.sum((1-aij) * null_log_like) * weight # Addition on the log scale
     numpyro.factor("R", score)
-    numpyro.deterministic("r_score", score)
+    if debug:
+        numpyro.deterministic("r_score", score)
 
 def model23_unpack_model_data(model_data):
     # Unpack data for tracing
@@ -2762,16 +2854,23 @@ def model_dispatcher(model_name, model_data, save_dir, init_strat_dispatch_key="
         init_strategy = init_to_uniform
     elif model_name in  ("model23_ll_lp", "model23_se", "model23_se_sc",
                          "model23_se_sr", "model23_se_sr_sc", "model23_p",
+                         "model23_a", "model23_b", "model23_c", "model23_d",
+                         "model23_e", "model23_f", "model23_g"
                          ):
         model = dict(model23_ll_lp = model23_ll_lp,
                      model23_se = model23_se,
                      model23_se_sc = model23_se_sc,
                      model23_se_sr = model23_se_sr,
                      model23_se_sr_sc = model23_se_sr_sc,
-                     model23_p = model23_p,)[model_name] 
+                     model23_p = model23_p,
+                     model23_a = model23_a,
+                     model23_b = model23_b,
+                     model23_c = model23_c,
+                     model23_d = model23_d,)[model_name] 
         model_data = model23_ll_lp_data_getter(save_dir)
         # Don't calculate compoistes for models that don't need it
-        if model_name in ("model23_se_sr", "model23_se", "model23_p"):
+        if model_name in ("model23_se_sr", "model23_se", "model23_p",
+                          "model23_a", "model23_b", "model23_c", "model23_d"):
             model_data = model23_data_transformer(model_data, calculate_composites = False)
         else:
             model_data = model23_data_transformer(model_data, calculate_composites = True)
