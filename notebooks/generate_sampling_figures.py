@@ -344,6 +344,19 @@ def _main(o, i, mode):
                 title = "Spectral counts",
                 savename = "spec_table",)
 
+        # Conditionally plot the saint pair score edgelist table
+        conditional_keys = ("saint_max_pair_score_edgelist",)
+        for cond_key in conditional_keys:
+            if cond_key in model_data:
+                cond_val = model_data[cond_key]
+                if cond_val == "saint_max_pair_score_edgelist":
+                    cond_mat = mv.flat2matrix(cond_val, n=N)
+                    plot_matrix(cond_mat,
+                                xlabel = "node",
+                                title = "Saint max pair score",
+                                savename = "saint_max_pair_score")
+
+
     # Get the model data
     with open(str(i.parent / i.stem) + "_model_data.pkl", "rb") as f:
         model_data = pkl.load(f)
@@ -414,7 +427,7 @@ def _main(o, i, mode):
         plot_plot(shuff_direct_tps, score, "k.", "shuff direct tp edges", "score", "shuff_direct_tp_vs_score" + suffix) 
         plot_plot(shuff_direct_fps, score, "k.", "shuff direct fp edges", "score", "shuff_direct_fp_vs_score" + suffix) 
 
-        plot_plot(n_total_edges,    score, "k.", "N edges", "score", "n_edges_vs_score")
+        plot_plot(n_total_edges,    score, "k.", "N edges", "score", "n_edges_vs_score" + suffix)
 
         for key, val in dict(
                 direct_tps = direct_tps,
@@ -543,7 +556,7 @@ def _main(o, i, mode):
                 savename = "accept_prob" + suffix,)
 
         for key in ("accept_prob", "mean_accept_prob", "diverging", "num_steps",
-                    "r_score", "sij_score"):
+                    "r_score", "sij_score", "z_score"):
             plot_stuff = False
             if (key in ef):  
                 d = ef

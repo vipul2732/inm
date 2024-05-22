@@ -173,6 +173,25 @@ mini_model23_d = from_template(
         model_name = "model23_d",
         model_output_dirpath = "../results/mini_model23_d")
     
+mini_model23_e = from_template(
+        mini_model23_d,
+        model_name = "model23_e",
+        model_output_dirpath = "../results/mini_model23_e")
+
+mini_model23_f = from_template(
+        mini_model23_d,
+        model_name = "model23_f",
+        model_output_dirpath = "../results/mini_model23_f")
+
+mini_model23_g = from_template(
+        mini_model23_d,
+        model_name = "model23_g",
+        model_output_dirpath = "../results/mini_model23_g")
+
+mini_model23_h = from_template(
+        mini_model23_d,
+        model_name = "model23_h",
+        model_output_dirpath = "../results/mini_model23_h")
 
 mini_dev_run_w_thinning = from_template(mini_dev_run,
     model_output_dirpath = "../results/mini_dev_run_w_thinning",
