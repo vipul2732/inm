@@ -21,6 +21,7 @@ import pandas as pd
 import jax
 import jax.numpy as jnp
 from jax.tree_util import Partial
+import numpyro.distributions as dist
 import numpy as np
 from pathlib import Path
 import math
@@ -49,6 +50,8 @@ print(sa._e1)
 m_erlp1u20k = sa.get_results(sa._e1)
 
 w_erlp1u20k = sa.get_results("../results/se_sr_low_prior_1_wt_20k/")
+
+r_diag = sa.get_results("../results/se_sr_low_prior_1_uniform_mock_2k_diagnose/se_sr_low_prior_1_uniform_mock_2k_diagnose_rseed_0/", rseed=0)
 
 # +
 #v_erlp1uv20k = sa.get_results("../results/se_sr_low_prior_1_uniform_")
@@ -132,6 +135,10 @@ def hist(ax, x):
     ax.hist(x, bins=100, range=(0,1))
 
 
+# -
+
+reindexer = gbf.get_cullin_reindexer()
+
 # +
 m_saint_prior = get_saint_prior(m_erlp1u20k)
 
@@ -164,6 +171,10 @@ w_deg_x_av = w_degree_prior * w_pairwise_average
 m_deg_x_prod = m_degree_prior * m_pairwise_product
 w_deg_x_prod = w_degree_prior * w_pairwise_product
 
+m_corr = m_erlp1u20k.model_data["corr"]
+m_corr.sort_index(axis=0, inplace=True)
+m_corr.sort_index(axis=1, inplace=True)
+
 # +
 assert np.alltrue(m_saint_prior.columns == m_erlp1u20k.A_df.columns)
 assert np.alltrue(m_saint_prior.index == m_erlp1u20k.A_df.index)
@@ -175,10 +186,12 @@ assert np.alltrue(w_saint_prior.index == w_erlp1u20k.A_df.columns)
 
 assert np.alltrue(m_pairwise_product.columns == m_erlp1u20k.A_df.columns)
 assert np.alltrue(m_pairwise_average.columns == m_erlp1u20k.A_df.columns)
+assert np.alltrue(m_corr.columns == m_saint_prior.columns)
 # -
 
 ## Uncomment to plot various networks in matrix form
 h = lambda x: sns.heatmap(x, vmin=0, vmax=1)
+h(m_corr)
 #h(m_erlp1u20k.A_df)
 #h(w_erlp1u20k.A_df)
 #h(m_degree_prior * m_erlp1u20k.A_df)
@@ -192,8 +205,8 @@ h = lambda x: sns.heatmap(x, vmin=0, vmax=1)
 #h(m_pairwise_average)
 #h(w_pairwise_average)
 #h(m_deg_x_av)
-#h(m_deg_x_)
-del h
+#h(w_deg_x_av)
+#del h
 
 # +
 m_plot_list = [
@@ -227,25 +240,38 @@ del plot_list
 # +
 m_pairwise_product_edgelist_df = sa.matrix_df_to_edge_list_df(m_pairwise_product)
 w_pairwise_product_edgelist_df = sa.matrix_df_to_edge_list_df(w_pairwise_product)
+
 m_pairwise_average_edgelist_df = sa.matrix_df_to_edge_list_df(m_pairwise_average)
 w_pairwise_average_edgelist_df = sa.matrix_df_to_edge_list_df(w_pairwise_average)
 
+m_saint_prior_edgelist_df = sa.matrix_df_to_edge_list_df(m_saint_prior)
+w_saint_prior_edgelist_df = sa.matrix_df_to_edge_list_df(w_saint_prior)
 
+m_degree_prior_edgelist_df = sa.matrix_df_to_edge_list_df(m_degree_prior)
+w_degree_prior_edgelist_df = sa.matrix_df_to_edge_list_df(w_degree_prior)
+
+m_deg_x_prod_edgelist_df = sa.matrix_df_to_edge_list_df(m_deg_x_prod)
+w_deg_x_prod_edgelist_df = sa.matrix_df_to_edge_list_df(w_deg_x_av)
+
+m_degree_prior_x_pair_edgelist_df = sa.matrix_df_to_edge_list_df(m_deg_x_prod)
+w_degree_prior_x_pair_edgelist_df = sa.matrix_df_to_edge_list_df(w_deg_x_prod)
+
+m_corr_edgelist_df = sa.matrix_df_to_edge_list_df(m_corr)
 # -
 
-saint_prior_edgelist_df = sa.matrix_df_to_edge_list_df(saint_prior)
+u_m_pairwise_product = u_from_edgelist_df(m_pairwise_product_edgelist_df)
+u_w_pairwise_product = u_from_edgelist_df(w_pairwise_product_edgelist_df)
 
-degree_prior_edgelist_df = sa.matrix_df_to_edge_list_df(degree_prior)
+u_m_corr = u_from_edgelist_df(m_corr_edgelist_df)
 
-reindexer = gbf.get_cullin_reindexer()
+u_m_degree_prior = u_from_edgelist_df(m_degree_prior_edgelist_df)
+u_w_degree_prior = u_from_edgelist_df(m_degree_prior_edgelist_df)
 
-u_degree_prior = u_from_edgelist_df(degree_prior_edgelist_df)
-
-degree_prior_x_pair_edgelist_df = sa.matrix_df_to_edge_list_df(degree_prior * pairwise_product)
+m_degree_prior_x_pair_edgelist_df = sa.matrix_df_to_edge_list_df(m_degree_prior * m_pa)
 u_degree_prior_x_pair_prod = u_from_edgelist_df(degree_prior_x_pair_edgelist_df)
 
-degree_prior_x_pair_av_edgelist_df = sa.matrix_df_to_edge_list_df((degree_prior * pairwise_average))
-u_degree_prior_x_pair_av = u_from_edgelist_df(degree_prior_x_pair_av_edgelist_df)
+m_degree_prior_x_pair_av_edgelist_df = sa.matrix_df_to_edge_list_df((m_degree_prior * m_pairwise_average))
+u_m_degree_prior_x_pair_av = u_from_edgelist_df(m_degree_prior_x_pair_av_edgelist_df)
 
 u = gbf.UndirectedEdgeList()
 u.update_from_df(
@@ -291,10 +317,10 @@ assert np.alltrue(saint_prior_wt.index == r_wt.A_df.columns)
 degree_prior_wt = get_degree_prior_from_matrix_df(r_wt.A_df)
 
 pairwise_average_wt = (r_wt.A_df + saint_prior_wt) / 2
+# -
 
 degree_prior_x_pair_av_wt_edgelist_df = sa.matrix_df_to_edge_list_df((degree_prior_wt * pairwise_average_wt))
 u_degree_prior_x_pair_av_wt = u_from_edgelist_df(degree_prior_x_pair_av_wt_edgelist_df)
-# -
 
 predictions = dict(
     saint_prior = u_saint_prior,
@@ -311,6 +337,8 @@ predictions = dict(
 )
 
 predictions['humap2_hc']._edge_dict
+
+dist.Normal
 
 references = dict(
   costructure = gbf.get_pdb_ppi_predict_cocomplex_reference(),
@@ -447,7 +475,18 @@ gbf.write_roc_curves_and_table(
     ),
     multi_save_suffix=f"_{ref_key}")
 
+# +
+#deg_x_av_top_edge_set
+# -
 
+corr_res = gbf.do_benchmark(u_m_corr)
+
+plt.plot(corr_res.ppr_points, corr_res.tpr_points)
+plt.show()
+
+corr_res.auc
+
+m_erlp1u20k.hmc_warmup.adapt_state.step_size
 
 # +
 # Let's say we want to predict a network based on the ROC type curve
@@ -457,7 +496,7 @@ gbf.write_roc_curves_and_table(
 pp_top_node_set, pp_top_edge_set = dcc.get_top_edges_upto_threshold(pairwise_product_edgelist_df, threshold=0.9997)
 
 deg_x_av_top_node_set, deg_x_av_top_edge_set = dcc.get_top_edges_upto_threshold(
-    degree_prior_x_av_edgelist_df, threshold=0.9)
+    m_degree_prior_x_pair_av_edgelist_df, threshold=0.9)
 
 
 # +
@@ -484,9 +523,10 @@ net_pp = dcc.pyvis_plot_network(pp_top_edge_set)
 
 net_deg_x_av = dcc.pyvis_plot_network(deg_x_av_top_edge_set)
 
-# +
-#net_deg_x_av.show("deg_x_av.html")
-# -
+from IPython.display import display, HTML
+display(HTML("<style>.container { width:100% !important; }</style>"))
+
+net_deg_x_av.show("deg_x_av.html")
 
 deg_x_av_wt_top_node_set, deg_x_av_wt_top_edge_set = dcc.get_top_edges_upto_threshold(
     degree_prior_x_pair_av_wt_edgelist_df, threshold=0.85)
@@ -498,8 +538,6 @@ net_dev_x_av_wt.show("deg_x_av_wt.html")
 x = degree_prior_x_pair_av_wt_edgelist_df
 sel = x['a'] == 'vifprotein'
 x.sort_values("w", ascending=False).loc[sel, :]
-
-
 
 np.sum(pairwise_product_edgelist_df['w'] >= 0.9995)
 
@@ -564,5 +602,3 @@ d_filt.sum()
 sel = [isinstance(i, str) for i in d["SASA12"]]
 
 d.loc[0, "SASA12"]
-
-d.loc[~np.array(sel)]
