@@ -134,6 +134,10 @@ def plot_plotlist(plot_list):
 def hist(ax, x):
     ax.hist(x, bins=100, range=(0,1))
 
+def plthist(x):
+    plt.hist(np.array(x), bins=100)
+    plt.show()
+
 
 # -
 
@@ -171,9 +175,14 @@ w_deg_x_av = w_degree_prior * w_pairwise_average
 m_deg_x_prod = m_degree_prior * m_pairwise_product
 w_deg_x_prod = w_degree_prior * w_pairwise_product
 
+# +
 m_corr = m_erlp1u20k.model_data["corr"]
 m_corr.sort_index(axis=0, inplace=True)
 m_corr.sort_index(axis=1, inplace=True)
+
+w_corr = w_erlp1u20k.model_data["corr"]
+w_corr.sort_index(axis=0, inplace=True)
+w_corr.sort_index(axis=1, inplace=True)
 
 # +
 assert np.alltrue(m_saint_prior.columns == m_erlp1u20k.A_df.columns)
@@ -191,12 +200,12 @@ assert np.alltrue(m_corr.columns == m_saint_prior.columns)
 
 ## Uncomment to plot various networks in matrix form
 h = lambda x: sns.heatmap(x, vmin=0, vmax=1)
-h(m_corr)
+#h(m_corr)
 #h(m_erlp1u20k.A_df)
 #h(w_erlp1u20k.A_df)
 #h(m_degree_prior * m_erlp1u20k.A_df)
 #h(w_degree_prior * w_erlp1u20k.A_df)
-#h(m_degree_prior)
+h(m_degree_prior)
 #h(w_degree_prior)
 #h(m_saint_prior)
 #h(w_saint_prior)
@@ -215,27 +224,27 @@ m_plot_list = [
     ("m degree score", m_degree_prior),
     ("m pairwise product (edge & saint)", m_pairwise_product),
     ("m pairwise av (edge & saint)", m_pairwise_average),
-    ("m deg_x_av", m_degree_prior * m_pairwise_average),
-    ("m deg_x_prod", m_degree_prior * m_pairwise_product),
+    ("m deg_x_av", m_deg_x_av),
+    ("m deg_x_prod", m_deg_x_prod),
     ("m deg dist", (m_degree_prior-1) * -1)
     ]
+
 w_plot_list = [
     ("w average edge score", w_erlp1u20k.A_df),
-    ("w max pair saing score", w_saint_prior),
+    ("w max pair saint score", w_saint_prior),
     ("w degree score", w_degree_prior),
     ("w pairwise product (edge & saint)", w_pairwise_product),
     ("w pairwise av (edge & saint)", w_pairwise_average),
-    ("w deg_x_av", w_degree_prior * w_pairwise_average),
-    ("w deg_x_prod", w_degree_prior * w_pairwise_product)    
-]
+    ("w deg_x_av", w_deg_x_av),
+    ("w deg_x_prod", w_deg_x_prod),
+    ("w deg dist", (w_degree_prior-1) * -1)
+    ]
 
 plot_plotlist(m_plot_list)
     
 # -
 
 plot_plotlist(w_plot_list)
-
-del plot_list
 
 # +
 m_pairwise_product_edgelist_df = sa.matrix_df_to_edge_list_df(m_pairwise_product)
@@ -251,89 +260,59 @@ m_degree_prior_edgelist_df = sa.matrix_df_to_edge_list_df(m_degree_prior)
 w_degree_prior_edgelist_df = sa.matrix_df_to_edge_list_df(w_degree_prior)
 
 m_deg_x_prod_edgelist_df = sa.matrix_df_to_edge_list_df(m_deg_x_prod)
-w_deg_x_prod_edgelist_df = sa.matrix_df_to_edge_list_df(w_deg_x_av)
+w_deg_x_prod_edgelist_df = sa.matrix_df_to_edge_list_df(w_deg_x_prod)
 
-m_degree_prior_x_pair_edgelist_df = sa.matrix_df_to_edge_list_df(m_deg_x_prod)
-w_degree_prior_x_pair_edgelist_df = sa.matrix_df_to_edge_list_df(w_deg_x_prod)
+
+m_deg_x_av_edgelist_df = sa.matrix_df_to_edge_list_df(m_deg_x_av)
+w_deg_x_av_edgelist_df = sa.matrix_df_to_edge_list_df(m_deg_x_av)
 
 m_corr_edgelist_df = sa.matrix_df_to_edge_list_df(m_corr)
-# -
+w_corr_edgelist_df = sa.matrix_df_to_edge_list_df(w_corr)
 
+# +
 u_m_pairwise_product = u_from_edgelist_df(m_pairwise_product_edgelist_df)
 u_w_pairwise_product = u_from_edgelist_df(w_pairwise_product_edgelist_df)
 
+u_m_pairwise_av = u_from_edgelist_df(m_pairwise_average_edgelist_df)
+u_w_pairwise_av = u_from_edgelist_df(w_pairwise_average_edgelist_df)
+
 u_m_corr = u_from_edgelist_df(m_corr_edgelist_df)
+u_w_corr = u_from_edgelist_df(w_corr_edgelist_df)
 
 u_m_degree_prior = u_from_edgelist_df(m_degree_prior_edgelist_df)
 u_w_degree_prior = u_from_edgelist_df(m_degree_prior_edgelist_df)
 
-m_degree_prior_x_pair_edgelist_df = sa.matrix_df_to_edge_list_df(m_degree_prior * m_pa)
-u_degree_prior_x_pair_prod = u_from_edgelist_df(degree_prior_x_pair_edgelist_df)
+u_m_degree_prior_x_pair_prod = u_from_edgelist_df(m_degree_prior_x_pair_edgelist_df)
+u_w_degree_prior_x_pair_prod = u_from_edgelist_df(w_degree_prior_x_pair_edgelist_df)
 
-m_degree_prior_x_pair_av_edgelist_df = sa.matrix_df_to_edge_list_df((m_degree_prior * m_pairwise_average))
-u_m_degree_prior_x_pair_av = u_from_edgelist_df(m_degree_prior_x_pair_av_edgelist_df)
+u_m_degree_prior_x_pair_av = u_from_edgelist_df(m_deg_x_av_edgelist_df)
+u_w_degree_prior_x_pair_av = u_from_edgelist_df(w_deg_x_av_edgelist_df)
 
-u = gbf.UndirectedEdgeList()
-u.update_from_df(
-    pairwise_average_edgelist_df, a_colname='a', b_colname='b',
-    edge_value_colname='w', multi_edge_value_merge_strategy='max')
-u_pairwise_average = u
-u_pairwise_average.reindex(reindexer, enforce_coverage=False)
-
-u = gbf.UndirectedEdgeList()
-u.update_from_df(
-    saint_prior_edgelist_df, a_colname='a', b_colname='b',
-    edge_value_colname='w', multi_edge_value_merge_strategy='max')
-u_saint_prior = u
-u_saint_prior.reindex(reindexer, enforce_coverage=False)
-
-u_saint_prior.node_intersection(gbf.get_pdb_ppi_predict_cocomplex_reference())
-
-u_saint_prior
-
-# +
-u = gbf.UndirectedEdgeList()
-u.update_from_df(pairwise_product_edgelist_df, a_colname='a', b_colname='b',
-        edge_value_colname='w', multi_edge_value_merge_strategy='max')
-
-u_pairwise = u
-u_pairwise.reindex(reindexer, enforce_coverage=False)
 # -
 
-u_pairwise.node_intersection(r1.u)
+u_saint_max = gbf.get_cullin_saint_scores_edgelist()
+u_saint_max = u_saint_max.node_select(u_saint_max.node_intersection(u_w_pairwise_product))
+assert u_saint_max.n_nodes == 235
+assert u_saint_max.nedges == 654
 
 # +
-saint_prior_wt = get_saint_prior(r_wt)
+# The saint prior is defined for 234 nodes and 27261 possible edges
+u_saint_pair_prior = u_from_edgelist_df(m_saint_prior_edgelist_df)
+u_saint_pair_prior.node_intersection(gbf.get_pdb_ppi_predict_cocomplex_reference())
+assert u_saint_pair_prior.n_nodes == 234
 
-saint_prior_wt = saint_prior_wt.sort_index(axis=0)
-saint_prior_wt = saint_prior_wt.sort_index(axis=1)
-r_wt.A_df.sort_index(axis=0, inplace=True)
-r_wt.A_df.sort_index(axis=1, inplace=True)
 
-assert np.alltrue(saint_prior_wt.columns == r_wt.A_df.columns)
-assert np.alltrue(saint_prior_wt.index == r_wt.A_df.index)
-assert np.alltrue(saint_prior_wt.index == r_wt.A_df.columns)
-
-degree_prior_wt = get_degree_prior_from_matrix_df(r_wt.A_df)
-
-pairwise_average_wt = (r_wt.A_df + saint_prior_wt) / 2
 # -
 
-degree_prior_x_pair_av_wt_edgelist_df = sa.matrix_df_to_edge_list_df((degree_prior_wt * pairwise_average_wt))
-u_degree_prior_x_pair_av_wt = u_from_edgelist_df(degree_prior_x_pair_av_wt_edgelist_df)
-
-predictions = dict(
-    saint_prior = u_saint_prior,
-    pair_prod = u_pairwise,
-    average_edge = r1.u,
-    pair_av = u_pairwise_average,
-    degree_prior = u_degree_prior,
-    deg_x_prod = u_degree_prior_x_pair_prod,
-    deg_x_av = u_degree_prior_x_pair_av,
-    humap2_hc = gbf.get_humap_high_reference(),
-    saint_max = gbf.get_cullin_saint_scores_edgelist(),
-    humap2_med = gbf.get_humap_medium_reference(),
-    m3 = u_m3,
+m_predictions = dict(
+    saint_pair_score = u_saint_pair_prior,
+    pair_prod = u_m_pairwise_product,
+    pair_av = u_m_pairwise_av,
+    deg_score = u_m_degree_prior,
+    deg_x_prod = u_m_degree_prior_x_pair_prod,
+    deg_x_av = u_m_degree_prior_x_pair_av,
+    corr = u_m_corr,
+    saint_max = u_saint_max,
 )
 
 predictions['humap2_hc']._edge_dict
