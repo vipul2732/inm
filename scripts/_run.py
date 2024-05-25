@@ -73,6 +73,9 @@ def main(
     target_accept_prob : float = 0.8,
     collect_warmup : bool = False,
     mode = "cullin",
+    synthetic_N = None,
+    synthetic_Mtrue = None,
+    synthetic_rseed = None,
 ):
     """
     Params:
@@ -102,6 +105,16 @@ def main(
       hyper_param_max_distance : int - only matters for composite_connectivity. The number of Warshal algorithm iterations to perform when calculating the shortest paths presence distance matrix.
       filter_kw : str - a flag sent to preprocess_data to define different sets of nodes for modeling
       init_strat : str - currently supports 'uniform' and an empty string.
+      thinning = 1 : save chains every thinning steps
+      step_size : float = 1.0 : manually set the step size
+      adapt_step_size : bool = True : step size adaptation during wamrup -- see numpyro.infer.mcmc.hmc
+      adapt_mass_matrix  : bool = True : mass matrix adaptation during wamrup -- see numpyro.infer.mcmc.hmc
+      target_accept_prob : float = 0.8 : target acceptance probability -- smaller results in slower more robust sampling in principle
+      collect_warmup : bool = False : collect the warmup samples
+      mode = "cullin" : a catch all mostly for cullin specific i/o
+      synthetic_N : number of nodes in synthetic data 
+      synthetic_Mtrue : number of true edges in synthetic data
+      synthetic_rseed : the seed to control the synthetic network and data genration independently of the model rseed
     """
     model_output_dirpath = Path(model_output_dirpath)
     model_input_fpath= Path(model_input_fpath)
@@ -179,7 +192,10 @@ def main(
                  jax_profile = jax_profile,
                  init_strat = init_strat,
                  thinning = thinning,
-                 collect_warmup = collect_warmup)
+                 collect_warmup = collect_warmup,
+                 synthetic_N = synthetic_N,
+                 synthetic_Mtrue = synthetic_Mtrue,
+                 synthetic_rseed = synthetic_rseed,)
     
         cullin_figures(model_id = model_id,
                 model_name = model_name,

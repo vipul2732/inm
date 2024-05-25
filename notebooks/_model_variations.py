@@ -1450,6 +1450,9 @@ def get_aligned_max_saint_score_table(composite_table, corr):
     max_saint_dict = get_maximal_composite_dict_from_composite_table(composite_table)
     saint_max_score_table = maximal_composite_dict_to_max_saint_pair_score_table(max_saint_dict)
     saint_max_score_table = align_saint_max_score_table_2_corr_table(saint_max_score_table, corr)
+
+    assert np.all(saint_max_score_table.index == corr.index)
+    assert np.all(saint_max_score_table.columns == corr.columns)
     return saint_max_score_table
 
 def get_saint_max_edgelist(aligned_max_saint_score_table):
@@ -1470,7 +1473,7 @@ def get_saint_max_pair_score_edgelist(dd):
         value : score
         """
 
-def model23_data_transformer(data_dict, calculate_composites = True):
+def model23_data_transformer(data_dict, calculate_composites = True, generate_synthetic_data_kwargs = None, synthetic_N = None, synthetic_Mtrue = None, synthetic_rseed = None):
     """
     Transforms input data to be ready for modeling. Performs some checks.
     """
@@ -1510,6 +1513,7 @@ def model23_data_transformer(data_dict, calculate_composites = True):
                               'N': len(temp),
                               "n_pairs": n_pairs,
                               'maximal_shortest_path_to_calculate': min(22, n_pairs)}
+
             if p == 1:
                 new_composite_dict_p_is_1[cid] = temp_composite
             elif (p * n >= 5) and (n * (1-p) >= 5):
@@ -1519,7 +1523,7 @@ def model23_data_transformer(data_dict, calculate_composites = True):
         dd['new_composite_dict_norm_approx'] = new_composite_dict_norm_approx 
         dd['new_composite_dict_p_is_1'] = new_composite_dict_p_is_1
         return dd
-
+    
     def update_correlations(dd):
         assert np.all(dd['corr'].index == dd['shuff_corr'].index) 
         # Flatten corr and shuff corr to jax arrays
@@ -1533,7 +1537,53 @@ def model23_data_transformer(data_dict, calculate_composites = True):
         #dd['p_per_composite'] = np.array([c['t'] for i, c in dd['composite_dict'].items()], dtype=jnp.float32)
         assert len(dd['apms_corr_flat']) == dd['M']
         return dd
+   
+    def validate_synthetic_args(synthetic_N, synthetic_Mtrue, synthetic_rseed):
+        if (synthetic_N is None) and (synthetic_Mtrue is None):
+            assert synthetic_rseed is None
+        else:
+            assert isinstance(synthetic_N, int)
+            assert isinstance(synthetic_Mtrue, int)
+            assert isinstance(synthetic_rseed, int)
+    
+    def conditional_generate_synthetic_data_and_truth(dd, synthetic_N, synthetic_Mtrue, synthetic_rseed):
+        if synthetic_N is not None:
+            return generate_synthetic_data_and_update(dd, synthetic_N, synthetic_Mtrue, synthetic_rseed)
+        else:
+            return dd
 
+    def generate_synthetic_data_and_update(dd, synthetic_N, synthetic_Mtrue, synthetic_rseed):
+        # Generate synthetic data
+        prng_key = jax.random.PRNGKey(synthetic_rseed)
+        M = math.comb(synthetic_N, 2)
+        N = len(dd["corr"].index) 
+        assert M == math.comb(N, 2), (N, synthetic_N) 
+        # Generate synthetic_Mtrue indices from 0 to M
+        prng_key, key = jax.random.split(prng_key)
+        synthetic_Mtrue_indices = jax.random.choice(key, jnp.arange(M), shape=(synthetic_Mtrue,), replace=False)
+        null_dist = Histogram(dd['apms_shuff_corr_flat'], bins=dd['n_null_bins'])
+        prng_key, key = jax.random.split(prng_key)
+        null_data = null_dist.sample(key, sample_shape=(M,))
+        # Generate the true data 
+        prng_key, key = jax.random.split(prng_key)
+        direct_edge_data = jax.random.uniform(key, shape=(synthetic_Mtrue,), minval=0.3, maxval=1.)
+        synthetic_network = jnp.zeros(M, dtype=jnp.int32)
+        for i in range(len(direct_edge_data)):
+            index = synthetic_Mtrue_indices[i]
+            null_data = null_data.at[index].set(direct_edge_data[i])
+            synthetic_network = synthetic_network.at[index].set(1)
+        dd["synthetic_N"] = synthetic_N
+        dd["synthetic_Mtrue"] = synthetic_Mtrue
+        dd["synthetic_rseed"] = synthetic_rseed
+        dd["synthetic_network"] = synthetic_network
+        dd["apms_corr_flat"] = null_data
+        null_data_matrix = flat2matrix(null_data, N)
+        corr = dd["corr"]
+        dd["corr"] = pd.DataFrame(np.array(null_data_matrix), columns=corr.columns, index=corr.index)
+        return dd
+
+
+    validate_synthetic_args(synthetic_N, synthetic_Mtrue, synthetic_rseed)
     dd = data_dict.copy()
     r, c = dd['corr'].shape
     do_checks(dd, r, c)
@@ -1548,6 +1598,7 @@ def model23_data_transformer(data_dict, calculate_composites = True):
     else:
         dd = dd | {"new_composite_dict_p_is_1" : None, "new_composite_dict_norm_approx" : None} 
     dd = update_correlations(dd)
+    dd = conditional_generate_synthetic_data_and_truth(dd, synthetic_N, synthetic_Mtrue, synthetic_rseed) 
 
     # Find a number of bins without infinities
     if dd['n_null_bins'] == 'auto':
@@ -1556,6 +1607,7 @@ def model23_data_transformer(data_dict, calculate_composites = True):
     aligned_max_saint_score_table = get_aligned_max_saint_score_table(dd['composite_table'], dd['corr'])
     saint_max_pair_score_edgelist = get_saint_max_edgelist(aligned_max_saint_score_table)
     dd['saint_max_pair_score_edgelist'] = saint_max_pair_score_edgelist
+
     return dd 
 
 def corr2degree_weighted_corr(corr):
@@ -1649,6 +1701,7 @@ def model15(model_data):
     #mixture_probs = numpyro.sample("mixture_probs", dist.Dirichlet(jnp.ones(K)).expand([N,]))
     # Prior edge probability is 0.67
     # Hyperprior set by plotting Beta Distribution during Synthetic Benchmark50 notebook
+
     pT = numpyro.sample("pT", dist.Beta(0.5, 0.5)) 
     #pT = numpyro.sample("pT", dist.Beta(4, 2).expand([N,])) # Mean is 0.66
     mixture_probs = jnp.array([pT, 1-pT]).T
@@ -1686,6 +1739,7 @@ def model16(model_data):
     #mixture_probs = numpyro.sample("mixture_probs", dist.Dirichlet(jnp.ones(K)).expand([N,]))
     # Prior edge probability is 0.67
     # Hyperprior set by plotting Beta Distribution during Synthetic Benchmark50 notebook
+
     pT = numpyro.sample("pT", dist.Beta(0.5, 0.5)) 
     #pT = numpyro.sample("pT", dist.Beta(4, 2).expand([N,])) # Mean is 0.66
     mixture_probs = jnp.array([pT, 1-pT]).T
@@ -2455,7 +2509,7 @@ def model23_z_score(mu, M, debug = False):
     z_restraint = dist.Normal(mu).expand([M,])
     z = numpyro.sample('z', z_restraint) 
     if debug:
-        z_score = jnp.sum(z_restraint.log_prob(z))
+        z_score = -jnp.sum(z_restraint.log_prob(z))
         numpyro.deterministic("z_score", z_score)
     return z
 
@@ -2463,16 +2517,24 @@ def model23_saint_score(aij, SAINT_PAIR_SCORE, debug = False):
     sij = -jnp.sum((1-aij) * SAINT_PAIR_SCORE) 
     numpyro.factor("sij", sij)
     if debug:
-        numpyro.deterministic("sij_score", sij)
+        numpyro.deterministic("sij_score", -sij)
 
-def model23_nedges_score(aij, N_EDGES_SIGMA, N_EXPECTED_EDGES, debug=False):
+def model23_nedges_score(aij, N_EXPECTED_EDGES, N_EDGES_SIGMA,  debug=False, weight = 1.0,):
     nedges = jnp.sum(aij)
-    n_edges_restraint = dist.Normal(nedges, N_EXPECTED_EDGES)
-    numpyro.sample("nedges", n_edges_restraint, obs=N_EXPECTED_EDGES)
+    n_edges_restraint = dist.Normal(loc = N_EXPECTED_EDGES, scale = N_EDGES_SIGMA)
+    #numpyro.sample("nedges", n_edges_restraint, obs=nedges)
+    n_edges_restraint_log_prob = n_edges_restraint.log_prob(nedges) * weight
+    numpyro.factor("nedges_score_factor", n_edges_restraint_log_prob)
     if debug:
-        n_edges_restraint_log_prob = n_edges_restraint.log_prob(N_EXPECTED_EDGES)
-        numpyro.deterministic("n_edges_score", n_edges_restraint_log_prob)
+        numpyro.deterministic("n_edges_score", -n_edges_restraint_log_prob)
 
+_MODEL23_MU = -1. #-1.2 # -1.3
+_MODEL23_DEBUG = True
+_MODEL23_N_EXPECTED_EDGES =  200
+_MODEL23_N_EXPECTED_EDGES_SIGMA =  1000
+
+_MODEL23_SR_WEIGHT = 1. #0.5
+_MODEL23_E_WEIGHT = 1. #2. 
 
 def model23_a(model_data):
     """
@@ -2481,8 +2543,8 @@ def model23_a(model_data):
     (N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx, R,
      R0, null_dist, zero_clipped_null_log_like, disconectivity_distance, max_distance, saint_max_pair_score_edgelist) = model23_unpack_model_data(model_data)
     
-    mu = -1.3
-    z = model23_z_score(mu, M, debug = True)
+    mu = _MODEL23_MU 
+    z = model23_z_score(mu, M, debug = _MODEL23_DEBUG)
 
 def model23_b(model_data):
     """
@@ -2491,13 +2553,14 @@ def model23_b(model_data):
     (N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx, R,
      R0, null_dist, zero_clipped_null_log_like, disconectivity_distance, max_distance, saint_max_pair_score_edgelist) = model23_unpack_model_data(model_data)
     
-    mu = -1.3
-    z = model23_z_score(mu, M, debug = True)
-
-    aij = Z2A(z)
+    mu = _MODEL23_MU 
     SAINT_PAIR_SCORE = jnp.log(saint_max_pair_score_edgelist)
 
-    model23_saint_score(aij, SAINT_PAIR_SCORE, debug = True)
+    z = model23_z_score(mu, M, debug = _MODEL23_DEBUG)
+
+    aij = Z2A(z)
+
+    model23_saint_score(aij, SAINT_PAIR_SCORE, debug = _MODEL23_DEBUG)
 
 def model23_c(model_data):
     """
@@ -2506,11 +2569,13 @@ def model23_c(model_data):
     (N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx, R,
      R0, null_dist, zero_clipped_null_log_like, disconectivity_distance, max_distance, saint_max_pair_score_edgelist) = model23_unpack_model_data(model_data)
     
-    mu = -1.3
-    z = model23_z_score(mu, M, debug = True)
+    mu = _MODEL23_MU 
+
+    z = model23_z_score(mu, M, debug = _MODEL23_DEBUG)
+
     aij = Z2A(z)
 
-    model23_SR_score(aij = aij, null_log_like = zero_clipped_null_log_like, debug = True)
+    model23_SR_score(aij = aij, null_log_like = zero_clipped_null_log_like, weight = _MODEL23_SR_WEIGHT, debug = _MODEL23_DEBUG)
 
 def model23_d(model_data):
     """
@@ -2521,12 +2586,15 @@ def model23_d(model_data):
 
     
     SAINT_PAIR_SCORE = jnp.log(saint_max_pair_score_edgelist)
-    mu = -1.3
-    z = model23_z_score(mu, M, debug = True)
+    mu = _MODEL23_MU 
+
+    z = model23_z_score(mu, M, debug = _MODEL23_DEBUG)
+
     aij = Z2A(z)
 
-    model23_saint_score(aij, SAINT_PAIR_SCORE, debug = True)
-    model23_SR_score(aij = aij, null_log_like = zero_clipped_null_log_like, debug = True)
+    model23_saint_score(aij, SAINT_PAIR_SCORE, debug = _MODEL23_DEBUG)
+
+    model23_SR_score(aij = aij, null_log_like = zero_clipped_null_log_like, weight = _MODEL23_SR_WEIGHT, debug = _MODEL23_DEBUG)
 
 
 def model23_e(model_data):
@@ -2536,11 +2604,16 @@ def model23_e(model_data):
     (N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx, R,
      R0, null_dist, zero_clipped_null_log_like, disconectivity_distance, max_distance, saint_max_pair_score_edgelist) = model23_unpack_model_data(model_data)
     
-    mu = -1.3
-    z = model23_z_score(mu, M, debug = True)
+    mu = _MODEL23_MU 
+    z = model23_z_score(mu, M, debug = _MODEL23_DEBUG)
+
     aij = Z2A(z)
 
-    model23_nedges_score(aij, 1000, 10, debug = True)
+    model23_nedges_score(aij,
+        _MODEL23_N_EXPECTED_EDGES,
+        _MODEL23_N_EXPECTED_EDGES_SIGMA,
+        debug = _MODEL23_DEBUG,
+        weight = _MODEL23_E_WEIGHT)
 
 def model23_f(model_data):
     """
@@ -2549,15 +2622,20 @@ def model23_f(model_data):
     (N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx, R,
      R0, null_dist, zero_clipped_null_log_like, disconectivity_distance, max_distance, saint_max_pair_score_edgelist) = model23_unpack_model_data(model_data)
     
-    mu = -1.3
-    z = model23_z_score(mu, M, debug = True)
-    aij = Z2A(z)
-
-    model23_nedges_score(aij, 1000, 10, debug = True)
-
+    mu = _MODEL23_MU 
     SAINT_PAIR_SCORE = jnp.log(saint_max_pair_score_edgelist)
 
-    model23_saint_score(aij, SAINT_PAIR_SCORE, debug = True)
+    z = model23_z_score(mu, M, debug = _MODEL23_DEBUG)
+    aij = Z2A(z)
+
+    model23_nedges_score(aij,
+        _MODEL23_N_EXPECTED_EDGES,
+        _MODEL23_N_EXPECTED_EDGES_SIGMA,
+        debug = _MODEL23_DEBUG,
+        weight = _MODEL23_E_WEIGHT)
+
+
+    model23_saint_score(aij, SAINT_PAIR_SCORE, debug = _MODEL23_DEBUG)
 
 def model23_g(model_data):
     """
@@ -2566,12 +2644,19 @@ def model23_g(model_data):
     (N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx, R,
      R0, null_dist, zero_clipped_null_log_like, disconectivity_distance, max_distance, saint_max_pair_score_edgelist) = model23_unpack_model_data(model_data)
     
-    mu = -1.3
-    z = model23_z_score(mu, M, debug = True)
+    mu = _MODEL23_MU 
+
+    z = model23_z_score(mu, M, debug = _MODEL23_DEBUG)
+
     aij = Z2A(z)
 
-    model23_nedges_score(aij, 1000, 10, debug = True)
-    model23_SR_score(aij = aij, null_log_like = zero_clipped_null_log_like, debug = True)
+    model23_nedges_score(aij,
+        _MODEL23_N_EXPECTED_EDGES,
+        _MODEL23_N_EXPECTED_EDGES_SIGMA,
+        debug = _MODEL23_DEBUG,
+        weight = _MODEL23_E_WEIGHT)
+
+    model23_SR_score(aij = aij, null_log_like = zero_clipped_null_log_like, weight = _MODEL23_SR_WEIGHT, debug = _MODEL23_DEBUG)
 
 def model23_h(model_data):
     """
@@ -2580,24 +2665,124 @@ def model23_h(model_data):
     (N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx, R,
      R0, null_dist, zero_clipped_null_log_like, disconectivity_distance, max_distance, saint_max_pair_score_edgelist) = model23_unpack_model_data(model_data)
     
-    mu = -1.3
-    z = model23_z_score(mu, M, debug = True)
+    mu = _MODEL23_MU 
+    SAINT_PAIR_SCORE = jnp.log(saint_max_pair_score_edgelist)
+
+    z = model23_z_score(mu, M, debug = _MODEL23_DEBUG)
+
     aij = Z2A(z)
 
+    model23_saint_score(aij, SAINT_PAIR_SCORE, debug = _MODEL23_DEBUG)
+
+    model23_nedges_score(aij,
+        _MODEL23_N_EXPECTED_EDGES,
+        _MODEL23_N_EXPECTED_EDGES_SIGMA,
+        debug = _MODEL23_DEBUG,
+        weight = _MODEL23_E_WEIGHT)
+
+    model23_SR_score(aij = aij, null_log_like = zero_clipped_null_log_like, weight = _MODEL23_SR_WEIGHT, debug = _MODEL23_DEBUG)
+
+def model23_i(model_data):
+    """
+    Prior + r_z_score 
+    """
+    (N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx, R,
+     R0, null_dist, zero_clipped_null_log_like, disconectivity_distance, max_distance, saint_max_pair_score_edgelist) = model23_unpack_model_data(model_data)
+    
+    mu = _MODEL23_MU 
+
+    z = model23_z_score(mu, M, debug = _MODEL23_DEBUG)
+
+    #aij = Z2A(z)
+    model23_RZ_score(rij = R, zij = z, mu = mu, debug = _MODEL23_DEBUG)
+
+
+
+def model23_j(model_data):
+    """
+    Prior + r_z_score + saint 
+    """
+    (N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx, R,
+     R0, null_dist, zero_clipped_null_log_like, disconectivity_distance, max_distance, saint_max_pair_score_edgelist) = model23_unpack_model_data(model_data)
+    
+    mu = _MODEL23_MU 
+
+    z = model23_z_score(mu, M, debug = _MODEL23_DEBUG)
+
+    model23_RZ_score(rij = R, zij = z, mu = mu, debug = _MODEL23_DEBUG)
+
     SAINT_PAIR_SCORE = jnp.log(saint_max_pair_score_edgelist)
-    model23_saint_score(aij, SAINT_PAIR_SCORE, debug = True)
-
-    model23_nedges_score(aij, 1000, 10, debug = True)
-    model23_SR_score(aij = aij, null_log_like = zero_clipped_null_log_like, debug = True)
+    model23_saint_score(aij, SAINT_PAIR_SCORE, debug = _MODEL23_DEBUG)
 
 
+def model23_k(model_data):
+    """
+    Prior + r_z_score + nedges
+    """
+    (N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx, R,
+     R0, null_dist, zero_clipped_null_log_like, disconectivity_distance, max_distance, saint_max_pair_score_edgelist) = model23_unpack_model_data(model_data)
+    
+    mu = _MODEL23_MU 
+
+    z = model23_z_score(mu, M, debug = _MODEL23_DEBUG)
+
+
+    model23_RZ_score(rij = R, zij = z, mu = mu, debug = _MODEL23_DEBUG)
+
+    aij = Z2A(z)
+    model23_nedges_score(aij,
+        _MODEL23_N_EXPECTED_EDGES,
+        _MODEL23_N_EXPECTED_EDGES_SIGMA,
+        debug = _MODEL23_DEBUG,
+        weight = _MODEL23_E_WEIGHT)
+
+def model23_l(model_data):
+    """
+    Prior + r_z_score + saint + n_edges
+    """
+    (N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx, R,
+     R0, null_dist, zero_clipped_null_log_like, disconectivity_distance, max_distance, saint_max_pair_score_edgelist) = model23_unpack_model_data(model_data)
+    
+    mu = _MODEL23_MU 
+    SAINT_PAIR_SCORE = jnp.log(saint_max_pair_score_edgelist)
+
+    z = model23_z_score(mu, M, debug = _MODEL23_DEBUG)
+
+    model23_RZ_score(rij = R, zij = z, mu = mu, debug = _MODEL23_DEBUG)
+
+    aij = Z2A(z)
+
+    model23_nedges_score(aij,
+        _MODEL23_N_EXPECTED_EDGES,
+        _MODEL23_N_EXPECTED_EDGES_SIGMA,
+        debug = _MODEL23_DEBUG,
+        weight = _MODEL23_E_WEIGHT)
+
+    model23_saint_score(aij, SAINT_PAIR_SCORE, debug = _MODEL23_DEBUG)
+
+
+
+
+def generate_synthetic_example(rseed, n_true, m_total):
+    """
+    rseed : int
+    n_true : number of true edges
+    m_total : number of possible edges
+
+
+    """
+
+    def rand_rij_true(rng_key):
+        return jax.random.uniform(rng_key, low=0.3, high=1.)
+
+    a_true = jnp.zeros(m_total)
 
 
 def model23_se(model_data):
     """
     $S(M) = S_E(M)$
     """
-    N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx, R, R0, null_dist, null_log_like, disconectivity_distance, max_distance = model23_unpack_model_data(model_data)
+    N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx, R, R0, null_dist, null_log_like, disconectivity_distance, max_distance, _ = model23_unpack_model_data(model_data)
     aij = model23_SE_score(
             alpha = alpha,
             beta = beta,
@@ -2692,6 +2877,26 @@ def model23_SAINT_score(aij, saint_ij, M, k=2):
     score = jnp.sum(y)
     numpyro.factor("sij", score)
 
+def model23_null_score(aij, null_log_like):
+    """
+    The null score is the log likelihood of the null hypothesis
+
+    If the null is likely (low score) the edge should be 0
+
+    If the likelihood is high then the edge must be 0
+    If the likelihood is low then it can be anything
+
+    """
+    score = jnp.sum((1-aij) * null_log_like)
+    numpyro.factor("r_null", score)
+
+def model23_RQ_score(z, rij, rq_sigma = 0.3, debug = False):
+    restraint = dist.Normal(rij, rq_sigma)
+    numpyro.sample("r_q", restraint, obs=z)
+    if debug:
+        log_prob_score = jnp.sum(restraint.log_prob(z))
+        numpyro.deterministic("r_q_score", -log_prob_score)
+
 
 def model23_SC_score(aij, composite_dict_norm_approx, composite_dict_p_is_1, N, disconectivity_distance,
                      max_distance):
@@ -2726,10 +2931,37 @@ def model23_SC_score(aij, composite_dict_norm_approx, composite_dict_p_is_1, N, 
     kth_bait_prey_score_p_is_1(aij, 59, composite_dict_p_is_1, N, k = disconectivity_distance, max_distance = max_distance)
 
 def model23_SR_score(aij, null_log_like, weight = 1.0, debug = False):
-    score = jnp.sum((1-aij) * null_log_like) * weight # Addition on the log scale
-    numpyro.factor("R", score)
+    r_score = jnp.sum((1-aij) * null_log_like) * weight # Addition on the log scale
+    numpyro.factor("R", r_score)
     if debug:
-        numpyro.deterministic("r_score", score)
+        numpyro.deterministic("r_score", -r_score)
+
+def model23_RZ_score(zij, rij, mu, debug = False):
+    restraint = dist.Normal(rij + mu)
+    numpyro.sample("r_z", restraint, obs=zij)
+    if debug:
+        log_prob_score = jnp.sum(restraint.log_prob(zij))
+        numpyro.deterministic("r_z_score", -log_prob_score)
+
+    
+
+def model23_SQ_score(aij, null_log_like, weight = 1.0, debug = False):
+    """
+    1 - represent a (0, 1) vector for null / not null profile similarities
+    - There is a approximatley 70% chance of a costructure interaction
+    - There is a appromitley 30% chance of a direct edge given a costructure interaction
+    p(D | C) = 0.7, p(C | NN) = 0.7
+    p(D | C)p(C | NN) = 0.21
+
+    Model in the Z space
+
+    p(D | C)p(C | NN)p(NN | R0)
+
+    NN ~ p(NN | R0)
+    C ~ p(C | NN) 
+    D ~ p(D | C)
+
+    """
 
 def model23_unpack_model_data(model_data):
     # Unpack data for tracing
@@ -2833,6 +3065,59 @@ def load(fpath):
         dat = pkl.load(f)
     return dat
 
+def calculate_metrics(a, reference):
+    """
+    Calculate metrics for a given model
+    """
+    a = a > 0.5
+    reference = reference > 0.5
+
+
+    # Expand dims of reference to match the shape of a
+    reference = jnp.expand_dims(reference, 0)
+
+    # True Positive (TP): we count the number of times where we correctly predict a positive class
+    TP = jnp.sum(jnp.bitwise_and(a == 1, reference == 1), axis=1)
+
+    # True Negative (TN): we count the number of times where we correctly predict a negative class
+    TN = jnp.sum(jnp.bitwise_and(a == 0, reference == 0), axis=1)
+
+    # False Positive (FP): we count the number of times we incorrectly predict a positive class
+    FP = jnp.sum(jnp.bitwise_and(a == 1, reference == 0), axis=1)
+
+    # False Negative (FN): we count the number of times we incorrectly predict a negative class
+    FN = jnp.sum(jnp.bitwise_and(a == 0, reference == 1), axis=1)
+
+    # Accuracy: (TP + TN) / (TP + TN + FP + FN)
+    accuracy = (TP + TN) / (TP + TN + FP + FN)
+
+    # Precision: TP / (TP + FP)
+    precision = TP / (TP + FP)
+
+    # Recall: TP / (TP + FN)
+    recall = TP / (TP + FN)
+
+    # F1 Score: 2 * (Precision * Recall) / (Precision + Recall)
+    f1_score = 2 * (precision * recall) / (precision + recall)
+    return dict(TP=TP, FP=FP, TN=TN, FN=FN, accuracy=accuracy, precision=precision, recall=recall, f1_score=f1_score)
+
+
+
+
+def calculate_mcmc_summary_statistics(extra_fields, samples, reference):
+
+    top_score = jnp.min(extra_fields["potential_energy"])
+    top_score_idx = jnp.argmin(extra_fields["potential_energy"]).item()
+
+    summary_metrics = calculate_metrics(Z2A(samples["z"]), reference)
+    top_metircs = {k: jnp.max(v) for k, v in summary_metrics.items() if k != "FP" or k != "FN"}
+    top_metrics = top_metircs | {k : jnp.min(v) for k,v in summary_metrics.items() if k == "FP" or k == "FN"}
+    
+    metrics_of_top_score = {k: v[top_score_idx] for k, v in summary_metrics.items()}
+    return dict(top_score=top_score, top_score_idx=top_score_idx, top_metrics=top_metrics, metrics_of_top_score=metrics_of_top_score)
+
+
+
 #Keys are model name, values are model_func, init_func pairs
 _model_dispatch = {
     "model_10_wt": (model_10_wt, get_cov_model9_init_strategy, lambda x: int(x)),
@@ -2845,7 +3130,7 @@ _model_dispatch = {
     "model_11_path_length": (model_11_path_length, init_to_uniform, lambda x: int(x)),
         }
 
-def model_dispatcher(model_name, model_data, save_dir, init_strat_dispatch_key=""):
+def model_dispatcher(model_name, model_data, save_dir, init_strat_dispatch_key="", synthetic_N = None, synthetic_Mtrue = None, synthetic_rseed = None):
     if model_name in _model_dispatch:
         model, init_strategy, data_func = _model_dispatch[model_name]
         model_data = data_func(model_data)
@@ -2910,6 +3195,7 @@ def model_dispatcher(model_name, model_data, save_dir, init_strat_dispatch_key="
                          "model23_se_sr", "model23_se_sr_sc", "model23_p",
                          "model23_a", "model23_b", "model23_c", "model23_d",
                          "model23_e", "model23_f", "model23_g", "model23_h",
+                         "model23_i", "model23_j", "model23_k", "model23_l",
                          ):
         model = dict(model23_ll_lp = model23_ll_lp,
                      model23_se = model23_se,
@@ -2924,15 +3210,21 @@ def model_dispatcher(model_name, model_data, save_dir, init_strat_dispatch_key="
                      model23_e = model23_e,
                      model23_f = model23_f,
                      model23_g = model23_g,
-                     model23_h = model23_h,)[model_name] 
+                     model23_h = model23_h,
+                     model23_i = model23_i,
+                     model23_j = model23_j,
+                     model23_k = model23_k,
+                     model23_l = model23_l,)[model_name] 
+
         model_data = model23_ll_lp_data_getter(save_dir)
         # Don't calculate compoistes for models that don't need it
         if model_name in ("model23_se_sr", "model23_se", "model23_p",
                           "model23_a", "model23_b", "model23_c", "model23_d",
-                          "model23_e", "model23_f", "model23_g", "model23_h"):
-            model_data = model23_data_transformer(model_data, calculate_composites = False)
+                          "model23_e", "model23_f", "model23_g", "model23_h",
+                          "model23_i", "model23_j", "model23_k", "model23_l"):
+            model_data = model23_data_transformer(model_data, calculate_composites = False, synthetic_N = synthetic_N, synthetic_Mtrue = synthetic_Mtrue, synthetic_rseed = synthetic_rseed)
         else:
-            model_data = model23_data_transformer(model_data, calculate_composites = True)
+            model_data = model23_data_transformer(model_data, calculate_composites = True, synthetic_N = synthetic_N, synthetic_Mtrue = synthetic_Mtrue, synthetic_rseed = synthetic_rseed)
         #init_strategy = model_23_ll_lp_init_to_zero_strategy(model_data)
         if init_strat_dispatch_key == "uniform":
             init_strategy = init_to_uniform
@@ -2980,6 +3272,9 @@ def trace_model_shapes(model, arg):
 @click.option("--adapt-mass-matrix", type=bool, default=True)
 @click.option("--target_accept_prob", type=float, default=0.8)
 @click.option("--collect-warmup", type=bool, default=False)
+@click.option("--synthetic-N", type=int, default=None)
+@click.option("--synthetic-Mtrue", type=int, default=None)
+@click.option("--synthetic-rseed", type=int, default=None)
 def main(model_id,
          rseed,
          model_name,
@@ -3001,7 +3296,10 @@ def main(model_id,
          step_size,
          adapt_mass_matrix,
          target_accept_prob,
-         collect_warmup,):
+         collect_warmup,
+         synthetic_N,
+         synthetic_Mtrue,
+         synthetic_rseed):
     _main(model_id = model_id,
           rseed = rseed,
           model_name = model_name,
@@ -3023,7 +3321,11 @@ def main(model_id,
           adapt_step_size = adapt_step_size,
           adapt_mass_matrix = adapt_mass_matrix,
           target_accept_prob = target_accept_prob,
-          collect_warmup = collect_warmup)
+          collect_warmup = collect_warmup,
+          synthetic_N = synthetic_N,
+          synthetic_Mtrue = synthetic_Mtrue,
+          synthetic_rseed = synthetic_rseed)
+
 
 def _main(model_id,
          rseed,
@@ -3046,7 +3348,10 @@ def _main(model_id,
          adapt_step_size : bool = True,
          adapt_mass_matrix  : bool = True,
          target_accept_prob : float = 0.8,
-         collect_warmup = False,):
+         collect_warmup = False,
+         synthetic_N = None,
+         synthetic_Mtrue = None,
+         synthetic_rseed = None):
     #log_path = Path(save_dir) / "_model_variations.log"
     #logging.basicConfig(filename=log_path, filemode='w')
     logger = logging.getLogger(__name__)
@@ -3066,6 +3371,9 @@ def _main(model_id,
     init_strat {init_strat}
     thinning {thinning}
     collect_warmup {collect_warmup}
+    sythetic_N {synthetic_N}
+    sythetic_Mtrue {synthetic_Mtrue}
+    synthetic_rseed {synthetic_rseed}
     """)
 
     entered_main_time = time.time()
@@ -3088,7 +3396,7 @@ def _main(model_id,
                             # step_size N
                         #"trajectory_length",
         )
-    model, model_data, init_strategy = model_dispatcher(model_name, model_data, save_dir, init_strat_dispatch_key = init_strat)
+    model, model_data, init_strategy = model_dispatcher(model_name, model_data, save_dir, init_strat_dispatch_key = init_strat, synthetic_N = synthetic_N, synthetic_Mtrue = synthetic_Mtrue, synthetic_rseed = synthetic_rseed)
     # Save model_data to output directory
     data_savename = str(model_id) + "_" + model_name + "_" + str(rseed) + "_model_data.pkl"
     with open(Path(save_dir) / data_savename, "wb") as file:

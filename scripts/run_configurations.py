@@ -33,6 +33,9 @@ class RunConfiguration(NamedTuple):
     adapt_mass_matrix : bool = True
     target_accept_prob : float = 0.8
     collect_warmup : bool = False
+    synthetic_N : int = None
+    synthetic_Mtrue : int = None
+    synthetic_rseed : int = None
 
 
 def from_template(template: RunConfiguration, **kwargs) -> RunConfiguration:
@@ -107,6 +110,9 @@ mini_template = dict(
     hyper_param_disconectivity_distance = 10,
     hyper_param_max_distance = 11,
     collect_warmup = True,
+    synthetic_N = None,
+    synthetic_Mtrue = None,
+    synthetic_rseed = None,
 )
 
 mini_dev_run = RunConfiguration(
@@ -142,13 +148,13 @@ mini_model23_p = from_template(
     model_output_dirpath = "../results/mini_model23_p",
     model_name = "model23_p",
     num_warmup = 500,
-    num_samples = 5000,
+    num_samples = 500,
     progress_bar = True,
     load_warmup = True,
     hyper_param_alpha = 0.001, 
     hyper_param_beta = 0.003,  
     init_strat = "uniform",
-    filter_kw = "all",
+    filter_kw = "mock",
     collect_warmup = True,
     target_accept_prob = 0.6,
     )
@@ -193,15 +199,35 @@ mini_model23_h = from_template(
         model_name = "model23_h",
         model_output_dirpath = "../results/mini_model23_h")
 
+mini_model23_i = from_template(
+        mini_model23_d,
+        model_name = "model23_i",
+        model_output_dirpath = "../results/mini_model23_i")
+
+mini_model23_k = from_template(
+        mini_model23_d,
+        model_name = "model23_k",
+        model_output_dirpath = "../results/mini_model23_k")
+
+mini_model23_k_synthetic = from_template(
+        mini_model23_k,
+        model_name = "model23_k",
+        model_output_dirpath = "../results/mini_model23_k_synthetic",
+        synthetic_N = 177,
+        synthetic_Mtrue = 49,
+        synthetic_rseed = 0,)
+
+mini_model23_l = from_template(
+        mini_model23_d,
+        model_name = "model23_l",
+        model_output_dirpath = "../results/mini_model23_l")
+
+
+
 mini_dev_run_w_thinning = from_template(mini_dev_run,
     model_output_dirpath = "../results/mini_dev_run_w_thinning",
     thinning = 2,
     )
-
-mini_dev_run_collect_warmup = from_template(mini_dev_run,
-    model_output_dirpath = "../results/mini_dev_run_collect_warmup",
-    collect_warmup = True,
-    load_warmup = False,)
 
 
 mini_se_sr_run = RunConfiguration(
