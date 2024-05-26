@@ -9,6 +9,33 @@ from functools import partial
 from undirected_edge_list import UndirectedEdgeList
 import _model_variations as mv
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+def pklload(path):
+    with open(path, "rb") as f:
+        return pkl.load(f)
+
+def find_results_file_path(name, rseed, chain_path):
+    hmc_file_path = find_hmc_warmup_samples_file_path(chain_path)
+    results_path = hmc_file_path.name.split("_warmup_samples")[0] + ".pkl"
+    logger.info(f"results path: {results_path}")
+    results_file_path = chain_path / (results_path)
+    return results_file_path
+
+def find_hmc_warmup_samples_file_path(chain_path):
+    for path in chain_path.iterdir():
+        if path.is_file() and ("warmup_samples" in path.name):
+            return path
+    raise FileNotFoundError("hmc warmup samples file not found")
+
+def find_model_data_file_path(chain_path):
+    for path in chain_path.iterdir():
+        if path.is_file() and ("model_data" in path.name):
+            return path
+    raise FileNotFoundError("model data file not found")
+
 def load_cullin_composite_saint_scores():
     df = pd.read_csv("../data/processed/cullin/composite_table.tsv", sep="\t")
     return df
