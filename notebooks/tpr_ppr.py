@@ -63,8 +63,11 @@ def add_shuffled_curve_to_roc_plot(ax, results):
     ax.plot(results.shuff_ppr_points, results.shuff_tpr_points, label=f"shuffled AUC {round(results.shuff_auc, 3)}")
 
 def set_roc_limits(ax):
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, 1)
+    """Set the limits of the plot to be between 0 and 1.05
+    Default is 1.05 to allow for a little bit of space around the plot"""
+    ax.set_xlim(0, 1.05)
+    ax.set_ylim(0, 1.05)
+    return ax
 
 def set_roc_labels_with_N(ax, results):
     ax.set_xlabel(f"PPR N={results.n_predicted_positives}")
@@ -76,7 +79,7 @@ def dpi_save(save_path, fig, dpi: int):
 
 def _plotter_plot(o, save_path, title, results):
     fig, ax = plt.subplots(1, 1)
-    set_roc_limits(ax)
+    ax = set_roc_limits(ax)
     add_curve_to_roc_plot(ax, results)
     add_shuffled_curve_to_roc_plot(ax, results)
     ax.set_title(title)
