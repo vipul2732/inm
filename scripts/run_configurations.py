@@ -143,12 +143,13 @@ mini_dev_run = RunConfiguration(
     filter_kw = "all",
 )
 
+
 mini_model23_p = from_template(
     mini_dev_run,
     model_output_dirpath = "../results/mini_model23_p",
     model_name = "model23_p",
     num_warmup = 500,
-    num_samples = 500,
+    num_samples = 2_000,
     progress_bar = True,
     load_warmup = True,
     hyper_param_alpha = 0.001, 
@@ -221,6 +222,13 @@ mini_model23_l = from_template(
         mini_model23_d,
         model_name = "model23_l",
         model_output_dirpath = "../results/mini_model23_l")
+
+mini_model23_l_large_network = from_template(
+    mini_model23_l,
+    model_output_dirpath = "../results/mini_model23_l_large_network",
+    model_name = "model23_l",
+    hyper_param_thresholds = [.4, .5, .6, .7, .8, .9, 1.],
+)
 
 
 
