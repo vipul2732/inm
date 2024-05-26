@@ -370,11 +370,15 @@ def _main(o, i, mode):
     costructure_ref = data_io.get_pdb_ppi_predict_cocomplex_reference()
     
 
+    rng_key = jax.random.PRNGKey(122387)
     direct_ij = align_reference_to_model(model_data, direct_ref, mode=mode) 
     costructure_ij = align_reference_to_model(model_data, costructure_ref, mode=mode)
 
-    rng_key = jax.random.PRNGKey(122387)
-    shuff_direct_ij = np.array(jax.random.permutation(rng_key, direct_ij))
+    rng_key, key  = jax.random.split(rng_key)
+    shuff_costructure_ij = np.array(jax.random.permutation(key, costructure_ij))
+
+    rng_key, key  = jax.random.split(rng_key)
+    shuff_direct_ij = np.array(jax.random.permutation(key, direct_ij))
 
 
     x : dict = postprocess_samples(i.parent, fbasename=i.stem) 
@@ -408,6 +412,9 @@ def _main(o, i, mode):
 
         shuff_direct_tps = np.array(n_tps(a_typed, shuff_direct_ij))
         shuff_direct_fps = np.array(n_fps(a_typed, shuff_direct_ij))
+
+        shuff_costructure_tps = np.array(n_tps(a_typed, shuff_costructure_ij))
+        shuff_costructure_fps = np.array(n_fps(a_typed, shuff_costructure_ij))
         
         n_total_edges = np.array(n_edges(a_typed))
         score = np.array(ef['potential_energy'])
@@ -427,6 +434,9 @@ def _main(o, i, mode):
         plot_plot(shuff_direct_tps, score, "k.", "shuff direct tp edges", "score", "shuff_direct_tp_vs_score" + suffix) 
         plot_plot(shuff_direct_fps, score, "k.", "shuff direct fp edges", "score", "shuff_direct_fp_vs_score" + suffix) 
 
+        plot_plot(shuff_costructure_tps, score, "k.", "shuff costructure tp edges", "score", "shuff_costructure_tp_vs_score" + suffix) 
+        plot_plot(shuff_costructure_fps, score, "k.", "shuff costructure fp edges", "score", "shuff_costructure_fp_vs_score" + suffix) 
+
         plot_plot(n_total_edges,    score, "k.", "N edges", "score", "n_edges_vs_score" + suffix)
 
         for key, val in dict(
@@ -440,6 +450,8 @@ def _main(o, i, mode):
                 control_last_fps = control_last_fps,
                 shuff_direct_tps = shuff_direct_tps,
                 shuff_direct_fps = shuff_direct_fps,
+                shuff_costructure_tps = shuff_costructure_tps,
+                shuff_costructure_fps = shuff_costructure_fps,
                 n_total_edges = n_total_edges,
                 ).items():
             plot_caterpillar(
@@ -556,7 +568,7 @@ def _main(o, i, mode):
                 savename = "accept_prob" + suffix,)
 
         for key in ("accept_prob", "mean_accept_prob", "diverging", "num_steps",
-                    "r_score", "sij_score", "z_score"):
+                    "r_score", "sij_score", "z_score", "n_edges_score"):
             plot_stuff = False
             if (key in ef):  
                 d = ef
