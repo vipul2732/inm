@@ -536,8 +536,8 @@ def humap_bench(bench_output = "../results/humap_bench", topN=None):
 
 def write_roc_curves_and_table(model_output_dirpath, predictions, references,
                                pairs_to_plot_on_one_graph =( 
-        ("average_edge", "humap2_high"),
-        ("average_edge", "huri"),
+        #("average_edge", "humap2_high"),
+        #("average_edge", "huri"),
         ("average_edge", "pdb_direct"),
         ("average_edge", "pdb_cocomplex"),
         ("cullin_max_saint", "pdb_cocomplex")

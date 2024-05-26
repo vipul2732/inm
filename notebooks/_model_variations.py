@@ -2224,7 +2224,6 @@ def data_from_spec_table_and_composite_table(data_path, ms_thresholds, sep="\t",
     assert np.alltrue(shuff_corr <= 1)
     assert np.alltrue(shuff_corr >= -1)
     assert np.alltrue(null_sc.values >= 0)
-    
 
     base = { 
             "corr" : corr,
