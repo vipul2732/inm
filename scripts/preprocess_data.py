@@ -388,8 +388,8 @@ def preprocess_cullin(prey_colname="PreyGene", enforce_bait_remapping=False):
             prey_colname=prey_colname,
             enforce_bait_remapping=enforce_bait_remapping) 
     log_unmapped_bait(composites)
-    composites.to_csv("../data/processed/cullin/composite_table.tsv", sep="\t", index=False)
-    spec_table.to_csv("../data/processed/cullin/spec_table.tsv", sep="\t", index=True, header=False)
+    
+    write_tables(spec_table, composites, output_dir = Path("../data/processed/cullin"))
 
 def preprocess_spec_table(input_path,
                           output_dir,
@@ -417,9 +417,12 @@ def preprocess_spec_table(input_path,
             mode = mode)
 
     log_unmapped_bait(composites)
+    write_tables(spec_table, composites, output_dir)
+
+def write_tables(spec_table, composites, output_dir):
+    spec_table.sort_index(inplace = True)
     composites.to_csv(output_dir / "composite_table.tsv", sep="\t", index=False)
     spec_table.to_csv(output_dir / "spec_table.tsv", sep="\t", index=True, header=True)
-
 
 def get_conditions_mask_cullin(spec_table, filter_kw):
     """
@@ -536,8 +539,7 @@ def preprocess_dub(prey_colname="Prey", enforce_bait_remapping=False):
             bait_parser_strat="all",
             enforce_bait_remapping=enforce_bait_remapping)
     log_unmapped_bait(composites)
-    composites.to_csv("../data/processed/dub/composite_table.tsv", sep="\t", index=False)
-    spec_table.to_csv("../data/processed/dub/spec_table.tsv", sep="\t", index=True, header=False)
+    write_tables(spec_table, composites, output_dir = Path("../data/processed/dub"))
 
 def preprocess_tip49(prey_colname="Prey", enforce_bait_remapping=False):
     spec_table, composites = get_spec_table_and_composites(
@@ -547,8 +549,7 @@ def preprocess_tip49(prey_colname="Prey", enforce_bait_remapping=False):
             prey_colname=prey_colname,
             enforce_bait_remapping=enforce_bait_remapping)
     log_unmapped_bait(composites)
-    composites.to_csv("../data/processed/tip49/composite_table.tsv", sep="\t", index=False)
-    spec_table.to_csv("../data/processed/tip49/spec_table.tsv", sep="\t", index=True, header=False)
+    write_tables(spec_table, composites, output_dir = Path("../data/processed/tip49"))
 
 def preprocess_sars2(prey_colname="PreyGene", enforce_bait_remapping=False):
     spec_table, composites = get_spec_table_and_composites(
@@ -560,8 +561,7 @@ def preprocess_sars2(prey_colname="PreyGene", enforce_bait_remapping=False):
             bait_parser_strat="all",
             enforce_bait_remapping=enforce_bait_remapping)
     log_unmapped_bait(composites)
-    composites.to_csv("../data/processed/gordon_sars_cov_2/composite_table.tsv", sep="\t", index=False)
-    spec_table.to_csv("../data/processed/gordon_sars_cov_2/spec_table.tsv", sep="\t", index=True, header=False)
+    write_tables(spec_table, composites, output_dir = Path("../data/processed/gordon_sars_cov_2"))
 
 
 #References 
