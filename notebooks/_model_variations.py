@@ -2542,7 +2542,7 @@ def model23_nedges_score(aij, N_EXPECTED_EDGES, N_EDGES_SIGMA,  debug=False, wei
     if debug:
         numpyro.deterministic("n_edges_score", -n_edges_restraint_log_prob)
 
-_MODEL23_MU = -1. #-1.2 # -1.3
+_MODEL23_MU = 0 #-1. #-1.2 # -1.3
 _MODEL23_DEBUG = True
 _MODEL23_N_EXPECTED_EDGES =  200
 _MODEL23_N_EXPECTED_EDGES_SIGMA =  1000
