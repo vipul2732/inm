@@ -2508,13 +2508,28 @@ def model23_z_score(mu, M, debug = False):
     z_restraint = dist.Normal(mu).expand([M,])
     z = numpyro.sample('z', z_restraint) 
     if debug:
-        z_score = -jnp.sum(z_restraint.log_prob(z))
+        def f(x):
+            return -jnp.sum(z_restraint.log_prob(x))
+        gradf = jax.grad(f)
+        z_score = f(z)
+        grad_z_score = jnp.sum(gradf(z))
+        numpyro.deterministic("z_grad_score", grad_z_score)
         numpyro.deterministic("z_score", z_score)
     return z
 
 def model23_saint_score(aij, SAINT_PAIR_SCORE, debug = False):
     sij = -jnp.sum((1-aij) * SAINT_PAIR_SCORE) 
     numpyro.factor("sij", sij)
+    if debug:
+        numpyro.deterministic("sij_score", -sij)
+
+def model23_saint_score_b(aij, SAINT_PAIR_SCORE, debug = False):
+    """
+    If the saint score is low aij should be 0, if it is high aji can be either 0 or 1 
+    """
+    mu = SAINT_PAIR_SCORE
+    epsilon = 1e-2
+    numpyro.samples("sij", dist.Normal(mu, mu + epsilon), obs=aij)
     if debug:
         numpyro.deterministic("sij_score", -sij)
 
@@ -2759,6 +2774,36 @@ def model23_l(model_data):
 
     model23_saint_score(aij, SAINT_PAIR_SCORE, debug = _MODEL23_DEBUG)
 
+def model23_m(model_data):
+    """
+    Prior + r_z_score + saint + n_edges
+    """
+    (N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx, R,
+     R0, null_dist, zero_clipped_null_log_like, disconectivity_distance, max_distance, saint_max_pair_score_edgelist) = model23_unpack_model_data(model_data)
+    
+    mu = _MODEL23_MU 
+    SAINT_PAIR_SCORE = jnp.log(saint_max_pair_score_edgelist)
+    
+    # There are many correlations that are not null, hence the mean is close to the decision boundary 0.5
+    x = numpyro.sample("x", dist.Normal(0.5, 1).expand([M,])) 
+    null_assignment = Z2A(x) # 0 is null, 1 is not null
+    model23_null_assignment_score(
+        null_assignment,
+        null_log_like = zero_clipped_null_log_like,
+        debug = _MODEL23_DEBUG)
+    z = numpyro.sample("z", dist.Normal(null_assignment / 3, 0.2).expand([M,])) # about a 1/3 chance of a direct edge for non-null assignments
+
+    model23_RZ_score(rij = R, zij = z, mu = mu, debug = _MODEL23_DEBUG)
+
+    aij = Z2A(z) 
+
+    model23_nedges_score(aij,
+        _MODEL23_N_EXPECTED_EDGES,
+        _MODEL23_N_EXPECTED_EDGES_SIGMA,
+        debug = _MODEL23_DEBUG,
+        weight = _MODEL23_E_WEIGHT)
+
+    model23_saint_score(aij, SAINT_PAIR_SCORE, debug = _MODEL23_DEBUG)
 
 
 
@@ -2930,10 +2975,15 @@ def model23_SC_score(aij, composite_dict_norm_approx, composite_dict_p_is_1, N, 
     kth_bait_prey_score_p_is_1(aij, 59, composite_dict_p_is_1, N, k = disconectivity_distance, max_distance = max_distance)
 
 def model23_SR_score(aij, null_log_like, weight = 1.0, debug = False):
-    r_score = jnp.sum((1-aij) * null_log_like) * weight # Addition on the log scale
+    def f(x):
+        return jnp.sum((1-x) * null_log_like) * weight
+    r_score = f(aij) # Addition on the log scale
     numpyro.factor("R", r_score)
     if debug:
+        gradf = jax.grad(f)
+        grad_r_score = jnp.sum(gradf(aij))
         numpyro.deterministic("r_score", -r_score)
+        numpyro.deterministic("grad_r_score", -grad_r_score)
 
 def model23_RZ_score(zij, rij, mu, debug = False):
     restraint = dist.Normal(rij + mu)
@@ -2941,6 +2991,13 @@ def model23_RZ_score(zij, rij, mu, debug = False):
     if debug:
         log_prob_score = jnp.sum(restraint.log_prob(zij))
         numpyro.deterministic("r_z_score", -log_prob_score)
+
+def model23_null_assignment_score(null_assignment, null_log_like, debug= False):
+    # a positive (good) score is applied when null_assignment is 0
+    null_score = jnp.sum((1-null_assignment) * null_log_like)
+    numpyro.factor("null", null_score) # add the positives scores
+    if debug:
+        numpyro.deterministic("null_score", -null_score)
 
     
 
@@ -3195,6 +3252,7 @@ def model_dispatcher(model_name, model_data, save_dir, init_strat_dispatch_key="
                          "model23_a", "model23_b", "model23_c", "model23_d",
                          "model23_e", "model23_f", "model23_g", "model23_h",
                          "model23_i", "model23_j", "model23_k", "model23_l",
+                         "model23_m",
                          ):
         model = dict(model23_ll_lp = model23_ll_lp,
                      model23_se = model23_se,
@@ -3213,14 +3271,16 @@ def model_dispatcher(model_name, model_data, save_dir, init_strat_dispatch_key="
                      model23_i = model23_i,
                      model23_j = model23_j,
                      model23_k = model23_k,
-                     model23_l = model23_l,)[model_name] 
+                     model23_l = model23_l,
+                     model23_m = model23_m)[model_name] 
 
         model_data = model23_ll_lp_data_getter(save_dir)
         # Don't calculate compoistes for models that don't need it
         if model_name in ("model23_se_sr", "model23_se", "model23_p",
                           "model23_a", "model23_b", "model23_c", "model23_d",
                           "model23_e", "model23_f", "model23_g", "model23_h",
-                          "model23_i", "model23_j", "model23_k", "model23_l"):
+                          "model23_i", "model23_j", "model23_k", "model23_l",
+                          "model23_m"):
             model_data = model23_data_transformer(model_data, calculate_composites = False, synthetic_N = synthetic_N, synthetic_Mtrue = synthetic_Mtrue, synthetic_rseed = synthetic_rseed)
         else:
             model_data = model23_data_transformer(model_data, calculate_composites = True, synthetic_N = synthetic_N, synthetic_Mtrue = synthetic_Mtrue, synthetic_rseed = synthetic_rseed)
