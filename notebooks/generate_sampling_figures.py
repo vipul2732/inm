@@ -568,7 +568,7 @@ def _main(o, i, mode):
                 savename = "accept_prob" + suffix,)
 
         for key in ("accept_prob", "mean_accept_prob", "diverging", "num_steps",
-                    "r_score", "sij_score", "z_score", "n_edges_score"):
+                    "r_score", "sij_score", "z_score", "n_edges_score", "grad_r_score",):
             plot_stuff = False
             if (key in ef):  
                 d = ef
