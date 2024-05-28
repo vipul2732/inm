@@ -223,12 +223,43 @@ mini_model23_l = from_template(
         model_name = "model23_l",
         model_output_dirpath = "../results/mini_model23_l")
 
+mini_model23_l_mock = from_template(
+    mini_model23_l,
+    model_output_dirpath = "../results/mini_model23_l_mock",
+    filter_kw = "mock",
+)
+
+mini_model23_l_vif = from_template(
+    mini_model23_l,
+    model_output_dirpath = "../results/mini_model23_l_vif",
+    filter_kw = "vif",
+)
+
+mini_model23_l_wt = from_template(
+    mini_model23_l,
+    model_output_dirpath = "../results/mini_model23_l_wt",
+    filter_kw = "wt",
+)
+
+mini_model23_l_mock_synthetic = from_template(
+        mini_model23_l_mock,
+        model_output_dirpath = "../results/mini_model23_l_mock_synthetic",
+        synthetic_N = 177,
+        synthetic_Mtrue = 49,
+        synthetic_rseed = 0,)
+
+
 mini_model23_l_large_network = from_template(
     mini_model23_l,
     model_output_dirpath = "../results/mini_model23_l_large_network",
     model_name = "model23_l",
     hyper_param_thresholds = [.4, .5, .6, .7, .8, .9, 1.],
 )
+
+mini_model23_m = from_template(
+        mini_model23_d,
+        model_name = "model23_m",
+        model_output_dirpath = "../results/mini_model23_m")
 
 
 
