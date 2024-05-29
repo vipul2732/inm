@@ -68,6 +68,8 @@ def do_merge(name):
         filemode="w",
         format = "%(levelname)s:%(module)s:%(funcName)s:%(lineno)s:MSG:%(message)s",
     ) 
+
+    print(logging.getLogger().hasHandlers())
     logging.info(f"merging {name} chains")
     base = Path(f"../results/{name}")
     logging.info(f"base_path: {base}")

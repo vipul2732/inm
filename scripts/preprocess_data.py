@@ -420,7 +420,8 @@ def preprocess_spec_table(input_path,
     write_tables(spec_table, composites, output_dir)
 
 def write_tables(spec_table, composites, output_dir):
-    spec_table.sort_index(inplace = True)
+    spec_table.sort_index(inplace = True, axis = 0)
+    spec_table.sort_index(inplace = True, axis = 1)
     composites.to_csv(output_dir / "composite_table.tsv", sep="\t", index=False)
     spec_table.to_csv(output_dir / "spec_table.tsv", sep="\t", index=True, header=True)
 
