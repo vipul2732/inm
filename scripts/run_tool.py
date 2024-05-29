@@ -1,4 +1,5 @@
 import json
+import pdb
 import pickle as pkl
 import logging
 import sys
@@ -13,6 +14,7 @@ from pathlib import Path
 
 import run_configurations as rc
 import _run
+
 sys.path.append("../notebooks")
 from sampling_assessment import (
         get_results
@@ -49,11 +51,32 @@ def main(name, figures, rseed, merge):
     else:
         do_merge(name)
 
+def pkldump(x, path):
+    with open(path, "wb") as f:
+        pkl.dump(x, f)
+
 class MergeObject:
-    def __init__(self, results = None, model_data = None, hmc_warmup = None):
+    def __init__(self, results = None, model_data = None, hmc_warmup_samples = None):
         self.results = results
         self.model_data = model_data
-        self.hmc_warmup = hmc_warmup
+        self.hmc_warmup_samples = hmc_warmup_samples
+    def write(self, name):
+        assert self.results is not None
+        assert self.model_data is not None
+        assert self.hmc_warmup_samples is not None
+
+        out = Path(f"../results/{name}_merged")
+        assert out.is_dir(), out
+
+        pkldump(self.results, out / "merged_results.pkl")
+        pkldump(self.model_data, out / "merged_model_data.pkl")
+        pkldump(self.hmc_warmup_samples, out / "merged_hmc_warmup_samples.pkl")
+
+
+
+
+
+
 
 def do_merge(name):
     """ Merge multiple input chains into a single output directory """
@@ -62,6 +85,9 @@ def do_merge(name):
         out.mkdir()
     # set up logging
     
+    print(logging.getLogger().hasHandlers())
+    print(logging.getLogger())
+
     logging.basicConfig(
         filename = str(out / "_run.log"),
         level=logging.DEBUG,
@@ -69,7 +95,6 @@ def do_merge(name):
         format = "%(levelname)s:%(module)s:%(funcName)s:%(lineno)s:MSG:%(message)s",
     ) 
 
-    print(logging.getLogger().hasHandlers())
     logging.info(f"merging {name} chains")
     base = Path(f"../results/{name}")
     logging.info(f"base_path: {base}")
@@ -84,7 +109,7 @@ def do_merge(name):
     
     merge_object = MergeObject(results=None, model_data=None) 
     merge_object = update_merge_object(name, merge_object, base)
-    write_merged_results(merge_object, out)
+    merge_object.write(name)
 
 def update_merge_object(name, merge_object, base):
     for path in base.parent.iterdir():
@@ -106,13 +131,13 @@ def dictionary_concat_chains(x: dict, y: dict) -> dict:
     return tree_map(lambda a, b: jnp.concatenate([a, b], axis=0), x, y)
 
 def update_merge_object_warmup_hmc(merge_object, chain_path):
-    warmup_hmc_path = find_hmc_warmup_samples_file_path(chain_path) 
-    logging.info(f"updating merge object with warmup hmc from {warmup_hmc_path}")
-    hmc_warmup = dictionary_expand_dims(pklload(warmup_hmc_path))
-    if merge_object.hmc_warmup is None:
-        merge_object.hmc_warmup = hmc_warmup 
+    warmup_samples_hmc_path = find_hmc_warmup_samples_file_path(chain_path) 
+    logging.info(f"updating merge object with warmup hmc from {warmup_samples_hmc_path}")
+    hmc_warmup_samples = dictionary_expand_dims(pklload(warmup_samples_hmc_path))
+    if merge_object.hmc_warmup_samples is None:
+        merge_object.hmc_warmup_samples = hmc_warmup_samples 
     else:
-        merge_object.hmc_warmup = dictionary_concat_chains(merge_object.hmc_warmup, hmc_warmup)
+        merge_object.hmc_warmup_samples = dictionary_concat_chains(merge_object.hmc_warmup_samples, hmc_warmup_samples)
     return merge_object
 
 def update_merge_object_results(name, rseed, merge_object, chain_path):
@@ -134,17 +159,23 @@ def update_merge_object_model_data(merge_object, chain_path):
     else:
         for key in model_data.keys():
             assert key in merge_object.model_data.keys(), "model_data should be the same"
-            try:
-                assert hash(model_data[key]) == hash(merge_object.model_data[key])
-            except TypeError:
-                logging.debug(f"except TypeError: chain path{chain_path}")
-                a = model_data[key]
-                b = merge_object.model_data[key]
-                logging.debug(f"key: {key}")
-                if isinstance(a, pd.DataFrame):
-                     logging.debug(f"a index {a.index}")
-                     logging.debug(f"b index {b.index}")
-                assert np.all(a == b), key 
+
+            logging.debug(f"except TypeError: chain path{chain_path}")
+            a = model_data[key]
+            b = merge_object.model_data[key]
+            logging.debug(f"key: {key}")
+            if isinstance(a, pd.DataFrame):
+                 logging.debug(f"a index {a.index}")
+                 logging.debug(f"b index {b.index}")
+            if key == "composite_table":
+                assert np.allclose(a["MSscore"], b["MSscore"])
+            elif (a is None) and (b is None):
+                pass
+            else:
+                if isinstance(a, dict):
+                    assert a == b
+                else:
+                    assert np.allclose(a, b)
 
     return merge_object
 
