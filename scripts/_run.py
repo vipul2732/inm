@@ -8,10 +8,14 @@
 6. Generate the benchmark figures
 7. Generate the benchmark tables
 """
-import click
-import sys
-from pathlib import Path
+import json
 import logging
+import pdb
+import shutil
+import sys
+
+import click
+from pathlib import Path
 
 sys.path.append("../notebooks")
 
@@ -20,8 +24,6 @@ import _model_variations as mv
 import generate_sampling_figures as gsf
 import generate_benchmark_figures as gbf
 import generate_analysis_figures as gaf
-import json
-import shutil
 
 logger = logging.getLogger()
 def preprocessor_protocol_dispatcher(preprocessor_protocol_name):
@@ -204,20 +206,21 @@ def main(
     else:
         raise NotImplementedError
 
-def figures(model_id, model_name, rseed, model_output_dirpath, mode = "cullin", **kwargs):
+def figures(model_id, model_name, rseed, model_output_dirpath, mode = "cullin", merge = False,**kwargs):
     if mode == "cullin":
-        cullin_figures(model_id, model_name, rseed, model_output_dirpath, mode=mode, **kwargs)
+        cullin_figures(model_id, model_name, rseed, model_output_dirpath, mode=mode, merge = merge,**kwargs)
     else:
         raise NotImplementedError
 
-def cullin_figures(model_id, model_name, rseed, model_output_dirpath, **kwargs):
+def cullin_figures(model_id, model_name, rseed, model_output_dirpath, merge = False, **kwargs):
     if isinstance(model_output_dirpath, str):
         model_output_dirpath = Path(model_output_dirpath)
     fbasename = f"{model_id}_{model_name}_{rseed}"
     input_file = model_output_dirpath / f"{fbasename}.pkl"
     logging.info("enter generate_sampling_figures")
     gsf._main(o = str(model_output_dirpath),
-              i = input_file, mode="cullin")
+              i = input_file, mode="cullin",
+              merge = merge)
     logging.info("enter generate_benchmark_figures")
     gbf.cullin_standard(model_output_dirpath, fbasename)
     logging.info("enter generate_analysis_figures")

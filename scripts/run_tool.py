@@ -34,8 +34,8 @@ from data_io import (
 @click.option("--rseed", default = None)
 @click.option("--merge", is_flag = True, default = False, help="merge multiple chains") 
 def main(name, figures, rseed, merge):
+    run_configuration =rc.__dict__[name]._asdict() 
     if not merge:
-        run_configuration =rc.__dict__[name]._asdict() 
         if rseed is not None:
             rseed = int(rseed)
             # update the run configuration dynamically
@@ -49,7 +49,10 @@ def main(name, figures, rseed, merge):
         else:
             _run.figures(**run_configuration)
     else:
-        do_merge(name)
+        if not figures:
+             do_merge(name)
+        else:
+            _run.figures(**run_configuration, merge = merge)
 
 def pkldump(x, path):
     with open(path, "wb") as f:
@@ -69,8 +72,8 @@ class MergeObject:
         assert out.is_dir(), out
 
         pkldump(self.results, out / "merged_results.pkl")
-        pkldump(self.model_data, out / "merged_model_data.pkl")
-        pkldump(self.hmc_warmup_samples, out / "merged_hmc_warmup_samples.pkl")
+        pkldump(self.model_data, out / "merged_results_model_data.pkl")
+        pkldump(self.hmc_warmup_samples, out / "merged_results_warmup_samples.pkl")
 
 
 
