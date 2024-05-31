@@ -88,9 +88,9 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
     pdb_ppi_direct = data_io.get_pdb_ppi_predict_direct_reference()
     direct_ij = align_reference_to_model(model_data, pdb_ppi_direct, mode="cullin")
     logging.info("calculating ppv per chain based on amount of sampling")
-    ppv_results_dict = ppv_per_chain_based_on_amount_of_sampling(x['samples']['z'] > 0.5, direct_ij, amount_of_sampling_list = [1, 10, 100, 500, 1000, 2000])
+    ppv_results_dict = ppv_per_chain_based_on_amount_of_sampling(x['samples']['z'] > 0.5, direct_ij, amount_of_sampling_list = None) 
     errplot_from_av_std_dict(ppv_results_dict, "amount of sampling", "ppv", "PPV per chain", "ppv_per_chain" + suffix, save=save)
-    top_ppv_dict = top_ppv_per_chain_based_on_amount_of_sampling(x['samples']['z'] > 0.5, direct_ij, amount_of_sampling_list = [1, 10, 100, 500, 1000, 2000])
+    top_ppv_dict = top_ppv_per_chain_based_on_amount_of_sampling(x['samples']['z'] > 0.5, direct_ij, amount_of_sampling_list = None)
     errplot_from_av_std_dict(top_ppv_dict, "amount of sampling", "top ppv", "Top PPV per chain", "top_ppv_per_chain" + suffix, save=save)
 
 
@@ -155,23 +155,36 @@ def metric_as_a_function_of_amount_of_sampling_per_chain(x, metricf, amount_of_s
 
 
 _STD_AMOUNT_OF_SAMPING = [1] + list(np.arange(10, 2_000, 10)) 
+_STD_AMOUNT_OF_SAMPLING2 = [1,10, 100, 500,] + list(np.arange(1_000, 20_000, 1_000))
 _CHAIN_DIM = 0
 _ITER_DIM = 1
-
 _AV_DIM = 0
 _STD_DIM = 1
 
 def best_score_per_chain_based_on_amount_of_sampling(
         x, amount_of_sampling_list = None):
+    if x.ndim == 2:
+        n_chains, n_iter = x.shape
+    elif x.ndim == 3:
+        n_chains, n_iter, _ = x.shape
+    else:
+        raise ValueError("Only 2 or 3 dimensions are supported")
     if amount_of_sampling_list is None:
-        amount_of_sampling_list = _STD_AMOUNT_OF_SAMPING 
+        if n_iter > 2_000:
+            amount_of_sampling_list = _STD_AMOUNT_OF_SAMPLING2
+        else: 
+            amount_of_sampling_list = _STD_AMOUNT_OF_SAMPING 
     results = metric_as_a_function_of_amount_of_sampling_per_chain(x, lambda x: jnp.min(x, axis=_ITER_DIM), amount_of_sampling_list)
     return results
 
 def top_ppv_per_chain_based_on_amount_of_sampling(
         x, refij, amount_of_sampling_list = None):
+    nchains, niter, vdim = x.shape
     if amount_of_sampling_list is None:
-        amount_of_sampling_list = _STD_AMOUNT_OF_SAMPING
+        if niter > 2_000:
+            amount_of_sampling_list = _STD_AMOUNT_OF_SAMPLING2
+        else:
+            amount_of_sampling_list = _STD_AMOUNT_OF_SAMPING
     results = metric_as_a_function_of_amount_of_sampling_per_chain(x, lambda x: dim_aware_max(ppv_per_iteration_vectorized(x, refij)), amount_of_sampling_list)
     return results
 
