@@ -57,7 +57,7 @@ def input_load(i, fbasename, suffix):
     with open(i / f"{fbasename}{suffix}.pkl", "rb") as f:
         return pkl.load(f)
 
-def run_multichain_specific_plots(x, suffix="", save=None, o = None):
+def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None):
     """
     Params:
       x : { 
@@ -76,17 +76,21 @@ def run_multichain_specific_plots(x, suffix="", save=None, o = None):
         ax.set_ylabel(ylabel)
         ax.set_title(title)
         save(savename)
-
     merged_results_two_subsets_scores_hist_and_test(x, save=save, o = o)   
 
     # Plot of improving scores
 
     ef = x["extra_fields"]
+    logging.info("calculating best score per chain based on amount of sampling")
     results_dict = best_score_per_chain_based_on_amount_of_sampling(ef["potential_energy"])
     errplot_from_av_std_dict(results_dict, "amount of sampling", "best score", "Best score per chain", "best_score_per_chain" + suffix, save=save)
 
     pdb_ppi_direct = data_io.get_pdb_ppi_predict_direct_reference()
-    direct_ij = align_reference_to_model(x['model_data'], pdb_ppi_direct, mode="cullin")
+    direct_ij = align_reference_to_model(model_data, pdb_ppi_direct, mode="cullin")
+    logging.info("calculating ppv per chain based on amount of sampling")
+    ppv_results_dict = ppv_per_chain_based_on_amount_of_sampling(x['samples']['z'] > 0.5, direct_ij, amount_of_sampling_list = [1, 10, 100, 500, 1000, 2000])
+    errplot_from_av_std_dict(ppv_results_dict, "amount of sampling", "ppv", "PPV per chain", "ppv_per_chain" + suffix, save=save)
+
 
     for key in ef:
         val = ef[key]
@@ -115,9 +119,15 @@ def ppv_per_iteration(aij_mat, refij):
     return output
 
 def ppv_per_iteration_vectorized(aij_mat, refij):
-    ppv_vectorized = jax.vmap(ppv, in_axes=(0, None))
+    if aij_mat.ndim == 2:
+        # (ITERATION, ...)
+        ppv_vectorized = jax.vmap(ppv, in_axes=(0, None))
+    elif aij_mat.ndim == 3:
+        # (CHAIN, ITERATION, ...)
+        ppv_vectorized = jax.vmap(ppv, in_axes=(1, None))
     output = ppv_vectorized(aij_mat, refij)
     return output
+
 
 def min_score_vectorized(score_mat):
     """
@@ -142,20 +152,32 @@ def metric_as_a_function_of_amount_of_sampling_per_chain(x, metricf, amount_of_s
                 amount_of_sampling_list = amount_of_sampling_list)
 
 
-_STD_AMOUNT_OF_SAMPING = [1,2,4, 10, 20, 30, 40, 50, 80, 100, 150, 200, 250, 300, 350, 400, 500, 800,1000,1200, 1400, 1600, 1800, 2000,]
+_STD_AMOUNT_OF_SAMPING = [1] + list(np.arange(10, 2_000, 10)) 
+_CHAIN_DIM = 0
+_ITER_DIM = 1
+
+_AV_DIM = 0
+_STD_DIM = 1
 
 def best_score_per_chain_based_on_amount_of_sampling(
         x, amount_of_sampling_list = None):
     if amount_of_sampling_list is None:
         amount_of_sampling_list = _STD_AMOUNT_OF_SAMPING 
-    results = metric_as_a_function_of_amount_of_sampling_per_chain(x, lambda x: jnp.min(x, axis=1), amount_of_sampling_list)
+    results = metric_as_a_function_of_amount_of_sampling_per_chain(x, lambda x: jnp.min(x, axis=_ITER_DIM), amount_of_sampling_list)
+    return results
+
+def ppv_per_chain_based_on_amount_of_sampling(
+        x, refij, amount_of_sampling_list = None):
+    if amount_of_sampling_list is None:
+        amount_of_sampling_list = _STD_AMOUNT_OF_SAMPING
+    results = metric_as_a_function_of_amount_of_sampling_per_chain(x, lambda x: ppv_per_iteration_vectorized(x, refij), amount_of_sampling_list)
     return results
 
 def errplot_from_av_std_dict(av_std_dict, xlabel, ylabel, title, savename, save=None, alpha=0.2):
     fig, ax = plt.subplots()
     x = av_std_dict['amount_of_sampling_list']
     y = av_std_dict['out']
-    ax.errorbar(x, y[:, 0], yerr=y[:, 1], fmt='.', alpha=alpha, capsize=2)
+    ax.errorbar(x, y[:, _AV_DIM], yerr=y[:, _STD_DIM], fmt='.', alpha=alpha, capsize=2)
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
     ax.set_title(title)
@@ -903,8 +925,8 @@ def _main(o, i, mode, merge = False):
         
         fplot = partial(
             run_multichain_specific_plots,
+            model_data = model_data,
             save=save, o = o)
-        breakpoint() 
         fplot(x, suffix="_w_warmup")
         fplot(x2)
 
@@ -917,7 +939,6 @@ def _main(o, i, mode, merge = False):
         single_chain_sampling_analysis()
     else:
         multi_chain_sampling_analysis()
-    breakpoint()
     #return samples
 
 
