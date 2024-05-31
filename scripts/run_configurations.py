@@ -223,11 +223,19 @@ mini_model23_l = from_template(
         model_name = "model23_l",
         model_output_dirpath = "../results/mini_model23_l")
 
+
+
 mini_model23_l_mock = from_template(
     mini_model23_l,
     model_output_dirpath = "../results/mini_model23_l_mock",
     filter_kw = "mock",
 )
+
+mini_model23_l_mock_20k = from_template(
+    mini_model23_l_mock,
+    model_output_dirpath = "../results/mini_model23_l_mock_20k",
+    num_samples = 20_000,)
+
 
 mini_model23_l_vif = from_template(
     mini_model23_l,
