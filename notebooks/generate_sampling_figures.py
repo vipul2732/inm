@@ -198,8 +198,15 @@ def dim_aware_max(x):
 
 def ppv_per_chain_based_on_amount_of_sampling(
         x, refij, amount_of_sampling_list = None):
+    if x.ndim == 2:
+        n_chains, n_iter = x.shape
+    elif x.ndim == 3:
+        n_chains, n_iter, _ = x.shape
     if amount_of_sampling_list is None:
-        amount_of_sampling_list = _STD_AMOUNT_OF_SAMPING
+        if n_iter > 2_000:
+            amount_of_sampling_list = _STD_AMOUNT_OF_SAMPLING2
+        else:
+            amount_of_sampling_list = _STD_AMOUNT_OF_SAMPING
     results = metric_as_a_function_of_amount_of_sampling_per_chain(x, lambda x: ppv_per_iteration_vectorized(x, refij), amount_of_sampling_list)
     return results
 
