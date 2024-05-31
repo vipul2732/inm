@@ -19,6 +19,8 @@ import data_io
 import _model_variations as mv
 import merge_analysis as merge 
 
+import scipy as sp
+
 logger = logging.getLogger(__name__)
 # Globals
 hist_range = (-1, 1)
@@ -55,7 +57,7 @@ def input_load(i, fbasename, suffix):
     with open(i / f"{fbasename}{suffix}.pkl", "rb") as f:
         return pkl.load(f)
 
-def run_multichain_specific_plots(x, suffix="", save=None):
+def run_multichain_specific_plots(x, suffix="", save=None, o = None):
     """
     Params:
       x : { 
@@ -75,7 +77,17 @@ def run_multichain_specific_plots(x, suffix="", save=None):
         ax.set_title(title)
         save(savename)
 
+    merged_results_two_subsets_scores_hist_and_test(x, save=save, o = o)   
+
+    # Plot of improving scores
+
     ef = x["extra_fields"]
+    results_dict = best_score_per_chain_based_on_amount_of_sampling(ef["potential_energy"])
+    errplot_from_av_std_dict(results_dict, "amount of sampling", "best score", "Best score per chain", "best_score_per_chain" + suffix, save=save)
+
+    pdb_ppi_direct = data_io.get_pdb_ppi_predict_direct_reference()
+    direct_ij = align_reference_to_model(x['model_data'], pdb_ppi_direct, mode="cullin")
+
     for key in ef:
         val = ef[key]
         caterrplot(val, "iteration", key, key, f"{key}_caterpill" + suffix)    
@@ -83,6 +95,71 @@ def run_multichain_specific_plots(x, suffix="", save=None):
 
 
 
+    
+def ppv(aij, refij):
+    """
+    Positive predictive value
+    """
+    n_tp = jnp.sum((aij == 1) &  (refij == 1))
+    n_fp = jnp.sum((aij == 1) & (refij == 0))
+    return n_tp / (n_tp + n_fp)
+
+def ppv_per_iteration(aij_mat, refij):
+    """
+    Return the positive predictive value for each iteration
+    """
+    N, _ = aij_mat.shape
+    output = jnp.zeros(N)
+    for i in range(N):
+        output = output.at[i].set(ppv(aij_mat[i, :], refij))
+    return output
+
+def ppv_per_iteration_vectorized(aij_mat, refij):
+    ppv_vectorized = jax.vmap(ppv, in_axes=(0, None))
+    output = ppv_vectorized(aij_mat, refij)
+    return output
+
+def min_score_vectorized(score_mat):
+    """
+    score_mat : (chain, iteration) 
+    """
+    return jnp.min(score_mat, axis=1)
+
+def metric_as_a_function_of_amount_of_sampling_per_chain(x, metricf, amount_of_sampling_list):
+    """
+    x : (CHAIN, ITERATION, ...) 
+    metricf : 
+    """
+    M = len(amount_of_sampling_list)
+    out = jnp.zeros((M, 2))
+    for i, N in enumerate(amount_of_sampling_list):
+        temp = x[:, 0:N, ...] # select up to N iterations per chain
+        metric = metricf(temp)
+        av = jnp.mean(metric, axis=0) # average over chains
+        std = jnp.std(metric, axis=0) # std over chains
+        out = out.at[i, :].set([av, std])
+    return dict(out = out,
+                amount_of_sampling_list = amount_of_sampling_list)
+
+
+_STD_AMOUNT_OF_SAMPING = [1,2,4, 10, 20, 30, 40, 50, 80, 100, 150, 200, 250, 300, 350, 400, 500, 800,1000,1200, 1400, 1600, 1800, 2000,]
+
+def best_score_per_chain_based_on_amount_of_sampling(
+        x, amount_of_sampling_list = None):
+    if amount_of_sampling_list is None:
+        amount_of_sampling_list = _STD_AMOUNT_OF_SAMPING 
+    results = metric_as_a_function_of_amount_of_sampling_per_chain(x, lambda x: jnp.min(x, axis=1), amount_of_sampling_list)
+    return results
+
+def errplot_from_av_std_dict(av_std_dict, xlabel, ylabel, title, savename, save=None, alpha=0.2):
+    fig, ax = plt.subplots()
+    x = av_std_dict['amount_of_sampling_list']
+    y = av_std_dict['out']
+    ax.errorbar(x, y[:, 0], yerr=y[:, 1], fmt='.', alpha=alpha, capsize=2)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.set_title(title)
+    save(savename)
     
 
 
@@ -98,6 +175,35 @@ def n_fp(aij, refij):
 
 def n_edge(aij):
     return np.sum(aij > 0.5)
+
+def merged_results_two_subsets_scores_hist_and_test(merged_results, save=None, o = None):
+    scores = merged_results["extra_fields"]["potential_energy"]
+    
+    nchains, niter = scores.shape
+    P = nchains // 2
+    scores1 = np.ravel(scores[:P, :])
+    scores2 = np.ravel(scores[P:, :])
+    assert not np.all(scores1 == scores2)
+
+    test_results = sp.stats.ks_2samp(scores1, scores2)
+
+    # write a csv file for the two sample test results
+    pd.DataFrame(test_results._asdict(), index = [0],).to_csv(o / "ks_2samp_scores_results.tsv", sep="\t")
+
+    fig, ax = plt.subplots()
+    ax.hist(scores1, bins=100, alpha=0.5, label="subset 1")
+    ax.hist(scores2, bins=100, alpha=0.5, label="subset 2")
+    ax.set_xlabel("score")
+    ax.set_ylabel("count")
+    plt.legend()
+    D = "{:.3f}".format(test_results.statistic)
+    pval = "{:.3f}".format(test_results.pvalue)
+
+    s = f"Two-sample KS test\nD={D}\np-value={pval}"
+    plt.text(0.6, 0.6, s, transform=plt.gca().transAxes)
+    save("scores_2_hist")
+
+
 
 def _loop(aij_mat, refij, f):
     N, _ = aij_mat.shape
@@ -797,7 +903,7 @@ def _main(o, i, mode, merge = False):
         
         fplot = partial(
             run_multichain_specific_plots,
-            save=save)
+            save=save, o = o)
         breakpoint() 
         fplot(x, suffix="_w_warmup")
         fplot(x2)
