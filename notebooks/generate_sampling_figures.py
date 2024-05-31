@@ -90,6 +90,8 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
     logging.info("calculating ppv per chain based on amount of sampling")
     ppv_results_dict = ppv_per_chain_based_on_amount_of_sampling(x['samples']['z'] > 0.5, direct_ij, amount_of_sampling_list = [1, 10, 100, 500, 1000, 2000])
     errplot_from_av_std_dict(ppv_results_dict, "amount of sampling", "ppv", "PPV per chain", "ppv_per_chain" + suffix, save=save)
+    top_ppv_dict = top_ppv_per_chain_based_on_amount_of_sampling(x['samples']['z'] > 0.5, direct_ij, amount_of_sampling_list = [1, 10, 100, 500, 1000, 2000])
+    errplot_from_av_std_dict(top_ppv_dict, "amount of sampling", "top ppv", "Top PPV per chain", "top_ppv_per_chain" + suffix, save=save)
 
 
     for key in ef:
@@ -119,13 +121,9 @@ def ppv_per_iteration(aij_mat, refij):
     return output
 
 def ppv_per_iteration_vectorized(aij_mat, refij):
-    if aij_mat.ndim == 2:
-        # (ITERATION, ...)
-        ppv_vectorized = jax.vmap(ppv, in_axes=(0, None))
-    elif aij_mat.ndim == 3:
-        # (CHAIN, ITERATION, ...)
-        ppv_vectorized = jax.vmap(ppv, in_axes=(1, None))
+    ppv_vectorized = jax.vmap(ppv, in_axes=(0, None))
     output = ppv_vectorized(aij_mat, refij)
+    #breakpoint()
     return output
 
 
@@ -145,8 +143,12 @@ def metric_as_a_function_of_amount_of_sampling_per_chain(x, metricf, amount_of_s
     for i, N in enumerate(amount_of_sampling_list):
         temp = x[:, 0:N, ...] # select up to N iterations per chain
         metric = metricf(temp)
-        av = jnp.mean(metric, axis=0) # average over chains
-        std = jnp.std(metric, axis=0) # std over chains
+        if metric.ndim > 0:
+            av = jnp.mean(metric, axis=0) # average over chains
+            std = jnp.std(metric, axis=0) # std over chains
+        else:
+            av = metric
+            std = 0
         out = out.at[i, :].set([av, std])
     return dict(out = out,
                 amount_of_sampling_list = amount_of_sampling_list)
@@ -165,6 +167,21 @@ def best_score_per_chain_based_on_amount_of_sampling(
         amount_of_sampling_list = _STD_AMOUNT_OF_SAMPING 
     results = metric_as_a_function_of_amount_of_sampling_per_chain(x, lambda x: jnp.min(x, axis=_ITER_DIM), amount_of_sampling_list)
     return results
+
+def top_ppv_per_chain_based_on_amount_of_sampling(
+        x, refij, amount_of_sampling_list = None):
+    if amount_of_sampling_list is None:
+        amount_of_sampling_list = _STD_AMOUNT_OF_SAMPING
+    results = metric_as_a_function_of_amount_of_sampling_per_chain(x, lambda x: dim_aware_max(ppv_per_iteration_vectorized(x, refij)), amount_of_sampling_list)
+    return results
+
+def dim_aware_max(x):
+    if x.ndim == 1:
+        return jnp.max(x)
+    elif x.ndim == 2:
+        return jnp.max(x, axis=1)
+    else:
+        raise ValueError("Only 1 or 2 dimensions are supported")
 
 def ppv_per_chain_based_on_amount_of_sampling(
         x, refij, amount_of_sampling_list = None):
