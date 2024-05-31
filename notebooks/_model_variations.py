@@ -1524,12 +1524,13 @@ def model23_data_transformer(data_dict, calculate_composites = True, generate_sy
         dd['new_composite_dict_p_is_1'] = new_composite_dict_p_is_1
         return dd
     
-    def update_correlations(dd):
+    def update_correlations(dd, update_by_weighted_degree=False):
         assert np.all(dd['corr'].index == dd['shuff_corr'].index) 
         # Flatten corr and shuff corr to jax arrays
         
         # update corr to the weighted degree
-        dd['corr'] = get_apms_pair_score_matrix(dd['corr'])
+        if update_by_weighted_degree:
+            dd['corr'] = get_apms_pair_score_matrix(dd['corr'])
         dd['apms_corr_flat'] = matrix2flat(jnp.array(dd['corr'].values, dtype=jnp.float32))
         dd['apms_shuff_corr_flat'] = matrix2flat(jnp.array(dd['shuff_corr'].values, dtype=jnp.float32))
         dd['apms_shuff_corr_all_flat'] = matrix2flat(jnp.array(dd['shuff_corr_all'], dtype=jnp.float32))
@@ -2542,7 +2543,7 @@ def model23_nedges_score(aij, N_EXPECTED_EDGES, N_EDGES_SIGMA,  debug=False, wei
     if debug:
         numpyro.deterministic("n_edges_score", -n_edges_restraint_log_prob)
 
-_MODEL23_MU = 0 #-1. #-1.2 # -1.3
+_MODEL23_MU = -1. #-1.2 # -1.3
 _MODEL23_DEBUG = True
 _MODEL23_N_EXPECTED_EDGES =  200
 _MODEL23_N_EXPECTED_EDGES_SIGMA =  1000
