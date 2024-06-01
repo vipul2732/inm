@@ -2819,7 +2819,7 @@ def model23_m(model_data):
         debug = _MODEL23_DEBUG,
         weight = _MODEL23_E_WEIGHT)
 
-    model23_saint_score(aij, SAINT_PAIR_SCORE, weights = _MODEL23_SR_WEIGHT, debug = _MODEL23_DEBUG)
+    model23_saint_score(aij, SAINT_PAIR_SCORE, weight = _MODEL23_SR_WEIGHT, debug = _MODEL23_DEBUG)
 
 
 
