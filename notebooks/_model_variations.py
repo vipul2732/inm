@@ -2544,11 +2544,12 @@ def model23_nedges_score(aij, N_EXPECTED_EDGES, N_EDGES_SIGMA,  debug=False, wei
         numpyro.deterministic("n_edges_score", -n_edges_restraint_log_prob)
 
 _MODEL23_MU = -1. #-1.2 # -1.3
+_MODEL23_RZ_SIGMA = 0.7 
 _MODEL23_DEBUG = True
 _MODEL23_N_EXPECTED_EDGES =  200
 _MODEL23_N_EXPECTED_EDGES_SIGMA =  1000
 
-_MODEL23_SR_WEIGHT = 1. #0.5
+_MODEL23_SR_WEIGHT = 1.1 #0.5
 _MODEL23_E_WEIGHT = 1. #2. 
 
 def model23_a(model_data):
@@ -2763,7 +2764,12 @@ def model23_l(model_data):
 
     z = model23_z_score(mu, M, debug = _MODEL23_DEBUG)
 
-    model23_RZ_score(rij = R, zij = z, mu = mu, debug = _MODEL23_DEBUG)
+    model23_RZ_score(
+        rij = R,
+        zij = z,
+        mu = mu,
+        rz_sigma = _MODEL23_RZ_SIGMA,
+        debug = _MODEL23_DEBUG)
 
     aij = Z2A(z)
 
@@ -2986,8 +2992,8 @@ def model23_SR_score(aij, null_log_like, weight = 1.0, debug = False):
         numpyro.deterministic("r_score", -r_score)
         numpyro.deterministic("grad_r_score", -grad_r_score)
 
-def model23_RZ_score(zij, rij, mu, debug = False):
-    restraint = dist.Normal(rij + mu)
+def model23_RZ_score(zij, rij, mu, rz_sigma = 1., debug = False):
+    restraint = dist.Normal(rij + mu, rz_sigma)
     numpyro.sample("r_z", restraint, obs=zij)
     if debug:
         log_prob_score = jnp.sum(restraint.log_prob(zij))

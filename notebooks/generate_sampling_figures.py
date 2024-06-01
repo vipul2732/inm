@@ -213,7 +213,7 @@ def ppv_per_chain_based_on_amount_of_sampling(
     results = metric_as_a_function_of_amount_of_sampling_per_chain(x, lambda x: ppv_per_iteration_vectorized(x, refij), amount_of_sampling_list)
     return results
 
-def score_vs_ppv_plot(rng_key, samples, ef, refij, save=None, o=None, N=10_000, suffix=""):
+def score_vs_ppv_plot(rng_key, samples, ef, refij, save=None, o=None, N=100_000, suffix=""):
     """
     Plot the score vs ppv for each chain
     """
