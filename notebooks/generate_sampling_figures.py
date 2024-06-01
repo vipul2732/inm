@@ -40,7 +40,7 @@ _histogram_rc = ""
 _scatter_plot_rc = ""
 _caterpillar_rc = ""
 
-_dev = False 
+_dev = True 
 
 def rc_context(rc = None, fname = None):
     """
@@ -88,9 +88,17 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
     pdb_ppi_direct = data_io.get_pdb_ppi_predict_direct_reference()
     direct_ij = align_reference_to_model(model_data, pdb_ppi_direct, mode="cullin")
 
+    pdb_ppi_costructure = data_io.get_pdb_ppi_predict_costructure_reference()
+    costructure_ij = align_reference_to_model(model_data, pdb_ppi_costructure, mode="cullin")
+
     score_vs_ppv_plot(jax.random.PRNGKey(0), x["samples"], ef, direct_ij, save=save, o=o, suffix=suffix)
-    score_vs_tp_plot(jax.random.PRNGKey(0), x["samples"], ef, direct_ij, save=save, o=o, suffix=suffix)
-    score_vs_fp_plot(jax.random.PRNGKey(0), x["samples"], ef, direct_ij, save=save, o=o, suffix=suffix)
+    score_vs_tp_plot( jax.random.PRNGKey(0), x["samples"], ef, direct_ij, save=save, o=o, suffix=suffix)
+    score_vs_fp_plot( jax.random.PRNGKey(0), x["samples"], ef, direct_ij, save=save, o=o, suffix=suffix)
+
+    score_vs_ppv_plot(jax.random.PRNGKey(0), x["samples"], ef, costructure_ij, save=save, o=o, suffix="co_structure" + suffix)
+    score_vs_tp_plot( jax.random.PRNGKey(0), x["samples"], ef, costructure_ij, save=save, o=o, suffix="co_structure" + suffix)
+    score_vs_fp_plot( jax.random.PRNGKey(0), x["samples"], ef, costructure_ij, save=save, o=o, suffix="co_structure" + suffix)
+
 
     logging.info("calculating ppv per chain based on amount of sampling")
     ppv_results_dict = ppv_per_chain_based_on_amount_of_sampling(x['samples']['z'] > 0.5, direct_ij, amount_of_sampling_list = None) 
@@ -997,8 +1005,8 @@ def _main(o, i, mode, merge = False):
             x2 = pkl.load(f)
 
         N = model_data['N']
-        #x = optional_flatten(x)
-        #x2 = optional_flatten(x2)
+        x = optional_flatten(x)
+        x2 = optional_flatten(x2)
 
         def run_plots(x, suffix=""):
             # Unpack
@@ -1220,7 +1228,8 @@ def _main(o, i, mode, merge = False):
                     savename = "accept_prob" + suffix,)
 
             for key in ("accept_prob", "mean_accept_prob", "diverging", "num_steps",
-                        "r_score", "sij_score", "z_score", "n_edges_score", "grad_r_score", "grad_z_score"):
+                        "r_score", "sij_score", "z_score", "n_edges_score", "grad_r_score", "grad_z_score",
+                        "s_score"):
                 plot_stuff = False
                 if (key in ef):  
                     d = ef
@@ -1305,7 +1314,7 @@ def _main(o, i, mode, merge = False):
 
         run_plots(x, suffix="_w_warmup")
         run_plots(x2)
-        model_data_plots()
+        model_data_plots(model_data=model_data)
         # Write an edge list table of scores
 
         # Analysis
@@ -1410,11 +1419,16 @@ def optional_flatten(x):
     samples = x["samples"]
     temp = {}
     flatf = jax.jit(mv.matrix2flat)
+    flattened_lst = []
     for key, val in samples.items():
         shape = val.shape
         if shape[-1] == shape[-2]:
             for matrix in val:
                 flattend = flatf(matrix)
+                flattened_lst.append(flattend)
+            temp[key] = np.array(flattened_lst)
+    for key in temp:
+        x["samples"][key] = temp[key]
     return x
 
 

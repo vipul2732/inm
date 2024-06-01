@@ -2853,11 +2853,31 @@ def model23_n(model_data):
     aij = Z2A(z)
     # Set the diagonal to 0
 
-    aij = aij.at[diag_indices].set(0)
+    #aij = aij.at[diag_indices].set(0)
+    aij = jnp.tril(aij, k=-1)
+    aij = (aij + aij.T)
     degree = jnp.sum(aij, axis = 1)
 
     # Restrain the degree distribution to be somewhere around 0-5
-    numpyro.sample("degree", dist.Normal(degree, 2), obs=3)
+    degree_score = jnp.sum(dist.Normal(degree, 2).log_prob(3))
+    numpyro.factor("degree_score", degree_score)
+    
+    # Pull edges towards the profile similarity
+    # If profile similiary is 1 N(R | 1, 0.3)
+    # 
+    # p(R | aij)
+    r_score = jnp.sum(dist.Normal(aij, 0.3).log_prob(R_pairwise_matrix))
+    numpyro.factor("r_score", r_score)
+    
+    # Variance scales with the saint pair score
+    # effect is weaker for high saint scores - allowing and edge to be 0 or 1
+    # low saint scores centered near 0 have low variance allowing edges to only take on the value 0
+    # p(aij | s)
+    s_score = jnp.sum(dist.Normal(saint_max_pair_score_pairwise_matrix, saint_max_pair_score_pairwise_matrix ** 2 + 1e-2).log_prob(aij))
+    numpyro.factor("s_score", s_score)
+
+
+
 
 
 
