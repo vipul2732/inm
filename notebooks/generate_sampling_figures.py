@@ -40,7 +40,7 @@ _histogram_rc = ""
 _scatter_plot_rc = ""
 _caterpillar_rc = ""
 
-_dev = True 
+_dev = False 
 
 def rc_context(rc = None, fname = None):
     """
@@ -902,10 +902,12 @@ def _main(o, i, mode, merge = False):
 
         # Conditionally plot the saint pair score edgelist table
         conditional_keys = ("saint_max_pair_score_edgelist",)
+        N = model_data["N"]
+        M = model_data["M"]
         for cond_key in conditional_keys:
             if cond_key in model_data:
                 cond_val = model_data[cond_key]
-                if cond_val == "saint_max_pair_score_edgelist":
+                if cond_key == "saint_max_pair_score_edgelist":
                     cond_mat = mv.flat2matrix(cond_val, n=N)
                     plot_matrix(cond_mat,
                                 xlabel = "node",

@@ -2821,6 +2821,21 @@ def model23_m(model_data):
 
     model23_saint_score(aij, SAINT_PAIR_SCORE, weight = _MODEL23_SR_WEIGHT, debug = _MODEL23_DEBUG)
 
+def model23_n(model_data):
+    # unpack model variables
+    (N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx, R,
+     R0, null_dist, zero_clipped_null_log_like, disconectivity_distance, max_distance, saint_max_pair_score_edgelist) = model23_unpack_model_data(model_data)
+
+     # define global variables
+    mu = 0.3
+    sigma = 1.
+    _MODEL23_SR_WEIGHT = 1.1
+    _MODEL23_RZ_SIGMA = 0.4
+    SAINT_PAIR_SCORE = jnp.log(saint_max_pair_score_edgelist)
+
+    # Sample z in matrix form
+    z = numpyro.sample("z", dist.Normal(mu, sigma).expand([N, N])) 
+
 
 
 def generate_synthetic_example(rseed, n_true, m_total):
@@ -2912,7 +2927,7 @@ def model23_SE_score(alpha, beta, M):
     aij = Z2A(z)
     return aij
 
-def model23_SAINT_score(aij, saint_ij, M, k=2):
+def model23_SAINT_score(aij, saint_ij, M, weight = 1., k=2):
     """
     A SAINT bait-prey link classifies a node as "co-purifying"
     The score is between [0, 1].
@@ -2934,7 +2949,7 @@ def model23_SAINT_score(aij, saint_ij, M, k=2):
     exponent = 2 * (1-saint_ij)
     x = 2 * aij
     y = k * jnp.power(x, exponent) - k
-    score = jnp.sum(y)
+    score = jnp.sum(y) * weight
     numpyro.factor("sij", score)
 
 def model23_null_score(aij, null_log_like):
