@@ -88,7 +88,7 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
     pdb_ppi_direct = data_io.get_pdb_ppi_predict_direct_reference()
     direct_ij = align_reference_to_model(model_data, pdb_ppi_direct, mode="cullin")
 
-    score_vs_ppv_plot(jax.random.PRNGKey(0), x["samples"], ef, direct_ij, save=save, o=o)
+    score_vs_ppv_plot(jax.random.PRNGKey(0), x["samples"], ef, direct_ij, save=save, o=o, suffix=suffix)
 
     logging.info("calculating ppv per chain based on amount of sampling")
     ppv_results_dict = ppv_per_chain_based_on_amount_of_sampling(x['samples']['z'] > 0.5, direct_ij, amount_of_sampling_list = None) 
@@ -122,9 +122,13 @@ def ppv_per_iteration(aij_mat, refij):
 def ppv_per_iteration_vectorized(aij_mat, refij):
     ppv_vectorized = jax.vmap(ppv, in_axes=(0, None))
     output = ppv_vectorized(aij_mat, refij)
-    #breakpoint()
     return output
 
+def ppv_per_iteration_vectorized_3d(aij_3dim, refij):
+    f1 = jax.vmap(ppv, in_axes=(0, None))
+    f2 = jax.vmap(f1, in_axes=(1, None))
+    output = f2(aij_3dim, refij)
+    return output
 
 def min_score_vectorized(score_mat):
     """
@@ -209,7 +213,7 @@ def ppv_per_chain_based_on_amount_of_sampling(
     results = metric_as_a_function_of_amount_of_sampling_per_chain(x, lambda x: ppv_per_iteration_vectorized(x, refij), amount_of_sampling_list)
     return results
 
-def score_vs_ppv_plot(rng_key, samples, ef, refij, save=None, o=None, N=10_000):
+def score_vs_ppv_plot(rng_key, samples, ef, refij, save=None, o=None, N=10_000, suffix=""):
     """
     Plot the score vs ppv for each chain
     """
@@ -222,11 +226,21 @@ def score_vs_ppv_plot(rng_key, samples, ef, refij, save=None, o=None, N=10_000):
 
     indices = jax.random.permutation(rng_key, jnp.arange(Nsamples))[:N]
 
-    scores = jnp.ravel(scores)[indices]
     aij_mat = mv.Z2A(samples['z']) > 0.5
-    ppv = ppv_per_iteration_vectorized(aij_mat, refij)
-    breakpoint()
+    ppv_f = jax.jit(ppv_per_iteration_vectorized_3d)
+    ppv = ppv_f(aij_mat, refij).T
 
+    assert scores.shape == ppv.shape, (scores.shape, ppv.shape)
+
+    scores_subsample = jnp.ravel(scores)[indices]
+    ppv_subsample = jnp.ravel(ppv)[indices]
+
+    fig, ax = plt.subplots()
+    ax.plot(scores_subsample, ppv_subsample, 'k.', alpha=0.2)
+    ax.set_xlabel("score")
+    ax.set_ylabel("ppv")
+    ax.set_title("Score vs PPV")
+    save("score_vs_ppv" + suffix)
 
 
 def errplot_from_av_std_dict(av_std_dict, xlabel, ylabel, title, savename, save=None, alpha=0.2):
@@ -1285,6 +1299,9 @@ def _main(o, i, mode, merge = False):
             x2 = pkl.load(f)
         
         N = model_data['N']
+
+        multi_chain_validate_shapes(x, model_data)
+        multi_chain_validate_shapes(x2, model_data)
         
         fplot = partial(
             run_multichain_specific_plots,
@@ -1311,6 +1328,13 @@ def _main(o, i, mode, merge = False):
     #return samples
 
 
+def multi_chain_validate_shapes(x, model_data):
+    samples = x['samples']
+    ef = x['extra_fields']
+
+    n_chains, n_iter, M = samples['z'].shape
+    for key, value in ef.items():
+        assert value.shape == (n_chains, n_iter), (key, value.shape)
 
 
 def save_composite_table(model_data, o, samples):
