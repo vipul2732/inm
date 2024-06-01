@@ -269,6 +269,12 @@ mini_model23_m = from_template(
         model_name = "model23_m",
         model_output_dirpath = "../results/mini_model23_m")
 
+mini_model23_m_10k = from_template(
+        mini_model23_m,
+        model_name = "model23_m_10k",
+        model_output_dirpath = "../results/mini_model23_m_10k")
+
+
 
 
 mini_dev_run_w_thinning = from_template(mini_dev_run,

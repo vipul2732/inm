@@ -2543,13 +2543,13 @@ def model23_nedges_score(aij, N_EXPECTED_EDGES, N_EDGES_SIGMA,  debug=False, wei
     if debug:
         numpyro.deterministic("n_edges_score", -n_edges_restraint_log_prob)
 
-_MODEL23_MU = -1. #-1.2 # -1.3
+_MODEL23_MU = .5 #-1. #-1.2 # -1.3
 _MODEL23_RZ_SIGMA = 0.7 
 _MODEL23_DEBUG = True
-_MODEL23_N_EXPECTED_EDGES =  200
-_MODEL23_N_EXPECTED_EDGES_SIGMA =  1000
+_MODEL23_N_EXPECTED_EDGES = 500 
+_MODEL23_N_EXPECTED_EDGES_SIGMA = 100 
 
-_MODEL23_SR_WEIGHT = 1.1 #0.5
+_MODEL23_SR_WEIGHT = 1.2 #0.5
 _MODEL23_E_WEIGHT = 1. #2. 
 
 def model23_a(model_data):
@@ -2788,21 +2788,30 @@ def model23_m(model_data):
     (N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx, R,
      R0, null_dist, zero_clipped_null_log_like, disconectivity_distance, max_distance, saint_max_pair_score_edgelist) = model23_unpack_model_data(model_data)
     
-    mu = _MODEL23_MU 
+    #mu = _MODEL23_MU 
+    mu = 0.3
+    _MODEL23_SR_WEIGHT = 1.1
+    _MODEL23_RZ_SIGMA = 0.4
     SAINT_PAIR_SCORE = jnp.log(saint_max_pair_score_edgelist)
     
     # There are many correlations that are not null, hence the mean is close to the decision boundary 0.5
-    x = numpyro.sample("x", dist.Normal(0.5, 1).expand([M,])) 
-    null_assignment = Z2A(x) # 0 is null, 1 is not null
+    null_assignment = Z2A(numpyro.sample("x", dist.Normal(0.5, 1).expand([M,]))) # 0 is null, 1 is not null 
+
     model23_null_assignment_score(
         null_assignment,
         null_log_like = zero_clipped_null_log_like,
         debug = _MODEL23_DEBUG)
-    z = numpyro.sample("z", dist.Normal(null_assignment / 3, 0.2).expand([M,])) # about a 1/3 chance of a direct edge for non-null assignments
 
-    model23_RZ_score(rij = R, zij = z, mu = mu, debug = _MODEL23_DEBUG)
-
+    z = numpyro.sample("z", dist.Normal(mu,).expand([M,]))
     aij = Z2A(z) 
+
+    # Null the pair must be 0
+    # If not null, restrain the pair 
+
+    numpyro.sample("null_restraint", dist.Normal((1-null_assignment) * aij, 0.5), obs=0)
+
+    model23_RZ_score(rij = R, zij = z, mu = mu, rz_sigma=_MODEL23_RZ_SIGMA, debug = _MODEL23_DEBUG)
+
 
     model23_nedges_score(aij,
         _MODEL23_N_EXPECTED_EDGES,
@@ -2810,7 +2819,7 @@ def model23_m(model_data):
         debug = _MODEL23_DEBUG,
         weight = _MODEL23_E_WEIGHT)
 
-    model23_saint_score(aij, SAINT_PAIR_SCORE, debug = _MODEL23_DEBUG)
+    model23_saint_score(aij, SAINT_PAIR_SCORE, weights = _MODEL23_SR_WEIGHT, debug = _MODEL23_DEBUG)
 
 
 
@@ -2993,6 +3002,13 @@ def model23_SR_score(aij, null_log_like, weight = 1.0, debug = False):
         numpyro.deterministic("grad_r_score", -grad_r_score)
 
 def model23_RZ_score(zij, rij, mu, rz_sigma = 1., debug = False):
+    restraint = dist.Normal(rij + mu, rz_sigma)
+    numpyro.sample("r_z", restraint, obs=zij)
+    if debug:
+        log_prob_score = jnp.sum(restraint.log_prob(zij))
+        numpyro.deterministic("r_z_score", -log_prob_score)
+
+def EXP_model23_RZ_score(zij, rij, mu, rz_sigma = 1., debug = False):
     restraint = dist.Normal(rij + mu, rz_sigma)
     numpyro.sample("r_z", restraint, obs=zij)
     if debug:
