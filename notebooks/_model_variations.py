@@ -2832,9 +2832,16 @@ def model23_n(model_data):
     _MODEL23_SR_WEIGHT = 1.1
     _MODEL23_RZ_SIGMA = 0.4
     SAINT_PAIR_SCORE = jnp.log(saint_max_pair_score_edgelist)
+    diag_indices = jnp.diag_indices(N)
 
     # Sample z in matrix form
     z = numpyro.sample("z", dist.Normal(mu, sigma).expand([N, N])) 
+
+    # Define aij from z
+    aij = Z2A(z)
+    # Set the diagonal to 0
+
+    aij = aij.at[diag_indices].set(0)
 
 
 
@@ -3290,7 +3297,7 @@ def model_dispatcher(model_name, model_data, save_dir, init_strat_dispatch_key="
                          "model23_a", "model23_b", "model23_c", "model23_d",
                          "model23_e", "model23_f", "model23_g", "model23_h",
                          "model23_i", "model23_j", "model23_k", "model23_l",
-                         "model23_m",
+                         "model23_m", "model23_n", "model23_o", "model23_q",
                          ):
         model = dict(model23_ll_lp = model23_ll_lp,
                      model23_se = model23_se,
@@ -3310,7 +3317,8 @@ def model_dispatcher(model_name, model_data, save_dir, init_strat_dispatch_key="
                      model23_j = model23_j,
                      model23_k = model23_k,
                      model23_l = model23_l,
-                     model23_m = model23_m)[model_name] 
+                     model23_m = model23_m,
+                     model23_n = model23_n)[model_name] 
 
         model_data = model23_ll_lp_data_getter(save_dir)
         # Don't calculate compoistes for models that don't need it
@@ -3318,7 +3326,7 @@ def model_dispatcher(model_name, model_data, save_dir, init_strat_dispatch_key="
                           "model23_a", "model23_b", "model23_c", "model23_d",
                           "model23_e", "model23_f", "model23_g", "model23_h",
                           "model23_i", "model23_j", "model23_k", "model23_l",
-                          "model23_m"):
+                          "model23_m", "model23_n", "model23_o", "model23_q"):
             model_data = model23_data_transformer(model_data, calculate_composites = False, synthetic_N = synthetic_N, synthetic_Mtrue = synthetic_Mtrue, synthetic_rseed = synthetic_rseed)
         else:
             model_data = model23_data_transformer(model_data, calculate_composites = True, synthetic_N = synthetic_N, synthetic_Mtrue = synthetic_Mtrue, synthetic_rseed = synthetic_rseed)
