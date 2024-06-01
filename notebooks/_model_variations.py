@@ -2833,11 +2833,18 @@ def model23_n(model_data):
     _MODEL23_RZ_SIGMA = 0.4
     SAINT_PAIR_SCORE = jnp.log(saint_max_pair_score_edgelist)
     diag_indices = jnp.diag_indices(N)
+    flat2matrix_f = partial(flat2matrix, n = N)
 
-    RO_pairwise_matrix = flat2matrix(R0)
-    R_pairwise_matrix = flat2matrix(R)
-    zero_clipped_null_log_like_pairwise_matrix = flat2matrix(zero_clipped_null_log_like)
-    saint_max_pair_score_pairwise_matrix = flat2matrix(saint_max_pair_score_edgelist)
+    RO_pairwise_matrix = flat2matrix_f(R0)
+    R_pairwise_matrix = flat2matrix_f(R)
+    zero_clipped_null_log_like_pairwise_matrix = flat2matrix_f(zero_clipped_null_log_like)
+    saint_max_pair_score_pairwise_matrix = flat2matrix_f(saint_max_pair_score_edgelist)
+    
+    # cleanup 
+    del zero_clipped_null_log_like
+    del saint_max_pair_score_edgelist
+    del R
+    del R0
 
     # Sample z in matrix form
     z = numpyro.sample("z", dist.Normal(mu, sigma).expand([N, N])) 

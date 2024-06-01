@@ -89,6 +89,8 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
     direct_ij = align_reference_to_model(model_data, pdb_ppi_direct, mode="cullin")
 
     score_vs_ppv_plot(jax.random.PRNGKey(0), x["samples"], ef, direct_ij, save=save, o=o, suffix=suffix)
+    score_vs_tp_plot(jax.random.PRNGKey(0), x["samples"], ef, direct_ij, save=save, o=o, suffix=suffix)
+    score_vs_fp_plot(jax.random.PRNGKey(0), x["samples"], ef, direct_ij, save=save, o=o, suffix=suffix)
 
     logging.info("calculating ppv per chain based on amount of sampling")
     ppv_results_dict = ppv_per_chain_based_on_amount_of_sampling(x['samples']['z'] > 0.5, direct_ij, amount_of_sampling_list = None) 
@@ -126,6 +128,18 @@ def ppv_per_iteration_vectorized(aij_mat, refij):
 
 def ppv_per_iteration_vectorized_3d(aij_3dim, refij):
     f1 = jax.vmap(ppv, in_axes=(0, None))
+    f2 = jax.vmap(f1, in_axes=(1, None))
+    output = f2(aij_3dim, refij)
+    return output
+
+def tp_per_iteration_vectorized_3d(aij_3dim, refij):
+    f1 = jax.vmap(n_tp, in_axes=(0, None))
+    f2 = jax.vmap(f1, in_axes=(1, None))
+    output = f2(aij_3dim, refij)
+    return output
+
+def fp_per_iteration_vectorized_3d(aij_3dim, refij):
+    f1 = jax.vmap(n_fp, in_axes=(0, None))
     f2 = jax.vmap(f1, in_axes=(1, None))
     output = f2(aij_3dim, refij)
     return output
@@ -213,6 +227,34 @@ def ppv_per_chain_based_on_amount_of_sampling(
     results = metric_as_a_function_of_amount_of_sampling_per_chain(x, lambda x: ppv_per_iteration_vectorized(x, refij), amount_of_sampling_list)
     return results
 
+def score_vs_X_plot(rng_key, samples, ef, refij, Y, title, ylabel, prefix, save=None, o=None, N=100_000, suffix=""):
+    scores = ef["potential_energy"]
+    assert scores.ndim == 2
+    n_chains, n_iter = scores.shape
+    
+    Nsamples = n_chains * n_iter
+
+    indices = jax.random.permutation(rng_key, jnp.arange(Nsamples))[:N]
+
+    aij_mat = mv.Z2A(samples['z']) > 0.5
+    
+    Y_f = jax.jit(Y)
+    y = Y_f(aij_mat, refij)
+
+    assert scores.shape == y.shape, (scores.shape, y.shape)
+
+    scores_subsample = jnp.ravel(scores)[indices]
+
+    y_subsample = jnp.ravel(y)[indices]
+
+    fig, ax = plt.subplots()
+    ax.plot(scores_subsample, y_subsample, 'k.', alpha=0.2)
+    ax.set_xlabel("score")
+    ax.set_ylabel(ylabel)
+    ax.set_title(title)
+    save(prefix + suffix)
+
+
 def score_vs_ppv_plot(rng_key, samples, ef, refij, save=None, o=None, N=100_000, suffix=""):
     """
     Plot the score vs ppv for each chain
@@ -242,6 +284,9 @@ def score_vs_ppv_plot(rng_key, samples, ef, refij, save=None, o=None, N=100_000,
     ax.set_title("Score vs PPV")
     save("score_vs_ppv" + suffix)
 
+score_vs_ppv_plot = partial(score_vs_X_plot, Y=lambda x, y : ppv_per_iteration_vectorized_3d(x, y).T, title="Score vs PPV", ylabel="ppv", prefix="score_vs_ppv",)
+score_vs_tp_plot = partial(score_vs_X_plot, Y=lambda x, y: tp_per_iteration_vectorized_3d(x, y).T, title="Score vs TPs", ylabel="TPs", prefix="score_vs_tp",)
+score_vs_fp_plot = partial(score_vs_X_plot, Y=lambda x, y: fp_per_iteration_vectorized_3d(x, y).T, title="Score vs FPs", ylabel="FPs", prefix="score_vs_fp",)
 
 def errplot_from_av_std_dict(av_std_dict, xlabel, ylabel, title, savename, save=None, alpha=0.2):
     fig, ax = plt.subplots()
@@ -260,10 +305,10 @@ def n_tp(aij, refij):
     Return the values of the array where both are 1
     Boolean arrays
     """
-    return np.sum((aij == 1) &  (refij == 1))
+    return jnp.sum((aij == 1) &  (refij == 1))
 
 def n_fp(aij, refij):
-    return np.sum((aij == 1) & (refij == 0))
+    return jnp.sum((aij == 1) & (refij == 0))
 
 def n_edge(aij):
     return np.sum(aij > 0.5)
@@ -931,7 +976,7 @@ def _main(o, i, mode, merge = False):
         i_ = i
     
         if not _dev:
-            model_data_plots()
+            model_data_plots(model_data = model_data)
         # Get concatenated samples
 
         direct_ref = data_io.get_pdb_ppi_predict_direct_reference()
@@ -952,6 +997,8 @@ def _main(o, i, mode, merge = False):
             x2 = pkl.load(f)
 
         N = model_data['N']
+        #x = optional_flatten(x)
+        #x2 = optional_flatten(x2)
 
         def run_plots(x, suffix=""):
             # Unpack
@@ -1355,6 +1402,23 @@ def save_composite_table(model_data, o, samples):
     df = pd.DataFrame({"Nmax" : nmax, "av" : means, "std" : stds}, index=Ns) 
     outpath = str(o / "composite_N.tsv")
     df.to_csv(outpath, sep="\t")
+
+def optional_flatten(x):
+    """
+    If z is in matrix form, flatten it
+    """
+    samples = x["samples"]
+    temp = {}
+    flatf = jax.jit(mv.matrix2flat)
+    for key, val in samples.items():
+        shape = val.shape
+        if shape[-1] == shape[-2]:
+            for matrix in val:
+                flattend = flatf(matrix)
+    return x
+
+
+            
 
 _example = {"i" : "../cullin_run0/0_model23_ll_lp_13.pkl", "o": "../cullin_run0/"}
 
