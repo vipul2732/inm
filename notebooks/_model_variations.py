@@ -2518,8 +2518,8 @@ def model23_z_score(mu, M, debug = False):
         numpyro.deterministic("z_score", z_score)
     return z
 
-def model23_saint_score(aij, SAINT_PAIR_SCORE, debug = False):
-    sij = -jnp.sum((1-aij) * SAINT_PAIR_SCORE) 
+def model23_saint_score(aij, SAINT_PAIR_SCORE, weight = 1., debug = False):
+    sij = -jnp.sum((1-aij) * SAINT_PAIR_SCORE) * weight 
     numpyro.factor("sij", sij)
     if debug:
         numpyro.deterministic("sij_score", -sij)
@@ -2834,6 +2834,11 @@ def model23_n(model_data):
     SAINT_PAIR_SCORE = jnp.log(saint_max_pair_score_edgelist)
     diag_indices = jnp.diag_indices(N)
 
+    RO_pairwise_matrix = flat2matrix(R0)
+    R_pairwise_matrix = flat2matrix(R)
+    zero_clipped_null_log_like_pairwise_matrix = flat2matrix(zero_clipped_null_log_like)
+    saint_max_pair_score_pairwise_matrix = flat2matrix(saint_max_pair_score_edgelist)
+
     # Sample z in matrix form
     z = numpyro.sample("z", dist.Normal(mu, sigma).expand([N, N])) 
 
@@ -2842,6 +2847,10 @@ def model23_n(model_data):
     # Set the diagonal to 0
 
     aij = aij.at[diag_indices].set(0)
+    degree = jnp.sum(aij, axis = 1)
+
+    # Restrain the degree distribution to be somewhere around 0-5
+    numpyro.sample("degree", dist.Normal(degree, 2), obs=3)
 
 
 
