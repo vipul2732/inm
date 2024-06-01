@@ -87,6 +87,9 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
 
     pdb_ppi_direct = data_io.get_pdb_ppi_predict_direct_reference()
     direct_ij = align_reference_to_model(model_data, pdb_ppi_direct, mode="cullin")
+
+    score_vs_ppv_plot(jax.random.PRNGKey(0), x["samples"], ef, direct_ij, save=save, o=o)
+
     logging.info("calculating ppv per chain based on amount of sampling")
     ppv_results_dict = ppv_per_chain_based_on_amount_of_sampling(x['samples']['z'] > 0.5, direct_ij, amount_of_sampling_list = None) 
     errplot_from_av_std_dict(ppv_results_dict, "amount of sampling", "ppv", "PPV per chain", "ppv_per_chain" + suffix, save=save)
@@ -97,10 +100,6 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
     for key in ef:
         val = ef[key]
         caterrplot(val, "iteration", key, key, f"{key}_caterpill" + suffix)    
-    
-
-
-
     
 def ppv(aij, refij):
     """
@@ -209,6 +208,26 @@ def ppv_per_chain_based_on_amount_of_sampling(
             amount_of_sampling_list = _STD_AMOUNT_OF_SAMPING
     results = metric_as_a_function_of_amount_of_sampling_per_chain(x, lambda x: ppv_per_iteration_vectorized(x, refij), amount_of_sampling_list)
     return results
+
+def score_vs_ppv_plot(rng_key, samples, ef, refij, save=None, o=None, N=10_000):
+    """
+    Plot the score vs ppv for each chain
+    """
+
+    scores = ef["potential_energy"]
+    assert scores.ndim == 2
+    n_chains, n_iter = scores.shape
+    
+    Nsamples = n_chains * n_iter
+
+    indices = jax.random.permutation(rng_key, jnp.arange(Nsamples))[:N]
+
+    scores = jnp.ravel(scores)[indices]
+    aij_mat = mv.Z2A(samples['z']) > 0.5
+    ppv = ppv_per_iteration_vectorized(aij_mat, refij)
+    breakpoint()
+
+
 
 def errplot_from_av_std_dict(av_std_dict, xlabel, ylabel, title, savename, save=None, alpha=0.2):
     fig, ax = plt.subplots()
@@ -369,6 +388,313 @@ def align_reference_to_model(model_data, uref, mode="cullin",):
         k += 1
     assert j == n_nodes -1
     return reflist_out
+
+def run_multi_chain_version_of_single_chain_plots(x, model_data, save, o, suffix=""):
+    # Unpack
+    samples = x['samples']
+    ef = x['extra_fields']
+
+    nchains, niter, M = samples['z'].shape
+    a = mv.Z2A(samples['z']) 
+    mean = np.mean(a, axis=0) 
+
+    a_typed = np.array(a > 0.5)
+
+    # generate controls for a single chain
+    control_ij = a_typed[0, 0, :] 
+    control_last_ij = a_typed[0, -1, :]
+
+    #direct_tps = np.array(n_tps(a_typed, direct_ij))
+    #direct_fps = np.array(n_fps(a_typed, direct_ij))
+
+    rng_key = jax.random.PRNGKey(122387)
+    direct_bootstrap_reference = bootstrap_samples(rng_key, direct_ij)
+    n_boostraps, n_true = direct_bootstrap_reference.shape
+
+    prev_bootstrap_direct_tps = None 
+    for i in range(n_boostraps):
+        bootstrap_direct_tps = np.array(n_tps(a_typed, direct_bootstrap_reference[i, :]))
+        if prev_bootstrap_direct_tps is None:
+            prev_bootstrap_direct_tps = bootstrap_direct_tps
+        else:
+            prev_bootstrap_direct_tps = np.concatenate([prev_bootstrap_direct_tps, bootstrap_direct_tps])
+
+    prev_bootstrap_direct_tps = np.ravel(prev_bootstrap_direct_tps) 
+    direct_mu_tps = np.mean(direct_tps)
+    direct_sigma_tps = np.mean(direct_tps)
+
+    boot_mu_tps = np.mean(prev_bootstrap_direct_tps)
+    boot_mu_sigma_tps = np.std(prev_bootstrap_direct_tps)
+
+    # Make an error bar plot
+    fig, ax = plt.subplots()
+    x = [0, 1]
+    y = [direct_mu_tps, boot_mu_tps]
+    yerr = [direct_sigma_tps, boot_mu_sigma_tps]
+    ax.errorbar(x, y, yerr=yerr, fmt='o')
+    ax.set_title("Quantification of direct TPs vs bootstrapped reference")
+    ax.set_ylabel("TPs")
+    labels = ["direct", "bootstrap"]
+    plt.xticks(x, labels)
+    save("direct_vs_bootstrap_tps")
+
+    plt.hist(prev_bootstrap_direct_tps, bins = 100, alpha=0.5, density=True, label="bootstrap direct TPs")
+    plt.hist(direct_tps, alpha=0.5, bins = 100, density=True, label="direct TPs")
+    plt.xlabel("direct TPs")
+    plt.ylabel("density")
+    plt.legend()
+    save("direct_vs_bootstrap_tps_hist")
+
+    costructure_tps = np.array(n_tps(a_typed, costructure_ij))
+    costructure_fps = np.array(n_fps(a_typed, costructure_ij))
+
+    control_first_tps = np.array(n_tps(a_typed, control_ij))
+    control_first_fps = np.array(n_fps(a_typed, control_ij))
+
+    control_last_tps = np.array(n_tps(a_typed, control_last_ij))
+    control_last_fps = np.array(n_fps(a_typed, control_last_ij))
+
+    shuff_direct_tps = np.array(n_tps(a_typed, shuff_direct_ij))
+    shuff_direct_fps = np.array(n_fps(a_typed, shuff_direct_ij))
+
+    shuff_costructure_tps = np.array(n_tps(a_typed, shuff_costructure_ij))
+    shuff_costructure_fps = np.array(n_fps(a_typed, shuff_costructure_ij))
+    
+    n_total_edges = np.array(n_edges(a_typed))
+    score = np.array(ef['potential_energy'])
+    
+    plot_plot(direct_tps,       score, "k.", "direct tp edges",       "score", "direct_tp_vs_score" + suffix) 
+    plot_plot(direct_fps,       score, "k.", "direct fp edges",       "score", "direct_fp_vs_score" + suffix) 
+    
+    plot_plot(costructure_tps,  score, "k.", "costructure tp edges",  "score", "costructure_tp_vs_score" + suffix) 
+    plot_plot(costructure_fps,  score, "k.", "costructure fp edges",  "score", "costructure_fp_vs_score" + suffix) 
+
+    plot_plot(control_first_tps,      score, "k.", "CONTROL FIRST position tp edges", "score", "control_tp_vs_score" + suffix) 
+    plot_plot(control_first_fps,      score, "k.", "CONTROL FIRST position fp edges", "score", "control_fp_vs_score" + suffix) 
+
+    plot_plot(control_last_tps,      score, "k.", "CONTROL LAST position tp edges", "score", "control_last_tp_vs_score" + suffix) 
+    plot_plot(control_last_fps,      score, "k.", "CONTROL LAST position fp edges", "score", "control_last_fp_vs_score" + suffix) 
+
+    plot_plot(shuff_direct_tps, score, "k.", "shuff direct tp edges", "score", "shuff_direct_tp_vs_score" + suffix) 
+    plot_plot(shuff_direct_fps, score, "k.", "shuff direct fp edges", "score", "shuff_direct_fp_vs_score" + suffix) 
+
+    plot_plot(shuff_costructure_tps, score, "k.", "shuff costructure tp edges", "score", "shuff_costructure_tp_vs_score" + suffix) 
+    plot_plot(shuff_costructure_fps, score, "k.", "shuff costructure fp edges", "score", "shuff_costructure_fp_vs_score" + suffix) 
+
+    plot_plot(n_total_edges,    score, "k.", "N edges", "score", "n_edges_vs_score" + suffix)
+
+    for key, val in dict(
+            direct_tps = direct_tps,
+            direct_fps = direct_fps,
+            costructure_tps = costructure_tps,
+            costructure_fps = costructure_fps,
+            control_first_tps = control_first_tps,
+            control_first_fps = control_first_fps,
+            control_last_tps = control_last_tps,
+            control_last_fps = control_last_fps,
+            shuff_direct_tps = shuff_direct_tps,
+            shuff_direct_fps = shuff_direct_fps,
+            shuff_costructure_tps = shuff_costructure_tps,
+            shuff_costructure_fps = shuff_costructure_fps,
+            n_total_edges = n_total_edges,
+            ).items():
+        plot_caterpillar(
+            y = val,
+            xlabel = "iteration",
+            ylabel = key,
+            title = key,
+            savename = f"{key}_caterpill" + suffix,)
+
+
+    # Plot a table of the average value of every composite N
+    if "new_composite_dict_norm_approx" in model_data:
+        save_composite_table(model_data, o, samples)
+    # Plot a graph of composite data satisfaction
+
+    # Plot the average adjacency matrix  
+
+    # Plot a histogram of edges
+
+    plot_histogram(
+            x = mean,
+            xlabel = "mean edge value",
+            ylabel = "count",
+            savename = "edge_score_hist" + suffix,
+            hist_range = (0, 1),)
+
+    var = np.var(a, axis=0) 
+    A = mv.flat2matrix(mean, N)
+    V = mv.flat2matrix(var, N)
+    plot_matrix(
+            matrix = mv.flat2matrix(a[0, :] , N), 
+            xlabel = "node",
+            title = "Initial value",
+            savename = "initial_value" + suffix,
+            )
+    plot_matrix(
+            matrix = np.array(A),
+            xlabel = "node",
+            title = "Average edge score",
+            savename = "mean_adjacency" + suffix,)
+
+    # Energy histogram
+    energy = np.array(ef["energy"])
+    plot_histogram(
+            x = energy,
+            xlabel = "energy",
+            ylabel = "count",
+            title = "H(q,p) = U(q) + K(p)", 
+            hist_range = None,
+            savename = "energy" + suffix,)
+    
+    x_cater = np.arange(len(ef['energy'])) 
+    # Energy Caterpillar
+    plot_caterpillar(
+            y = energy, 
+            xlabel = "iteration",
+            ylabel = "energy",
+            title = "H(q,p) = U(q) + K(p)",
+            savename = "energy_caterpill" + suffix,)
+
+    # Mean acceptance histogram
+    plot_histogram(
+            x = np.array(ef['mean_accept_prob']),
+            xlabel = "mean acceptance probability",
+            ylabel = "count",
+            title = None,
+            hist_range = (0.5, 1.),
+            savename = "mean_accept_prob" + suffix,)
+
+    # potential energy 
+    pe = np.array(ef['potential_energy'])
+
+    plot_histogram(
+            x = pe,
+            xlabel = "potential energy",
+            ylabel = "count",
+            title = "U",
+            hist_range = None,
+            savename = "potential_energy" + suffix,)
+
+    plot_caterpillar(
+            y = pe,
+            xlabel = "iteration",
+            ylabel = "potential energy",
+            title = "Score",
+            savename = "potential_energy_caterpill" + suffix,)
+
+    ke = energy - pe
+    plot_histogram(
+            x = ke,
+            xlabel = "kinetic energy",
+            ylabel = "count",
+            title = "k",
+            hist_range = None,
+            savename = "kinetic_energy" + suffix,)
+    
+    plot_caterpillar(
+            y = ke,
+            xlabel = "iteration",
+            ylabel = "kinetic energy",
+            title = "k",
+            savename = "kinetic_energy_caterpill" + suffix,)
+    
+    plot_histogram(
+            x = np.array(ef['diverging']),
+            xlabel = "diverging",
+            ylabel = "count",
+            savename = "diverging" + suffix,)
+    
+    plot_histogram(
+            x = np.array(ef['accept_prob']),
+            xlabel = "acceptance probability",
+            ylabel = "count",
+            savename = "accept_prob" + suffix,)
+
+    for key in ("accept_prob", "mean_accept_prob", "diverging", "num_steps",
+                "r_score", "sij_score", "z_score", "n_edges_score", "grad_r_score", "grad_z_score"):
+        plot_stuff = False
+        if (key in ef):  
+            d = ef
+            plot_stuff = True
+        elif (key in samples):
+            d = samples
+            plot_stuff = True
+        
+        if plot_stuff:
+            val = d[key]
+            plot_caterpillar(
+                    y = val,
+                    xlabel = "iteration",
+                    ylabel = key,
+                    title = key,
+                    savename = f"{key}_caterpill" + suffix,)
+
+    # Plot the hist
+    """
+    # Animation 
+    fig, ax = plt.subplots()
+    mat = ax.matshow(np.zeros((N, N)))
+    
+    def animate(i):
+        a_i = mv.flat2matrix(a[i, :], N)
+        mat = ax.matshow(np.array(a_i))
+        return mat,
+
+    nsamples, nedges = samples['z'].shape 
+    ani = animation.FuncAnimation(fig, animate, repeat=True,
+       frames=nsamples, interval=50)
+
+    # To save the animation using Pillow as a gif
+    writer = animation.PillowWriter(fps=15,
+                                     metadata=dict(artist='Me'),
+                                     bitrate=1800)
+
+    ani.save('edge_matrix.gif', writer=writer)
+    """
+    plot_matrix(
+            matrix = np.array(V),
+            title = "Edge variance",
+            xlabel = "node",
+            savename = "var_adjacency" + suffix,)
+
+    # Mean Variance correlation plot
+    plot_plot(
+            x = mean,
+            y = var,
+            fmt = 'k.',
+            xlabel = "Edge mean",
+            ylabel = "Edge variance",
+            savename = "mean_var_scatter" + suffix,)
+
+    # Distribution of u 
+    if 'u' in samples:
+        u = samples['u']
+        plot_histogram(
+                x = u,
+                xlabel = "$u$",
+                ylabel = "count",
+                title = "Nuisance variable $u$",
+                hist_range = None, #(0, 0.005),
+                savename = "hist_u" + suffix,) 
+    w = []
+    a = []
+    b = []
+    node_idx2name = model_data['node_idx2name']
+
+    viral_proteins = ["vifprotein", "tatprotein", "nefprotein", "gagprotein",
+                      "polpolyprotein"]
+
+    for i in range(N):
+        for j in range(0, i):
+            w.append(A[i, j])
+            a.append(node_idx2name[i])
+            b.append(node_idx2name[j])
+    
+    df = pd.DataFrame({'a': a, 'b': b, 'w': w})
+    base_name = str(o / i_.stem)
+    df.to_csv(base_name + f"edge_score_table{suffix}.tsv", sep="\t", index=None)
+
 
     
 def _main(o, i, mode, merge = False):
@@ -967,8 +1293,14 @@ def _main(o, i, mode, merge = False):
         fplot(x, suffix="_w_warmup")
         fplot(x2)
 
-        run_multi_chain_version_of_single_chain_plots(x, suffix="_w_warmup")
-        run_multi_chain_version_of_single_chain_plots(x)
+        gplot = partial(
+            run_multi_chain_version_of_single_chain_plots,
+            model_data = model_data,
+            save = save,
+            o = o)
+                
+        gplot(x = x, suffix = "_w_warmup")
+        gplot(x2)
 
 
 
@@ -977,6 +1309,8 @@ def _main(o, i, mode, merge = False):
     else:
         multi_chain_sampling_analysis()
     #return samples
+
+
 
 
 def save_composite_table(model_data, o, samples):
