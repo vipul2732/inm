@@ -88,7 +88,7 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
     pdb_ppi_direct = data_io.get_pdb_ppi_predict_direct_reference()
     direct_ij = align_reference_to_model(model_data, pdb_ppi_direct, mode="cullin")
 
-    pdb_ppi_costructure = data_io.get_pdb_ppi_predict_costructure_reference()
+    pdb_ppi_costructure = data_io.get_pdb_ppi_predict_cocomplex_reference()
     costructure_ij = align_reference_to_model(model_data, pdb_ppi_costructure, mode="cullin")
 
     score_vs_ppv_plot(jax.random.PRNGKey(0), x["samples"], ef, direct_ij, save=save, o=o, suffix=suffix)
