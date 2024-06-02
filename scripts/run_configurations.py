@@ -272,7 +272,8 @@ mini_model23_m = from_template(
 mini_model23_n = from_template(
     mini_model23_m,
     model_name = "model23_n",
-    model_output_dirpath = "../results/mini_model23_n")
+    model_output_dirpath = "../results/mini_model23_n",
+    num_samples = 500,)
 
 mini_model23_n_synthetic = from_template(
     mini_model23_n,

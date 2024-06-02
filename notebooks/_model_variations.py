@@ -2827,7 +2827,7 @@ def model23_n(model_data):
      R0, null_dist, zero_clipped_null_log_like, disconectivity_distance, max_distance, saint_max_pair_score_edgelist) = model23_unpack_model_data(model_data)
 
      # define global variables
-    mu = 0.3
+    mu = 0.1
     sigma = 1.
     _MODEL23_SR_WEIGHT = 1.1
     _MODEL23_RZ_SIGMA = 0.4
@@ -2839,6 +2839,8 @@ def model23_n(model_data):
     R_pairwise_matrix = flat2matrix_f(R)
     zero_clipped_null_log_like_pairwise_matrix = flat2matrix_f(zero_clipped_null_log_like)
     saint_max_pair_score_pairwise_matrix = flat2matrix_f(saint_max_pair_score_edgelist)
+    saint_max_pair_score_pairwise_matrix = saint_max_pair_score_pairwise_matrix.at[diag_indices].set(0)
+    R_pairwise_matrix = R_pairwise_matrix.at[diag_indices].set(0)
     
     # cleanup 
     del zero_clipped_null_log_like
@@ -2851,29 +2853,56 @@ def model23_n(model_data):
 
     # Define aij from z
     aij = Z2A(z)
-    # Set the diagonal to 0
+    # # Set the diagonal to 0
 
-    #aij = aij.at[diag_indices].set(0)
+    aij = aij.at[diag_indices].set(0)
     aij = jnp.tril(aij, k=-1)
     aij = (aij + aij.T)
     degree = jnp.sum(aij, axis = 1)
 
     # Restrain the degree distribution to be somewhere around 0-5
-    degree_score = jnp.sum(dist.Normal(degree, 2).log_prob(3))
+    degree_expected = jnp.ones(N) * 3
+    degree_restraint = dist.Normal(degree_expected, 3)
+    degree_score = jnp.sum(degree_restraint.log_prob(degree))
     numpyro.factor("degree_score", degree_score)
+
+    n_edges = jnp.sum(degree) / 2
+    n_edges_restraint = dist.Normal(300, 100)
+    n_edges_score = n_edges_restraint.log_prob(n_edges)
+    numpyro.factor("n_edges_score", n_edges_score)
     
     # Pull edges towards the profile similarity
     # If profile similiary is 1 N(R | 1, 0.3)
     # 
     # p(R | aij)
-    r_score = jnp.sum(dist.Normal(aij, 0.3).log_prob(R_pairwise_matrix))
+    #r_score = jnp.sum(dist.Normal(aij, 0.3).log_prob(R_pairwise_matrix))
+    #numpyro.factor("r_score", r_score)
+
+    # r_z score
+    # A restraint that ranks edges as more likely if they have a high profile similarity but also
+    # has a large std (near 1) to allow edges to be 0 even in cases with high profile similarity
+    # The score also allows edges to be 1 in cases with low profile similarity
+    # This case is taken care of by the r_restraint
+
+    r_z_restraint = dist.Normal(R_pairwise_matrix, 0.7)
+    r_z_score = jnp.sum(r_z_restraint.log_prob(z))
+    numpyro.factor("r_z_score", r_z_score)
+
+    r_restraint = dist.Normal(R_pairwise_matrix - 0.5, R_pairwise_matrix**2 + 1e-2)
+    r_score = jnp.sum(r_restraint.log_prob(z))
     numpyro.factor("r_score", r_score)
+
+    # N edges restraint
+    #n_edges = jnp.sum(aij) // 2
+    #e_score = jnp.sum(dist.Normal(300, 100).log_prob(n_edges))
+    #numpyro.factor("n_edges_score", e_score)
     
     # Variance scales with the saint pair score
     # effect is weaker for high saint scores - allowing and edge to be 0 or 1
     # low saint scores centered near 0 have low variance allowing edges to only take on the value 0
     # p(aij | s)
-    s_score = jnp.sum(dist.Normal(saint_max_pair_score_pairwise_matrix, saint_max_pair_score_pairwise_matrix ** 2 + 1e-2).log_prob(aij))
+    s_restraint = dist.Normal(saint_max_pair_score_pairwise_matrix-0.5, saint_max_pair_score_pairwise_matrix ** 2 + 1e-2)
+    s_score = jnp.sum(s_restraint.log_prob(z))
     numpyro.factor("s_score", s_score)
 
 

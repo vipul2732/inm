@@ -22,6 +22,7 @@ from functools import partial
 
 from undirected_edge_list import UndirectedEdgeList
 import _model_variations as mv
+import generate_sampling_figures as gsf
 import tpr_ppr
 import matplotlib.pyplot as plt
 
@@ -428,6 +429,7 @@ def model23_results2edge_list(modeling_output_dirpath, fbasename, discard_first_
         d = pkl.load(f)
     with open(modeling_output_dirpath / f"{fbasename}_model_data.pkl", "rb") as f:
         model_data = pkl.load(f)
+    d = gsf.optional_flatten(d)
     # Plot the average adjacency matrix  
     samples = d['samples']
     nsamples, M = samples['z'].shape
@@ -787,9 +789,6 @@ def _main(i, fbasename):
     logging.info(f"    fbasename:{fbasename}")
     i = Path(i)
     cullin_standard(i, fbasename)
-
-
-
 
 if __name__ == "__main__":
     main()
