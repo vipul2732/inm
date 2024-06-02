@@ -1228,7 +1228,7 @@ def _main(o, i, mode, merge = False):
                     savename = "accept_prob" + suffix,)
 
             for key in ("accept_prob", "mean_accept_prob", "diverging", "num_steps",
-                        "r_score", "sij_score", "z_score", "n_edges_score", "grad_r_score", "grad_z_score",
+                    "r_score", "sij_score", "z_score", "n_edges_score", "grad_r_score", "grad_z_score",
                         "s_score"):
                 plot_stuff = False
                 if (key in ef):  
@@ -1357,6 +1357,8 @@ def _main(o, i, mode, merge = False):
             x2 = pkl.load(f)
         
         N = model_data['N']
+        x = optional_flatten(x)
+        x2 = optional_flatten(x2)
 
         multi_chain_validate_shapes(x, model_data)
         multi_chain_validate_shapes(x2, model_data)
@@ -1423,10 +1425,20 @@ def optional_flatten(x):
     for key, val in samples.items():
         shape = val.shape
         if shape[-1] == shape[-2]:
-            for matrix in val:
-                flattend = flatf(matrix)
-                flattened_lst.append(flattend)
-            temp[key] = np.array(flattened_lst)
+            if val.ndim == 3: # (iter, N, N)
+                for matrix in val:
+                    flattend = flatf(matrix)
+                    flattened_lst.append(flattend)
+                temp[key] = np.array(flattened_lst)
+            elif val.ndim == 4: #(chain, iter, N, N)
+                n_chains, n_iter, N, _ = val.shape
+                output = np.zeros((n_chains, n_iter, N*(N-1)//2))
+                for i in range(n_chains):
+                    for j in range(n_iter):
+                        output[i, j, :] = flatf(val[i, j, :, :])
+                temp[key] = output
+            else:
+                raise ValueError(f"Unknown shape {shape} for key {key}")
     for key in temp:
         x["samples"][key] = temp[key]
     return x
