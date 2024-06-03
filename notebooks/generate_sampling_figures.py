@@ -70,8 +70,8 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
     """
     def caterrplot(y, xlabel, ylabel, title, savename, alpha = 0.2, save=save):
         fig, ax = plt.subplots()
-        nchains, niter = y.shape
-        x = np.arange(niter)
+        nchains, n_iter = y.shape
+        x = np.arange(n_iter)
         ax.errorbar(x, np.mean(y, axis=0), yerr=np.std(y, axis=0), fmt='o', alpha=alpha)
         ax.set_xlabel(xlabel)
         ax.set_ylabel(ylabel)
@@ -100,37 +100,128 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
     costructure_ij = align_reference_to_model(model_data, pdb_ppi_costructure, mode="cullin")
     end_time = time.time()
     logging.info(f"Time to run align_reference_to_model: {end_time - start_time}")
+
+    def score_vs_plot(rng_key, stat_mat, score_mat, ylabel, title, save,suffix):
+        n_chains, n_iter = stat_mat.shape
+        nvalues = n_chains * n_iter
+        indices = jax.random.permutation(rng_key, jnp.arange(nvalues))[:100_000]
+        scores_subsample = np.array(jnp.ravel(score_mat)[indices])
+        stat_subsample =   np.array(jnp.ravel(stat_mat )[indices])
+
+        fig, ax = plt.subplots()
+        ax.plot(scores_subsample, stat_subsample, 'k.', alpha=0.2)
+        ax.set_xlabel("score")
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        save(title + suffix)
+
+    def per_chain_amount_of_sampling(stat_mat, transform_fn = lambda x: x, every=100):
+        """
+        state_mat : (n_chains, n_iter) 
+        transform_fn : F: S -> A 
+        """
+        n_chains, n_iter = stat_mat.shape
+        every = np.concatenate([np.array([1]), np.arange(every, n_iter, every)])  
+        
+        out = np.zeros((len(every), 2)) 
+        for i, N in enumerate(every):
+            temp = transform_fn(stat_mat[:, 0:N])
+            mean = np.mean(temp, axis=0)
+            std = np.std(temp, axis=0)
+            out[i, 0] = mean 
+            out[i, 1] = std
+        return out, every
     
-    start_time = time.time()
-    score_vs_ppv_plot(jax.random.PRNGKey(0), x["samples"], ef, direct_ij, save=save, o=o, suffix="_direct_" + suffix)
-    score_vs_tp_plot( jax.random.PRNGKey(0), x["samples"], ef, direct_ij, save=save, o=o, suffix="_direct_" + suffix)
-    score_vs_fp_plot( jax.random.PRNGKey(0), x["samples"], ef, direct_ij, save=save, o=o, suffix="_direct_" + suffix)
-    score_vs_tn_plot( jax.random.PRNGKey(0), x["samples"], ef, direct_ij, save=save, o=o, suffix="_direct_" + suffix)
-    score_vs_fn_plot( jax.random.PRNGKey(0), x["samples"], ef, direct_ij, save=save, o=o, suffix="_direct_" + suffix)
-    end_time = time.time()
-    logging.info(f"Time to run score_vs_X_plot on direct: {end_time - start_time}")
+    def plot_per_chain_amount_of_sampling(every, out, xlabel, ylabel, title, save, suffix):
+        fig, ax = plt.subplots()
+        ax.errorbar(every, out[:, 0], yerr=out[:, 1], fmt='.', capsize=2, alpha=0.2, color="k")
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        save(title + suffix)
+
+    def run_plots(x, ef, refij, save, o, jf_tp, jf_tn, M, suffix):
+        start_time = time.time()
+
+        # calculate positive predictions
+        aij_mat = mv.Z2A(x['samples']['z']) > 0.5
+        n_chain, n_iter, M = aij_mat.shape
+
+        n_positives_mat = jnp.sum(aij_mat, axis=2)
+
+        tp_mat = jf_tp(aij_mat, refij)
+        out, every = per_chain_amount_of_sampling(tp_mat, transform_fn=lambda x: jnp.max(x, axis=1))
+        plot_per_chain_amount_of_sampling(every, out, "amount of sampling", "TPs", "Top TPs per chain", save, suffix)
+        fp_mat = n_positives_mat - tp_mat 
+        out, every = per_chain_amount_of_sampling(fp_mat, transform_fn=lambda x: jnp.min(x, axis=1))
+        plot_per_chain_amount_of_sampling(every, out, "amount of sampling", "FPs", "Bottom FPs per chain", save, suffix)
+        ppv_mat = tp_mat / (tp_mat + fp_mat)
+        out, every = per_chain_amount_of_sampling(ppv_mat, transform_fn=lambda x: jnp.max(x, axis=1))
+        plot_per_chain_amount_of_sampling(every, out, "amount of sampling", "PPV", "Top PPV per chain", save, suffix)
+
+        score_mat = ef["potential_energy"]
+        assert score_mat.shape == ppv_mat.shape
+        rng_key = jax.random.PRNGKey(0)
+        rng_key, key = jax.random.split(rng_key)
+        score_vs_plot(rng_key, tp_mat, score_mat, "TPs", "TPs vs score", save, suffix)
+        rng_key, key = jax.random.split(key)
+        score_vs_plot(rng_key, fp_mat, score_mat, "FPs", "FPs vs score", save, suffix)
+        rng_key, key = jax.random.split(key)
+        score_vs_plot(rng_key, ppv_mat, score_mat, "PPV", "PPV vs score", save, suffix)
+        del fp_mat
+        del tp_mat
+        del ppv_mat
+        n_negatives_mat = M - n_positives_mat 
+        del n_positives_mat
+
+        tn_mat = jf_tn(aij_mat, refij)
+        out, every = per_chain_amount_of_sampling(tn_mat, transform_fn=lambda x: jnp.max(x, axis=1))
+        fn_mat = n_negatives_mat - tn_mat
+        out, every = per_chain_amount_of_sampling(fn_mat, transform_fn=lambda x: jnp.min(x, axis=1))
+        plot_per_chain_amount_of_sampling(every, out, "amount of sampling", "Bottom FNs", "Bottom FNs per chain", save, suffix)
+        del n_negatives_mat
+        rng_key, key = jax.random.split(key)
+        score_vs_plot(rng_key, tn_mat, score_mat, "TNs", "TNs vs score", save, suffix)
+        rng_key, key = jax.random.split(key)
+        score_vs_plot(rng_key, fn_mat, score_mat, "FNs", "FNs vs score", save, suffix)
     
-    start_time = time.time()
-    score_vs_ppv_plot(jax.random.PRNGKey(0), x["samples"], ef, costructure_ij, save=save, o=o, suffix="_co_structure" + suffix)
-    score_vs_tp_plot( jax.random.PRNGKey(0), x["samples"], ef, costructure_ij, save=save, o=o, suffix="_co_structure" + suffix)
-    score_vs_fp_plot( jax.random.PRNGKey(0), x["samples"], ef, costructure_ij, save=save, o=o, suffix="_co_structure" + suffix)
-    score_vs_tn_plot( jax.random.PRNGKey(0), x["samples"], ef, costructure_ij, save=save, o=o, suffix="_co_structure" + suffix)
-    score_vs_fn_plot( jax.random.PRNGKey(0), x["samples"], ef, costructure_ij, save=save, o=o, suffix="_co_structure" + suffix)
-    end_time = time.time()
-    logging.info(f"Time to run score_vs_X_plot on costructure: {end_time - start_time}")
+    jf_tp = jax.jit(lambda x,y :tp_per_iteration_vectorized_3d(x, y).T)
+    jf_tn = jax.jit(lambda x,y :tn_per_iteration_vectorized_3d(x, y).T)
+    M = model_data["M"]
+    run_plots(x, ef, direct_ij, save, o,  jf_tp, jf_tn, M, suffix="_direct" + suffix)
+    run_plots(x, ef, costructure_ij, save, o,  jf_tp, jf_tn, M, suffix="_costructure" + suffix)
+    
+
+    #start_time = time.time()
+    #score_vs_ppv_plot(jax.random.PRNGKey(0), x["samples"], ef, direct_ij, save=save, o=o, suffix="_direct_" + suffix)
+    #score_vs_tp_plot( jax.random.PRNGKey(0), x["samples"], ef, direct_ij, save=save, o=o, suffix="_direct_" + suffix)
+    #score_vs_fp_plot( jax.random.PRNGKey(0), x["samples"], ef, direct_ij, save=save, o=o, suffix="_direct_" + suffix)
+    #score_vs_tn_plot( jax.random.PRNGKey(0), x["samples"], ef, direct_ij, save=save, o=o, suffix="_direct_" + suffix)
+    #score_vs_fn_plot( jax.random.PRNGKey(0), x["samples"], ef, direct_ij, save=save, o=o, suffix="_direct_" + suffix)
+    #end_time = time.time()
+    #logging.info(f"Time to run score_vs_X_plot on direct: {end_time - start_time}")
+    
+    #start_time = time.time()
+    #score_vs_ppv_plot(jax.random.PRNGKey(0), x["samples"], ef, costructure_ij, save=save, o=o, suffix="_co_structure" + suffix)
+    #score_vs_tp_plot( jax.random.PRNGKey(0), x["samples"], ef, costructure_ij, save=save, o=o, suffix="_co_structure" + suffix)
+    #score_vs_fp_plot( jax.random.PRNGKey(0), x["samples"], ef, costructure_ij, save=save, o=o, suffix="_co_structure" + suffix)
+    #score_vs_tn_plot( jax.random.PRNGKey(0), x["samples"], ef, costructure_ij, save=save, o=o, suffix="_co_structure" + suffix)
+    #score_vs_fn_plot( jax.random.PRNGKey(0), x["samples"], ef, costructure_ij, save=save, o=o, suffix="_co_structure" + suffix)
+    #end_time = time.time()
+    #logging.info(f"Time to run score_vs_X_plot on costructure: {end_time - start_time}")
 
 
-    logging.info("calculating ppv per chain based on amount of sampling")
-    start_time = time.time()
-    ppv_results_dict = ppv_per_chain_based_on_amount_of_sampling(x['samples']['z'] > 0.5, direct_ij, amount_of_sampling_list = None) 
-    errplot_from_av_std_dict(ppv_results_dict, "amount of sampling", "ppv", "PPV per chain", "ppv_per_chain" + suffix, save=save)
-    end_time = time.time()
-    logging.info(f"Time to run ppv_per_chain_based_on_amount_of_sampling: {end_time - start_time}")
-    start_time = time.time()
-    top_ppv_dict = top_ppv_per_chain_based_on_amount_of_sampling(x['samples']['z'] > 0.5, direct_ij, amount_of_sampling_list = None)
-    errplot_from_av_std_dict(top_ppv_dict, "amount of sampling", "top ppv", "Top PPV per chain", "top_ppv_per_chain" + suffix, save=save)
-    end_time = time.time()
-    logging.info(f"Time to run top_ppv_per_chain_based_on_amount_of_sampling: {end_time - start_time}")
+    #logging.info("calculating ppv per chain based on amount of sampling")
+    #start_time = time.time()
+    #ppv_results_dict = ppv_per_chain_based_on_amount_of_sampling(x['samples']['z'] > 0.5, direct_ij, amount_of_sampling_list = None) 
+    #errplot_from_av_std_dict(ppv_results_dict, "amount of sampling", "ppv", "PPV per chain", "archive_ppv_per_chain" + suffix, save=save)
+    #end_time = time.time()
+    #logging.info(f"Time to run ppv_per_chain_based_on_amount_of_sampling: {end_time - start_time}")
+    #start_time = time.time()
+    #top_ppv_dict = top_ppv_per_chain_based_on_amount_of_sampling(x['samples']['z'] > 0.5, direct_ij, amount_of_sampling_list = None)
+    #errplot_from_av_std_dict(top_ppv_dict, "amount of sampling", "top ppv", "Top PPV per chain", "archive_top_ppv_per_chain" + suffix, save=save)
+    #end_time = time.time()
+    #logging.info(f"Time to run top_ppv_per_chain_based_on_amount_of_sampling: {end_time - start_time}")
 
     start_time = time.time()
     k = 0
@@ -247,14 +338,14 @@ def best_score_per_chain_based_on_amount_of_sampling(
 def top_ppv_per_chain_based_on_amount_of_sampling(
         x, refij, amount_of_sampling_list = None):
     if x.ndim == 3:
-        nchains, niter, vdim = x.shape
+        nchains, n_iter, vdim = x.shape
     elif x.ndim == 4:
-        nchains, niter, N, _ = x.shape
+        nchains, n_iter, N, _ = x.shape
     else:
         raise ValueError("Only 3 or 4 dimensions are supported")
     if amount_of_sampling_list is None:
-        if niter > 2_000:
-            amount_of_sampling_list = [1] + list(np.arange(10, niter, 1_000)) 
+        if n_iter > 2_000:
+            amount_of_sampling_list = [1] + list(np.arange(10, n_iter, 1_000)) 
         else:
             amount_of_sampling_list = _STD_AMOUNT_OF_SAMPING
     results = metric_as_a_function_of_amount_of_sampling_per_chain(x, lambda x: dim_aware_max(ppv_per_iteration_vectorized(x, refij)), amount_of_sampling_list)
@@ -276,7 +367,7 @@ def ppv_per_chain_based_on_amount_of_sampling(
         n_chains, n_iter, _ = x.shape
     if amount_of_sampling_list is None:
         if n_iter > 2_000:
-            amount_of_sampling_list = [1] + list(np.arange(10, niter, 1_000)) 
+            amount_of_sampling_list = [1] + list(np.arange(10, n_iter, 1_000)) 
         else:
             amount_of_sampling_list = _STD_AMOUNT_OF_SAMPING
     results = metric_as_a_function_of_amount_of_sampling_per_chain(x, lambda x: ppv_per_iteration_vectorized(x, refij), amount_of_sampling_list)
@@ -379,7 +470,7 @@ def n_edge(aij):
 def merged_results_two_subsets_scores_hist_and_test(merged_results, save=None, o = None):
     scores = merged_results["extra_fields"]["potential_energy"]
     
-    nchains, niter = scores.shape
+    nchains, n_iter = scores.shape
     scores_flat = np.ravel(scores)
     N_scores = len(scores_flat)
     midpoint = N_scores // 2
@@ -527,7 +618,7 @@ def run_multi_chain_version_of_single_chain_plots(x, model_data, save, o, suffix
     samples = x['samples']
     ef = x['extra_fields']
 
-    nchains, niter, M = samples['z'].shape
+    nchains, n_iter, M = samples['z'].shape
     a = mv.Z2A(samples['z']) 
     mean = np.mean(a, axis=0) 
 
