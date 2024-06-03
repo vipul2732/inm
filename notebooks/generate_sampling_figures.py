@@ -218,7 +218,12 @@ def best_score_per_chain_based_on_amount_of_sampling(
 
 def top_ppv_per_chain_based_on_amount_of_sampling(
         x, refij, amount_of_sampling_list = None):
-    nchains, niter, vdim = x.shape
+    if x.ndim == 3:
+        nchains, niter, vdim = x.shape
+    elif x.ndim == 4:
+        nchains, niter, N, _ = x.shape
+    else:
+        raise ValueError("Only 3 or 4 dimensions are supported")
     if amount_of_sampling_list is None:
         if niter > 2_000:
             amount_of_sampling_list = _STD_AMOUNT_OF_SAMPLING2
@@ -1418,6 +1423,7 @@ def multi_chain_validate_shapes(x, model_data):
     ef = x['extra_fields']
 
     n_chains, n_iter, M = samples['z'].shape
+    assert M == model_data['M'], (M, model_data["M"])
     for key, value in ef.items():
         assert value.shape == (n_chains, n_iter), (key, value.shape)
 
