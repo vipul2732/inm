@@ -12,6 +12,7 @@ import jax
 import jax.numpy as jnp
 import matplotlib.animation as animation
 import matplotlib as mpl
+import time
 
 import logging
 
@@ -76,42 +77,69 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
         ax.set_ylabel(ylabel)
         ax.set_title(title)
         save(savename)
+    start_time = time.time()    
     merged_results_two_subsets_scores_hist_and_test(x, save=save, o = o)   
+    end_time = time.time()
+    logging.info(f"Time to run merged_results_two_subsets_scores_hist_and_test: {end_time - start_time}")
 
     # Plot of improving scores
 
     ef = x["extra_fields"]
     logging.info("calculating best score per chain based on amount of sampling")
+    start_time = time.time()
     results_dict = best_score_per_chain_based_on_amount_of_sampling(ef["potential_energy"])
     errplot_from_av_std_dict(results_dict, "amount of sampling", "best score", "Best score per chain", "best_score_per_chain" + suffix, save=save)
-
+    end_time = time.time()
+    logging.info(f"Time to run best_score_per_chain_based_on_amount_of_sampling: {end_time - start_time}")
+    
+    start_time = time.time()
     pdb_ppi_direct = data_io.get_pdb_ppi_predict_direct_reference()
     direct_ij = align_reference_to_model(model_data, pdb_ppi_direct, mode="cullin")
 
     pdb_ppi_costructure = data_io.get_pdb_ppi_predict_cocomplex_reference()
     costructure_ij = align_reference_to_model(model_data, pdb_ppi_costructure, mode="cullin")
-
+    end_time = time.time()
+    logging.info(f"Time to run align_reference_to_model: {end_time - start_time}")
+    
+    start_time = time.time()
     score_vs_ppv_plot(jax.random.PRNGKey(0), x["samples"], ef, direct_ij, save=save, o=o, suffix="_direct_" + suffix)
     score_vs_tp_plot( jax.random.PRNGKey(0), x["samples"], ef, direct_ij, save=save, o=o, suffix="_direct_" + suffix)
     score_vs_fp_plot( jax.random.PRNGKey(0), x["samples"], ef, direct_ij, save=save, o=o, suffix="_direct_" + suffix)
     score_vs_tn_plot( jax.random.PRNGKey(0), x["samples"], ef, direct_ij, save=save, o=o, suffix="_direct_" + suffix)
     score_vs_fn_plot( jax.random.PRNGKey(0), x["samples"], ef, direct_ij, save=save, o=o, suffix="_direct_" + suffix)
-
+    end_time = time.time()
+    logging.info(f"Time to run score_vs_X_plot on direct: {end_time - start_time}")
+    
+    start_time = time.time()
     score_vs_ppv_plot(jax.random.PRNGKey(0), x["samples"], ef, costructure_ij, save=save, o=o, suffix="_co_structure" + suffix)
     score_vs_tp_plot( jax.random.PRNGKey(0), x["samples"], ef, costructure_ij, save=save, o=o, suffix="_co_structure" + suffix)
     score_vs_fp_plot( jax.random.PRNGKey(0), x["samples"], ef, costructure_ij, save=save, o=o, suffix="_co_structure" + suffix)
+    score_vs_tn_plot( jax.random.PRNGKey(0), x["samples"], ef, costructure_ij, save=save, o=o, suffix="_co_structure" + suffix)
+    score_vs_fn_plot( jax.random.PRNGKey(0), x["samples"], ef, costructure_ij, save=save, o=o, suffix="_co_structure" + suffix)
+    end_time = time.time()
+    logging.info(f"Time to run score_vs_X_plot on costructure: {end_time - start_time}")
 
 
     logging.info("calculating ppv per chain based on amount of sampling")
+    start_time = time.time()
     ppv_results_dict = ppv_per_chain_based_on_amount_of_sampling(x['samples']['z'] > 0.5, direct_ij, amount_of_sampling_list = None) 
     errplot_from_av_std_dict(ppv_results_dict, "amount of sampling", "ppv", "PPV per chain", "ppv_per_chain" + suffix, save=save)
+    end_time = time.time()
+    logging.info(f"Time to run ppv_per_chain_based_on_amount_of_sampling: {end_time - start_time}")
+    start_time = time.time()
     top_ppv_dict = top_ppv_per_chain_based_on_amount_of_sampling(x['samples']['z'] > 0.5, direct_ij, amount_of_sampling_list = None)
     errplot_from_av_std_dict(top_ppv_dict, "amount of sampling", "top ppv", "Top PPV per chain", "top_ppv_per_chain" + suffix, save=save)
+    end_time = time.time()
+    logging.info(f"Time to run top_ppv_per_chain_based_on_amount_of_sampling: {end_time - start_time}")
 
-
+    start_time = time.time()
+    k = 0
     for key in ef:
         val = ef[key]
         caterrplot(val, "iteration", key, key, f"{key}_caterpill" + suffix)    
+        k += 1
+    end_time = time.time()
+    logging.info(f"Time to run {k} caterrplots: {end_time - start_time}")
     
 def ppv(aij, refij):
     """
@@ -1358,6 +1386,9 @@ def _main(o, i, mode, merge = False):
         df.to_csv(str(o / "summary.tsv"), sep="\t")
     
     def multi_chain_sampling_analysis(i=i, o=o):
+        logging.basicConfig(level=logging.INFO,
+                            output = o / "multi_chain_sampling_analysis.log",
+                            format = "%(levelname)s:%(module)s:%(funcName)s:%(lineno)s:MSG:%(message)s",)
         # Reset i and o to reference the merged directory
         logging.info("multi_chain_sampling_analysis")
         # Load the model data
@@ -1382,16 +1413,25 @@ def _main(o, i, mode, merge = False):
 
         rng_key, key  = jax.random.split(rng_key)
         shuff_direct_ij = np.array(jax.random.permutation(key, direct_ij))
+        start_time = time.time()
         x : dict = postprocess_samples(i.parent, fbasename=i.stem, merge=True) 
         with open(str(i) + ".pkl", "rb") as f:
             x2 = pkl.load(f)
+        end_time = time.time()
+        logging.info(f"Time to load samples {end_time - start_time}")
         
         N = model_data['N']
+        start_time = time.time()
         x = optional_flatten(x)
         x2 = optional_flatten(x2)
-
+        end_time = time.time()
+        logging.info(f"Time to flatten samples {end_time - start_time}")
+        
+        start_time = time.time()
         multi_chain_validate_shapes(x, model_data)
         multi_chain_validate_shapes(x2, model_data)
+        end_time = time.time()
+        logging.info(f"Time to validate shapes {end_time - start_time}")
         
         fplot = partial(
             run_multichain_specific_plots,
