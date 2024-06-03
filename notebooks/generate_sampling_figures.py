@@ -95,6 +95,8 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
     start_time = time.time()
     pdb_ppi_direct = data_io.get_pdb_ppi_predict_direct_reference()
     direct_ij = align_reference_to_model(model_data, pdb_ppi_direct, mode="cullin")
+    rng_key = jax.random.PRNGKey(0)
+    shuff_direct_ij = jax.random.permutation(rng_key, direct_ij)
 
     pdb_ppi_costructure = data_io.get_pdb_ppi_predict_cocomplex_reference()
     costructure_ij = align_reference_to_model(model_data, pdb_ppi_costructure, mode="cullin")
@@ -190,6 +192,9 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
     M = model_data["M"]
     run_plots(x, ef, direct_ij, save, o,  jf_tp, jf_tn, M, suffix="_direct" + suffix)
     run_plots(x, ef, costructure_ij, save, o,  jf_tp, jf_tn, M, suffix="_costructure" + suffix)
+    run_plots(x, ef, shuff_direct_ij, save, o, jf_tp, jf_tn, M, suffix="_shuff_direct" + suffix)
+    shuff_costructure_ij = jax.random.permutation(rng_key, costructure_ij)
+    run_plots(x, ef, shuff_costructure_ij, save, o, jf_tp, jf_tn, M, suffix="_shuff_costructure" + suffix)
     
 
     #start_time = time.time()
