@@ -238,7 +238,7 @@ def best_score_per_chain_based_on_amount_of_sampling(
         raise ValueError("Only 2 or 3 dimensions are supported")
     if amount_of_sampling_list is None:
         if n_iter > 2_000:
-            amount_of_sampling_list = _STD_AMOUNT_OF_SAMPLING2
+            amount_of_sampling_list = [1] + list(np.arange(10, n_iter, 1_000)) 
         else: 
             amount_of_sampling_list = _STD_AMOUNT_OF_SAMPING 
     results = metric_as_a_function_of_amount_of_sampling_per_chain(x, lambda x: jnp.min(x, axis=_ITER_DIM), amount_of_sampling_list)
@@ -254,7 +254,7 @@ def top_ppv_per_chain_based_on_amount_of_sampling(
         raise ValueError("Only 3 or 4 dimensions are supported")
     if amount_of_sampling_list is None:
         if niter > 2_000:
-            amount_of_sampling_list = _STD_AMOUNT_OF_SAMPLING2
+            amount_of_sampling_list = [1] + list(np.arange(10, niter, 1_000)) 
         else:
             amount_of_sampling_list = _STD_AMOUNT_OF_SAMPING
     results = metric_as_a_function_of_amount_of_sampling_per_chain(x, lambda x: dim_aware_max(ppv_per_iteration_vectorized(x, refij)), amount_of_sampling_list)
@@ -276,7 +276,7 @@ def ppv_per_chain_based_on_amount_of_sampling(
         n_chains, n_iter, _ = x.shape
     if amount_of_sampling_list is None:
         if n_iter > 2_000:
-            amount_of_sampling_list = _STD_AMOUNT_OF_SAMPLING2
+            amount_of_sampling_list = [1] + list(np.arange(10, niter, 1_000)) 
         else:
             amount_of_sampling_list = _STD_AMOUNT_OF_SAMPING
     results = metric_as_a_function_of_amount_of_sampling_per_chain(x, lambda x: ppv_per_iteration_vectorized(x, refij), amount_of_sampling_list)
