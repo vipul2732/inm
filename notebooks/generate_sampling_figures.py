@@ -91,13 +91,15 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
     pdb_ppi_costructure = data_io.get_pdb_ppi_predict_cocomplex_reference()
     costructure_ij = align_reference_to_model(model_data, pdb_ppi_costructure, mode="cullin")
 
-    score_vs_ppv_plot(jax.random.PRNGKey(0), x["samples"], ef, direct_ij, save=save, o=o, suffix=suffix)
-    score_vs_tp_plot( jax.random.PRNGKey(0), x["samples"], ef, direct_ij, save=save, o=o, suffix=suffix)
-    score_vs_fp_plot( jax.random.PRNGKey(0), x["samples"], ef, direct_ij, save=save, o=o, suffix=suffix)
+    score_vs_ppv_plot(jax.random.PRNGKey(0), x["samples"], ef, direct_ij, save=save, o=o, suffix="_direct_" + suffix)
+    score_vs_tp_plot( jax.random.PRNGKey(0), x["samples"], ef, direct_ij, save=save, o=o, suffix="_direct_" + suffix)
+    score_vs_fp_plot( jax.random.PRNGKey(0), x["samples"], ef, direct_ij, save=save, o=o, suffix="_direct_" + suffix)
+    score_vs_tn_plot( jax.random.PRNGKey(0), x["samples"], ef, direct_ij, save=save, o=o, suffix="_direct_" + suffix)
+    score_vs_fn_plot( jax.random.PRNGKey(0), x["samples"], ef, direct_ij, save=save, o=o, suffix="_direct_" + suffix)
 
-    score_vs_ppv_plot(jax.random.PRNGKey(0), x["samples"], ef, costructure_ij, save=save, o=o, suffix="co_structure" + suffix)
-    score_vs_tp_plot( jax.random.PRNGKey(0), x["samples"], ef, costructure_ij, save=save, o=o, suffix="co_structure" + suffix)
-    score_vs_fp_plot( jax.random.PRNGKey(0), x["samples"], ef, costructure_ij, save=save, o=o, suffix="co_structure" + suffix)
+    score_vs_ppv_plot(jax.random.PRNGKey(0), x["samples"], ef, costructure_ij, save=save, o=o, suffix="_co_structure" + suffix)
+    score_vs_tp_plot( jax.random.PRNGKey(0), x["samples"], ef, costructure_ij, save=save, o=o, suffix="_co_structure" + suffix)
+    score_vs_fp_plot( jax.random.PRNGKey(0), x["samples"], ef, costructure_ij, save=save, o=o, suffix="_co_structure" + suffix)
 
 
     logging.info("calculating ppv per chain based on amount of sampling")
@@ -148,6 +150,18 @@ def tp_per_iteration_vectorized_3d(aij_3dim, refij):
 
 def fp_per_iteration_vectorized_3d(aij_3dim, refij):
     f1 = jax.vmap(n_fp, in_axes=(0, None))
+    f2 = jax.vmap(f1, in_axes=(1, None))
+    output = f2(aij_3dim, refij)
+    return output
+
+def tn_per_iteration_vectorized_3d(aij_3dim, refij):
+    f1 = jax.vmap(n_tn, in_axes=(0, None))
+    f2 = jax.vmap(f1, in_axes=(1, None))
+    output = f2(aij_3dim, refij)
+    return output
+
+def fn_per_iteration_vectorized_3d(aij_3dim, refij):
+    f1 = jax.vmap(n_fn, in_axes=(0, None))
     f2 = jax.vmap(f1, in_axes=(1, None))
     output = f2(aij_3dim, refij)
     return output
@@ -295,6 +309,8 @@ def score_vs_ppv_plot(rng_key, samples, ef, refij, save=None, o=None, N=100_000,
 score_vs_ppv_plot = partial(score_vs_X_plot, Y=lambda x, y : ppv_per_iteration_vectorized_3d(x, y).T, title="Score vs PPV", ylabel="ppv", prefix="score_vs_ppv",)
 score_vs_tp_plot = partial(score_vs_X_plot, Y=lambda x, y: tp_per_iteration_vectorized_3d(x, y).T, title="Score vs TPs", ylabel="TPs", prefix="score_vs_tp",)
 score_vs_fp_plot = partial(score_vs_X_plot, Y=lambda x, y: fp_per_iteration_vectorized_3d(x, y).T, title="Score vs FPs", ylabel="FPs", prefix="score_vs_fp",)
+score_vs_tn_plot = partial(score_vs_X_plot, Y=lambda x, y: tn_per_iteration_vectorized_3d(x, y).T, title="Score vs TNs", ylabel="TNs", prefix="score_vs_tn",)
+score_vs_fn_plot = partial(score_vs_X_plot, Y=lambda x, y: fn_per_iteration_vectorized_3d(x, y).T, title="Score vs FNs", ylabel="FNs", prefix="score_vs_fn",)
 
 def errplot_from_av_std_dict(av_std_dict, xlabel, ylabel, title, savename, save=None, alpha=0.2):
     fig, ax = plt.subplots()
@@ -318,6 +334,12 @@ def n_tp(aij, refij):
 def n_fp(aij, refij):
     return jnp.sum((aij == 1) & (refij == 0))
 
+def n_tn(aij, refij):
+    return jnp.sum((aij == 0) & (refij == 0))
+
+def n_fn(aij, refij):
+    return jnp.sum((aij == 0) & (refij == 1))
+
 def n_edge(aij):
     return np.sum(aij > 0.5)
 
@@ -325,9 +347,11 @@ def merged_results_two_subsets_scores_hist_and_test(merged_results, save=None, o
     scores = merged_results["extra_fields"]["potential_energy"]
     
     nchains, niter = scores.shape
-    P = nchains // 2
-    scores1 = np.ravel(scores[:P, :])
-    scores2 = np.ravel(scores[P:, :])
+    scores_flat = np.ravel(scores)
+    N_scores = len(scores_flat)
+    midpoint = N_scores // 2
+    scores1 = scores_flat[:midpoint] 
+    scores2 = scores_flat[midpoint:]
     assert not np.all(scores1 == scores2)
 
     test_results = sp.stats.ks_2samp(scores1, scores2)
@@ -455,6 +479,15 @@ def align_reference_to_model(model_data, uref, mode="cullin",):
         k += 1
     assert j == n_nodes -1
     return reflist_out
+
+def bootstrap_samples(rng_key, refij, n_boostraps = 100):
+    n = refij.shape[0]
+    output = jnp.zeros((n_boostraps, n))
+    for i in range(n_boostraps):
+        rng_key, key = jax.random.split(rng_key)
+        shuff_ij = np.array(jax.random.permutation(key, refij))
+        output = output.at[i, :].set(shuff_ij)
+    return output
 
 def run_multi_chain_version_of_single_chain_plots(x, model_data, save, o, suffix=""):
     # Unpack
@@ -967,14 +1000,6 @@ def _main(o, i, mode, merge = False):
                                 title = "Saint max pair score",
                                 savename = "saint_max_pair_score")
 
-    def bootstrap_samples(rng_key, refij, n_boostraps = 100):
-        n = refij.shape[0]
-        output = jnp.zeros((n_boostraps, n))
-        for i in range(n_boostraps):
-            rng_key, key = jax.random.split(rng_key)
-            shuff_ij = np.array(jax.random.permutation(key, refij))
-            output = output.at[i, :].set(shuff_ij)
-        return output
 
     def single_chain_sampling_analysis():
 
