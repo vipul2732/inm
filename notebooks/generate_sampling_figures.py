@@ -1155,11 +1155,11 @@ def _main(o, i, mode, merge = False):
         shuff_direct_ij = np.array(jax.random.permutation(key, direct_ij))
 
         x : dict = postprocess_samples(i.parent, fbasename=i.stem) 
-        with open(i, "rb") as f:
-            x2 = pkl.load(f)
 
         N = model_data['N']
         x = optional_flatten(x)
+        with open(i, "rb") as f:
+            x2 = pkl.load(f)
         x2 = optional_flatten(x2)
 
         def run_plots(x, suffix=""):
@@ -1511,21 +1511,17 @@ def _main(o, i, mode, merge = False):
         shuff_direct_ij = np.array(jax.random.permutation(key, direct_ij))
         start_time = time.time()
         x : dict = postprocess_samples(i.parent, fbasename=i.stem, merge=True) 
-        with open(str(i) + ".pkl", "rb") as f:
-            x2 = pkl.load(f)
         end_time = time.time()
         logging.info(f"Time to load samples {end_time - start_time}")
         
         N = model_data['N']
         start_time = time.time()
         x = optional_flatten(x)
-        x2 = optional_flatten(x2)
         end_time = time.time()
         logging.info(f"Time to flatten samples {end_time - start_time}")
         
         start_time = time.time()
         multi_chain_validate_shapes(x, model_data)
-        multi_chain_validate_shapes(x2, model_data)
         end_time = time.time()
         logging.info(f"Time to validate shapes {end_time - start_time}")
         
@@ -1534,6 +1530,12 @@ def _main(o, i, mode, merge = False):
             model_data = model_data,
             save=save, o = o)
         fplot(x, suffix="_w_warmup")
+        
+        del x
+        with open(str(i) + ".pkl", "rb") as f:
+            x2 = pkl.load(f)
+        x2 = optional_flatten(x2)
+        multi_chain_validate_shapes(x2, model_data)
         fplot(x2)
 
         gplot = partial(
