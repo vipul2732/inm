@@ -9,6 +9,7 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 from jax.tree_util import tree_map, tree_flatten, tree_unflatten
+import jaxlib
 import pandas as pd
 from pathlib import Path
 
@@ -19,6 +20,8 @@ sys.path.append("../notebooks")
 from sampling_assessment import (
         get_results
 )
+import data_io
+
 
 from data_io import (
     pklload,
@@ -33,8 +36,12 @@ from data_io import (
 @click.option("--figures", default = False, is_flag = True, help="only run figures")
 @click.option("--rseed", default = None)
 @click.option("--merge", is_flag = True, default = False, help="merge multiple chains") 
-def main(name, figures, rseed, merge):
+@click.option("--jax2numpy-path", default = None, type=str, help="path to a pickle file for conversion")
+def main(name, figures, rseed, merge, jax2numpy_path):
     run_configuration =rc.__dict__[name]._asdict() 
+    if jax2numpy_path is not None:
+        jax2numpy(jax2numpy_path)
+        exit()
     if not merge:
         if rseed is not None:
             rseed = int(rseed)
@@ -74,12 +81,6 @@ class MergeObject:
         pkldump(self.results, out / "merged_results.pkl")
         pkldump(self.model_data, out / "merged_results_model_data.pkl")
         pkldump(self.hmc_warmup_samples, out / "merged_results_warmup_samples.pkl")
-
-
-
-
-
-
 
 def do_merge(name):
     """ Merge multiple input chains into a single output directory """
@@ -186,6 +187,18 @@ def update_rc_dict_rseed(rc_dict, rseed):
     rc_dict["rseed"] = rseed
     rc_dict["model_output_dirpath"] = rc_dict["model_output_dirpath"] + f"_rseed_{rseed}"
     return rc_dict
+
+def jax2numpy(jax2numpy_path):
+    x = data_io.pklload(jax2numpy_path)
+    temp = {}
+    for key, value in x.items():
+        if isinstance(value, jaxlib.xla_extension.DeviceArray):
+            temp[key] = np.array(value)
+        elif isinstance(value, jax.Array):
+            temp[key] = np.array(value)
+        else:
+            temp[key] = value 
+    pkl.dump(temp, open(jax2numpy_path, "wb"))
 
 if __name__ == "__main__":
     main()
