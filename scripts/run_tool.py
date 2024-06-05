@@ -119,10 +119,17 @@ def update_merge_object(name, merge_object, base):
     for path in base.parent.iterdir():
         if (path.is_dir()) and ("rseed" in path.name) and ("merge" not in path.name) and (name in path.name):
             found_warmup_samples = False
+            found_model_pickle = False
+            model_base_name = ""
+            for fpath in path.iterdir():
+                if "model_data" in fpath.name:
+                    model_base_name = fpath.name.split("_model_data")[0]
             for fpath in path.iterdir():
                 if "warmup_samples" in fpath.name:
                     found_warmup_samples = True
-            if found_warmup_samples:
+                if fpath.name == model_base_name + ".pkl":
+                    found_model_pickle = True
+            if found_warmup_samples and found_model_pickle:
                 rseed = int(path.name.split("_rseed_")[1])
                 merge_object = update_merge_object_from_chain_path(name, rseed, merge_object, path)
     return merge_object
