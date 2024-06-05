@@ -2821,7 +2821,7 @@ def model23_m(model_data):
 
     model23_saint_score(aij, SAINT_PAIR_SCORE, weight = _MODEL23_SR_WEIGHT, debug = _MODEL23_DEBUG)
 
-def model23_n(model_data):
+def model23_n_(model_data):
     # unpack model variables
     (N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx, R,
      R0, null_dist, zero_clipped_null_log_like, disconectivity_distance, max_distance, saint_max_pair_score_edgelist) = model23_unpack_model_data(model_data)
@@ -2884,7 +2884,7 @@ def model23_n(model_data):
     # The score also allows edges to be 1 in cases with low profile similarity
     # This case is taken care of by the r_restraint
 
-    r_z_restraint = dist.Normal(R_pairwise_matrix, 0.7)
+    r_z_restraint = dist.Normal(R_pairwise_matrix, 2) #0.7)
     r_z_score = jnp.sum(r_z_restraint.log_prob(z))
     numpyro.factor("r_z_score", r_z_score)
 
@@ -2901,6 +2901,14 @@ def model23_n(model_data):
     # effect is weaker for high saint scores - allowing and edge to be 0 or 1
     # low saint scores centered near 0 have low variance allowing edges to only take on the value 0
     # p(aij | s)
+    return saint_max_pair_score_pairwise_matrix, z
+
+    s_restraint = dist.Normal(saint_max_pair_score_pairwise_matrix-0.5, saint_max_pair_score_pairwise_matrix ** 2 + 1e-2)
+    s_score = jnp.sum(s_restraint.log_prob(z))
+    numpyro.factor("s_score", s_score)
+
+def model23_n(model_data):
+    saint_max_pair_score_pairwise_matrix, z = model23_n_(model_data)
     s_restraint = dist.Normal(saint_max_pair_score_pairwise_matrix-0.5, saint_max_pair_score_pairwise_matrix ** 2 + 1e-2)
     s_score = jnp.sum(s_restraint.log_prob(z))
     numpyro.factor("s_score", s_score)
@@ -3362,7 +3370,7 @@ def model_dispatcher(model_name, model_data, save_dir, init_strat_dispatch_key="
                          "model23_a", "model23_b", "model23_c", "model23_d",
                          "model23_e", "model23_f", "model23_g", "model23_h",
                          "model23_i", "model23_j", "model23_k", "model23_l",
-                         "model23_m", "model23_n", "model23_o", "model23_q",
+                         "model23_m", "model23_n", "model23_n_", "model23_o", "model23_q",
                          ):
         model = dict(model23_ll_lp = model23_ll_lp,
                      model23_se = model23_se,
@@ -3383,7 +3391,8 @@ def model_dispatcher(model_name, model_data, save_dir, init_strat_dispatch_key="
                      model23_k = model23_k,
                      model23_l = model23_l,
                      model23_m = model23_m,
-                     model23_n = model23_n)[model_name] 
+                     model23_n = model23_n,
+                     model23_n_ = model23_n_)[model_name] 
 
         model_data = model23_ll_lp_data_getter(save_dir)
         # Don't calculate compoistes for models that don't need it
@@ -3391,7 +3400,7 @@ def model_dispatcher(model_name, model_data, save_dir, init_strat_dispatch_key="
                           "model23_a", "model23_b", "model23_c", "model23_d",
                           "model23_e", "model23_f", "model23_g", "model23_h",
                           "model23_i", "model23_j", "model23_k", "model23_l",
-                          "model23_m", "model23_n", "model23_o", "model23_q"):
+                          "model23_m", "model23_n", "model23_n_", "model23_o", "model23_q"):
             model_data = model23_data_transformer(model_data, calculate_composites = False, synthetic_N = synthetic_N, synthetic_Mtrue = synthetic_Mtrue, synthetic_rseed = synthetic_rseed)
         else:
             model_data = model23_data_transformer(model_data, calculate_composites = True, synthetic_N = synthetic_N, synthetic_Mtrue = synthetic_Mtrue, synthetic_rseed = synthetic_rseed)

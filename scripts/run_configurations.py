@@ -291,20 +291,29 @@ mini_model23_n_all_10k = from_template(
     filter_kw = "all",
 )
 
-mini_model23_n_synthetic = from_template(
+mini_model23_n_all_20k = from_template(
     mini_model23_n,
-    synthetic_N = 177,
+    num_samples = 20_000,
+    num_warmup = 1_000,
+    model_output_dirpath = "../results/mini_model23_n_all_20k",
+    filter_kw = "all",
+)
+
+
+mini_model23_n__all_20k_synthetic = from_template(
+    mini_model23_n_all_20k,
+    model_name = "model23_n_",
+    synthetic_N = 236,
     synthetic_Mtrue = 49,
     synthetic_rseed = 0,
-    model_output_dirpath = "../results/mini_model23_n_synthetic")
+    model_output_dirpath = "../results/mini_model23_n__all_20k_synthetic",
+    )
 
 mini_model23_m_10k = from_template(
     mini_model23_m,
     model_name = "model23_m",
     model_output_dirpath = "../results/mini_model23_m_10k",
     num_samples = 10_000)
-
-
 
 
 mini_dev_run_w_thinning = from_template(mini_dev_run,
