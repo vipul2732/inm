@@ -1,8 +1,11 @@
 """
 Given an file of samples write figures visualing samples to an output directory
 """
+import sklearn
+import sklearn.metrics
 import click
 from functools import partial
+from collections import defaultdict
 from pathlib import Path
 import matplotlib.pyplot as plt
 import pickle as pkl
@@ -12,12 +15,15 @@ import jax
 import jax.numpy as jnp
 import matplotlib.animation as animation
 import matplotlib as mpl
+import scipy as sp
+import sklearn 
 import time
 
 import logging
 
 import data_io
 import _model_variations as mv
+import tpr_ppr
 import merge_analysis as merge 
 
 import scipy as sp
@@ -149,6 +155,13 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
         aij_mat = mv.Z2A(x['samples']['z']) > 0.5
         n_chain, n_iter, M = aij_mat.shape
 
+        mean_aij = np.mean(aij_mat, axis=(0, 1))
+        roc_curve(refij, mean_aij, save=save, o=o, suffix=suffix)
+        prc_curve(refij, mean_aij, save=save, o=o, suffix=suffix)
+        del mean_aij
+
+        score_vs_auprc_plot(x, ef, refij, save, o, suffix=suffix)
+
         n_positives_mat = jnp.sum(aij_mat, axis=2)
 
         tp_mat = jf_tp(aij_mat, refij)
@@ -190,11 +203,13 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
     jf_tp = jax.jit(lambda x,y :tp_per_iteration_vectorized_3d(x, y).T)
     jf_tn = jax.jit(lambda x,y :tn_per_iteration_vectorized_3d(x, y).T)
     M = model_data["M"]
+
     run_plots(x, ef, direct_ij, save, o,  jf_tp, jf_tn, M, suffix="_direct" + suffix)
     run_plots(x, ef, costructure_ij, save, o,  jf_tp, jf_tn, M, suffix="_costructure" + suffix)
     run_plots(x, ef, shuff_direct_ij, save, o, jf_tp, jf_tn, M, suffix="_shuff_direct" + suffix)
     shuff_costructure_ij = jax.random.permutation(rng_key, costructure_ij)
     run_plots(x, ef, shuff_costructure_ij, save, o, jf_tp, jf_tn, M, suffix="_shuff_costructure" + suffix)
+
     
 
     #start_time = time.time()
@@ -236,6 +251,103 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
         k += 1
     end_time = time.time()
     logging.info(f"Time to run {k} caterrplots: {end_time - start_time}")
+
+def roc_curve(y_true, y_score, save=None, o=None, suffix=""):
+    thresholds = np.linspace(0, 1, 1000)
+    fpr, tpr, thresholds = sklearn.metrics.roc_curve(y_true, y_score)
+
+    auc = sklearn.metrics.roc_auc_score(y_true = y_true, y_score = y_score)
+    
+    n_true = np.sum(y_true)
+    n_pred = len(y_score)
+    fig, ax = plt.subplots()
+    ax.set_xlabel(f"FPR - N pos pred = {n_pred}")
+    ax.set_ylabel(f"TPR - N={n_true}")
+    ax.plot(fpr, tpr, 'k-', alpha=0.2)
+    ax.text(0.6, 0.6, f"AUC={auc}", transform=plt.gca().transAxes)
+    save("roc_curve" + suffix)
+
+def prc_curve(y_true, y_score, save=None, o=None, suffix=""):
+    thresholds = np.linspace(0, 1, 1000)
+    precision, recall, thresholds = sklearn.metrics.precision_recall_curve(y_true, y_score)
+    auc = sklearn.metrics.average_precision_score(y_true = y_true, y_score = y_score)
+    
+    n_true = np.sum(y_true)
+    n_pred = len(y_score)
+    fig, ax = plt.subplots()
+    ax.set_xlabel(f"Recall - N pos pred = {n_pred}")
+    ax.set_ylabel(f"Precision - N={n_true}")
+    ax.plot(recall, precision, 'k-', alpha=0.2)
+    ax.text(0.6, 0.6, f"AUC={auc}", transform=plt.gca().transAxes)
+    save("pr_curve" + suffix)
+
+
+
+
+def score_vs_auprc_plot(x, ef, refij, save=None, o=None, suffix="", n_score_bins = 100, n_models_per_bin = 5):
+    # 1. Save every score : [(chain_idx, iteration_idx)] in a dictionary  
+    scores = ef["potential_energy"]
+    n_chains, n_iter = scores.shape
+
+    score_dict = {}
+    for chain_idx in range(n_chains):
+        for iteration_idx in range(n_iter):
+            score = float(scores[chain_idx, iteration_idx])
+            score_dict[score] = [chain_idx, iteration_idx]
+
+    # 2. Create N bins for the scores, {mean_score : [coords]}
+    min_score = np.min(scores)
+    max_score = np.max(scores)
+    def n_th_bin(score, min_score, max_score, nbins):
+        return int((score - min_score) / (max_score - min_score) * (nbins-1))
+
+    score_bins = defaultdict(list)
+    for score, coord in score_dict.items():
+        bin_idx = n_th_bin(score, min_score, max_score, n_score_bins)
+        score_bins[bin_idx].append((coord, score))
+
+    # 3. Select N models per bin, calculate the average model in the bin
+    
+    mean_score_average_model_dict = {}
+    for bin_idx, coord_score_lst in score_bins.items():
+        coords, scores = zip(*coord_score_lst)
+        n_models = len(coords)
+        if n_models <= 2:
+            continue
+        elif n_models < n_models_per_bin:
+            ...
+        else:
+            coords = coords[:n_models_per_bin]
+        models = []
+        for i, coord in enumerate(coords):
+            model = mv.Z2A(x["samples"]["z"][coord[0], coord[1]])
+            models.append(model)
+        models = np.array(models)
+        average_model = np.mean(models, axis=0)
+        mean_score = np.mean(scores)
+        mean_score_average_model_dict[mean_score] = average_model
+
+    # 4. Calculate the auroc for the average model
+    score_results = []
+    for mean_score, average_model in mean_score_average_model_dict.items():
+        roc_score = sklearn.metrics.roc_auc_score(y_true = refij, y_score = average_model)
+        prc_score = sklearn.metrics.average_precision_score(y_true = refij, y_score = average_model)
+        score_results.append((mean_score, roc_score, prc_score))
+    
+    score_results = np.array(score_results)
+    # 5. Plot the auroc vs the mean score
+    fig, ax = plt.subplots()
+    ax.set_xlabel("AUROC")
+    ax.set_ylabel("Mean score")
+    ax.plot(score_results[:, 1], score_results[:, 0], 'k.', alpha=0.2)
+    save("auroc_vs_mean_score" + suffix)
+
+    fig, ax = plt.subplots()
+    ax.set_xlabel("AUPRC")
+    ax.set_ylabel("Mean score")
+    ax.plot(score_results[:, 2], score_results[:, 0], 'k.', alpha=0.2)
+    save("auprc_vs_mean_score" + suffix)
+
     
 def ppv(aij, refij):
     """
@@ -477,6 +589,7 @@ def merged_results_two_subsets_scores_hist_and_test(merged_results, save=None, o
     
     nchains, n_iter = scores.shape
     scores_flat = np.ravel(scores)
+    scores_flat = np.array(jax.random.permutation(jax.random.PRNGKey(0), scores_flat))
     N_scores = len(scores_flat)
     midpoint = N_scores // 2
     scores1 = scores_flat[:midpoint] 

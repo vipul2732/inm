@@ -118,8 +118,13 @@ def do_merge(name):
 def update_merge_object(name, merge_object, base):
     for path in base.parent.iterdir():
         if (path.is_dir()) and ("rseed" in path.name) and ("merge" not in path.name) and (name in path.name):
-            rseed = int(path.name.split("_rseed_")[1])
-            merge_object = update_merge_object_from_chain_path(name, rseed, merge_object, path)
+            found_warmup_samples = False
+            for fpath in path.iterdir():
+                if "warmup_samples" in fpath.name:
+                    found_warmup_samples = True
+            if found_warmup_samples:
+                rseed = int(path.name.split("_rseed_")[1])
+                merge_object = update_merge_object_from_chain_path(name, rseed, merge_object, path)
     return merge_object
 
 def update_merge_object_from_chain_path(name, rseed, merge_object, chain_path):
