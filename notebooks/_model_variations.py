@@ -2821,6 +2821,8 @@ def model23_m(model_data):
 
     model23_saint_score(aij, SAINT_PAIR_SCORE, weight = _MODEL23_SR_WEIGHT, debug = _MODEL23_DEBUG)
 
+
+
 def model23_n_(model_data):
     # unpack model variables
     (N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx, R,
@@ -2903,9 +2905,9 @@ def model23_n_(model_data):
     # p(aij | s)
     return saint_max_pair_score_pairwise_matrix, z
 
-    s_restraint = dist.Normal(saint_max_pair_score_pairwise_matrix-0.5, saint_max_pair_score_pairwise_matrix ** 2 + 1e-2)
-    s_score = jnp.sum(s_restraint.log_prob(z))
-    numpyro.factor("s_score", s_score)
+    #s_restraint = dist.Normal(saint_max_pair_score_pairwise_matrix-0.5, saint_max_pair_score_pairwise_matrix ** 2 + 1e-2)
+    #s_score = jnp.sum(s_restraint.log_prob(z))
+    #numpyro.factor("s_score", s_score)
 
 def model23_n(model_data):
     saint_max_pair_score_pairwise_matrix, z = model23_n_(model_data)
@@ -2913,9 +2915,98 @@ def model23_n(model_data):
     s_score = jnp.sum(s_restraint.log_prob(z))
     numpyro.factor("s_score", s_score)
 
+def model23_o_params(model_data,
+    z_mu = 0.1, z_sigma = 1.,
+    _MODEL23_SR_WEIGHT = 1.1,
+    _MODEL23_RZ_SIGMA = 0.4,
+    n_edges_expected = 300,
+    n_edges_sigma = 100,
+    r_z_sigma = 2,
+    r_mu_scale = 1.,
+    r_mu_shift = -0.5,
+    r_sigma_scale = 1.,
+    r_sigma_shift = 1e-2,
+    degree_mu = 3,
+    degree_sigma = 3,
+    s_mu_shift = -0.5,
+    s_mu_scale = 1.,
+    s_sigma_scale = 1.,
+    s_sigma_shift = 1e-2,):
+    # unpack model variables
+    (N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx, R,
+     R0, null_dist, zero_clipped_null_log_like, disconectivity_distance, max_distance, saint_max_pair_score_edgelist) = model23_unpack_model_data(model_data)
 
+     # define global variables
+    SAINT_PAIR_SCORE = jnp.log(saint_max_pair_score_edgelist)
+    diag_indices = jnp.diag_indices(N)
+    flat2matrix_f = partial(flat2matrix, n = N)
 
+    RO_pairwise_matrix = flat2matrix_f(R0)
+    R_pairwise_matrix = flat2matrix_f(R)
+    zero_clipped_null_log_like_pairwise_matrix = flat2matrix_f(zero_clipped_null_log_like)
+    saint_max_pair_score_pairwise_matrix = flat2matrix_f(saint_max_pair_score_edgelist)
+    saint_max_pair_score_pairwise_matrix = saint_max_pair_score_pairwise_matrix.at[diag_indices].set(0)
+    R_pairwise_matrix = R_pairwise_matrix.at[diag_indices].set(0)
+    
+    # cleanup 
+    del zero_clipped_null_log_like
+    del saint_max_pair_score_edgelist
+    del R
+    del R0
 
+    # Sample z in matrix form
+    z = numpyro.sample("z", dist.Normal(z_mu, z_sigma).expand([N, N])) 
+
+    ## Define aij from z
+    aij = Z2A(z)
+    ## # Set the diagonal to 0
+
+    aij = aij.at[diag_indices].set(0)
+    aij = jnp.tril(aij, k=-1)
+    n_edges = jnp.sum(aij) 
+    aij = (aij + aij.T)
+    degree = jnp.sum(aij, axis = 1)
+
+    ## Restrain the degree distribution to be somewhere around 0-5
+    degree_expected = jnp.ones(N) * degree_mu 
+    degree_restraint = dist.Normal(degree_expected, degree_sigma)
+    degree_score = jnp.sum(degree_restraint.log_prob(degree))
+    numpyro.factor("degree_score", degree_score)
+
+    n_edges_restraint = dist.Normal(n_edges_expected, n_edges_sigma)
+    n_edges_score = n_edges_restraint.log_prob(n_edges)
+    numpyro.factor("n_edges_score", n_edges_score)
+    
+    #r_z_restraint = dist.Normal(R_pairwise_matrix, r_z_sigma) 
+    #r_z_score = jnp.sum(r_z_restraint.log_prob(z))
+    #numpyro.factor("r_z_score", r_z_score)
+
+    #r_restraint = dist.Normal(r_mu_scale * R_pairwise_matrix + r_mu_shift, (r_sigma_scale * R_pairwise_matrix)**2 + r_sigma_shift)
+    #r_score = jnp.sum(r_restraint.log_prob(z))
+    #numpyro.factor("r_score", r_score)
+    
+    #s_restraint = dist.Normal(saint_max_pair_score_pairwise_matrix + s_mu_shift, (s_sigma_scale * saint_max_pair_score_pairwise_matrix) ** 2 + s_sigma_shift)
+    #const_1 = z_mu 
+    #const_2 = z_sigma * saint_max_pair_score_pairwise_matrix + s_sigma_shift
+    #s_restraint = dist.Normal(const_1, const_2)
+    #s_restraint = dist.Normal(saint_max_pair_score_pairwise_matrix * z_mu + s_mu_shift, z_sigma * (saint_max_pair_score_pairwise_matrix ** 2)  + s_sigma_shift)
+    #s_score = jnp.sum(s_restraint.log_prob(z))
+    #numpyro.factor("s_score", s_score)
+
+def model23_o(model_data):
+    model23_o_params(model_data,
+    z_mu = -9,
+    z_sigma = 4.,
+    s_mu_shift = 0.,
+    s_sigma_shift = 0.,
+    _MODEL23_SR_WEIGHT = 1.,
+    n_edges_expected = 250,
+    n_edges_sigma = 50,
+    degree_mu = 3,
+    degree_sigma = 1.5,
+    r_z_sigma = 4,
+    r_sigma_scale = 2.,
+    )
 
 
 def generate_synthetic_example(rseed, n_true, m_total):
@@ -3392,7 +3483,8 @@ def model_dispatcher(model_name, model_data, save_dir, init_strat_dispatch_key="
                      model23_l = model23_l,
                      model23_m = model23_m,
                      model23_n = model23_n,
-                     model23_n_ = model23_n_)[model_name] 
+                     model23_n_ = model23_n_,
+                     model23_o = model23_o,)[model_name] 
 
         model_data = model23_ll_lp_data_getter(save_dir)
         # Don't calculate compoistes for models that don't need it

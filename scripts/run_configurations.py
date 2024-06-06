@@ -299,7 +299,6 @@ mini_model23_n_all_20k = from_template(
     filter_kw = "all",
 )
 
-
 mini_model23_n__all_20k_synthetic = from_template(
     mini_model23_n_all_20k,
     model_name = "model23_n_",
@@ -308,6 +307,23 @@ mini_model23_n__all_20k_synthetic = from_template(
     synthetic_rseed = 0,
     model_output_dirpath = "../results/mini_model23_n__all_20k_synthetic",
     )
+
+mini_model23_o_all = from_template(
+    mini_model23_n_all_20k,
+    model_name = "model23_o",
+    model_output_dirpath = "../results/mini_model23_o_all",
+    num_warmup = 500,
+    num_samples = 500,
+    filter_kw = "all",
+)
+
+mini_model_o_all_10k = from_template(
+    mini_model23_o_all,
+    model_name = "model23_o",
+    model_output_dirpath = "../results/mini_model_o_all_10k",
+    num_samples = 10_000,
+    num_warmup = 1_000,
+)
 
 mini_model23_m_10k = from_template(
     mini_model23_m,
@@ -320,7 +336,6 @@ mini_dev_run_w_thinning = from_template(mini_dev_run,
     model_output_dirpath = "../results/mini_dev_run_w_thinning",
     thinning = 2,
     )
-
 
 mini_se_sr_run = RunConfiguration(
     model_output_dirpath = "../results/mini_se_sr_run",
