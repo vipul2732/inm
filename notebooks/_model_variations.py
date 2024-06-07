@@ -2947,6 +2947,8 @@ def model23_o_params(model_data,
     saint_max_pair_score_pairwise_matrix = flat2matrix_f(saint_max_pair_score_edgelist)
     saint_max_pair_score_pairwise_matrix = saint_max_pair_score_pairwise_matrix.at[diag_indices].set(0)
     R_pairwise_matrix = R_pairwise_matrix.at[diag_indices].set(0)
+
+    ONES_ZEROS_AT_DIAG = jnp.ones((N, N)) - jnp.eye(N)
     
     # cleanup 
     del zero_clipped_null_log_like
@@ -2955,13 +2957,17 @@ def model23_o_params(model_data,
     del R0
 
     # Sample z in matrix form
-    z = numpyro.sample("z", dist.Normal(z_mu, z_sigma).expand([N, N])) 
+    #z = numpyro.sample("z", dist.Normal(z_mu + R_pairwise_matrix + saint_max_pair_score_pairwise_matrix - 1., z_sigma * saint_max_pair_score_pairwise_matrix + 1e-2).expand([N, N])) 
+    z = numpyro.sample("z", dist.Normal(z_mu, z_sigma * saint_max_pair_score_pairwise_matrix + 1e-2).expand([N, N])) 
+
+    #s_restraint = dist.Normal(saint_max_pair_score_pairwise_matrix + s_mu_shift, (s_sigma_scale * saint_max_pair_score_pairwise_matrix) ** 2 + s_sigma_shift)
 
     ## Define aij from z
-    aij = Z2A(z)
-    ## # Set the diagonal to 0
+    #aij = Z2A(z)
+    aij = jnp.rint(Z2A(z)) # NOTE rint on rseed 3 june 7 2024
+    ### # Set the diagonal to 0
 
-    aij = aij.at[diag_indices].set(0)
+    #aij = aij.at[diag_indices].set(0)
     aij = jnp.tril(aij, k=-1)
     n_edges = jnp.sum(aij) 
     aij = (aij + aij.T)
@@ -2976,18 +2982,30 @@ def model23_o_params(model_data,
     n_edges_restraint = dist.Normal(n_edges_expected, n_edges_sigma)
     n_edges_score = n_edges_restraint.log_prob(n_edges)
     numpyro.factor("n_edges_score", n_edges_score)
+
+    p2_restraint = dist.Normal(z_mu + (R_pairwise_matrix), 1.2 * z_sigma)
+    p2_score = p2_restraint.log_prob(z)
+    numpyro.factor("p2_score", p2_score)
+
+    # Path length 2
+    aij = aij @ aij
+    aij = jnp.minimum(aij, ONES_ZEROS_AT_DIAG) # count the presence of length 3 paths
+    p3_restraint = dist.Normal(R_pairwise_matrix, 4)
+    p3_score = p3_restraint.log_prob(aij)
+    numpyro.factor("p3_score", p3_score)
     
     #r_z_restraint = dist.Normal(R_pairwise_matrix, r_z_sigma) 
     #r_z_score = jnp.sum(r_z_restraint.log_prob(z))
     #numpyro.factor("r_z_score", r_z_score)
 
     #r_restraint = dist.Normal(r_mu_scale * R_pairwise_matrix + r_mu_shift, (r_sigma_scale * R_pairwise_matrix)**2 + r_sigma_shift)
+    #r_restraint = dist.Normal(z_mu + R_pairwise_matrix -1, (z_sigma * R_pairwise_matrix)*1.1 + r_sigma_shift)
     #r_score = jnp.sum(r_restraint.log_prob(z))
     #numpyro.factor("r_score", r_score)
     
     #s_restraint = dist.Normal(saint_max_pair_score_pairwise_matrix + s_mu_shift, (s_sigma_scale * saint_max_pair_score_pairwise_matrix) ** 2 + s_sigma_shift)
-    #const_1 = z_mu 
-    #const_2 = z_sigma * saint_max_pair_score_pairwise_matrix + s_sigma_shift
+    #const_1 = z_mu # + saint_max_pair_score_pairwise_matrix - 1 
+    #const_2 = z_sigma * jnp.sqrt(saint_max_pair_score_pairwise_matrix)  + s_sigma_shift
     #s_restraint = dist.Normal(const_1, const_2)
     #s_restraint = dist.Normal(saint_max_pair_score_pairwise_matrix * z_mu + s_mu_shift, z_sigma * (saint_max_pair_score_pairwise_matrix ** 2)  + s_sigma_shift)
     #s_score = jnp.sum(s_restraint.log_prob(z))
@@ -2995,15 +3013,14 @@ def model23_o_params(model_data,
 
 def model23_o(model_data):
     model23_o_params(model_data,
-    z_mu = -9,
+    z_mu = -6 ,#-9,
     z_sigma = 4.,
-    s_mu_shift = 0.,
-    s_sigma_shift = 0.,
+    s_sigma_shift = 1e-2,
     _MODEL23_SR_WEIGHT = 1.,
     n_edges_expected = 250,
     n_edges_sigma = 50,
     degree_mu = 3,
-    degree_sigma = 1.5,
+    degree_sigma = 3,
     r_z_sigma = 4,
     r_sigma_scale = 2.,
     )
@@ -3499,6 +3516,9 @@ def model_dispatcher(model_name, model_data, save_dir, init_strat_dispatch_key="
         #init_strategy = model_23_ll_lp_init_to_zero_strategy(model_data)
         if init_strat_dispatch_key == "uniform":
             init_strategy = init_to_uniform
+        elif init_strat_dispatch_key == "uniform_06":
+            init_strategy = partial(init_to_uniform, radius = 0.6)
+
         elif init_strat_dispatch_key == "":
             init_strategy = model_23_ll_lp_init_to_data_strategy(model_data)
         else:
