@@ -2963,8 +2963,8 @@ def model23_o_params(model_data,
     #s_restraint = dist.Normal(saint_max_pair_score_pairwise_matrix + s_mu_shift, (s_sigma_scale * saint_max_pair_score_pairwise_matrix) ** 2 + s_sigma_shift)
 
     ## Define aij from z
-    #aij = Z2A(z)
-    aij = jnp.rint(Z2A(z)) # NOTE rint on rseed 3 june 7 2024
+    aij = Z2A(z)
+    #aij = jnp.rint(Z2A(z)) 
     ### # Set the diagonal to 0
 
     #aij = aij.at[diag_indices].set(0)
@@ -2974,8 +2974,9 @@ def model23_o_params(model_data,
     degree = jnp.sum(aij, axis = 1)
 
     ## Restrain the degree distribution to be somewhere around 0-5
-    degree_expected = jnp.ones(N) * degree_mu 
-    degree_restraint = dist.Normal(degree_expected, degree_sigma)
+    #degree_expected = jnp.ones(N) * degree_mu 
+    #degree_restraint = dist.Normal(degree_expected, degree_sigma)
+    degree_restraint = dist.Exponential(1.)
     degree_score = jnp.sum(degree_restraint.log_prob(degree))
     numpyro.factor("degree_score", degree_score)
 
@@ -2983,14 +2984,14 @@ def model23_o_params(model_data,
     n_edges_score = n_edges_restraint.log_prob(n_edges)
     numpyro.factor("n_edges_score", n_edges_score)
 
-    p2_restraint = dist.Normal(z_mu + (R_pairwise_matrix), 1.2 * z_sigma)
-    p2_score = p2_restraint.log_prob(z)
+    p2_restraint = dist.Normal((R_pairwise_matrix), 4) #1.2 * z_sigma)
+    p2_score = p2_restraint.log_prob(aij)
     numpyro.factor("p2_score", p2_score)
 
-    # Path length 2
+    ## Path length 2
     aij = aij @ aij
     aij = jnp.minimum(aij, ONES_ZEROS_AT_DIAG) # count the presence of length 3 paths
-    p3_restraint = dist.Normal(R_pairwise_matrix, 4)
+    p3_restraint = dist.Normal(R_pairwise_matrix, 2)
     p3_score = p3_restraint.log_prob(aij)
     numpyro.factor("p3_score", p3_score)
     
@@ -3013,12 +3014,12 @@ def model23_o_params(model_data,
 
 def model23_o(model_data):
     model23_o_params(model_data,
-    z_mu = -6 ,#-9,
+    z_mu = -5 ,#-9,
     z_sigma = 4.,
     s_sigma_shift = 1e-2,
     _MODEL23_SR_WEIGHT = 1.,
-    n_edges_expected = 250,
-    n_edges_sigma = 50,
+    n_edges_expected = 800,
+    n_edges_sigma = 100,
     degree_mu = 3,
     degree_sigma = 3,
     r_z_sigma = 4,
