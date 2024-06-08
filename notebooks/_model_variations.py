@@ -2976,7 +2976,7 @@ def model23_o_params(model_data,
     ## Restrain the degree distribution to be somewhere around 0-5
     #degree_expected = jnp.ones(N) * degree_mu 
     #degree_restraint = dist.Normal(degree_expected, degree_sigma)
-    degree_restraint = dist.Exponential(1.)
+    degree_restraint = dist.Exponential(.1)
     degree_score = jnp.sum(degree_restraint.log_prob(degree))
     numpyro.factor("degree_score", degree_score)
 
@@ -2988,16 +2988,16 @@ def model23_o_params(model_data,
     p2_score = p2_restraint.log_prob(aij)
     numpyro.factor("p2_score", p2_score)
 
-    ## Path length 2
+    ### Path length 2
     aij = aij @ aij
     aij = jnp.minimum(aij, ONES_ZEROS_AT_DIAG) # count the presence of length 3 paths
     p3_restraint = dist.Normal(R_pairwise_matrix, 2)
     p3_score = p3_restraint.log_prob(aij)
     numpyro.factor("p3_score", p3_score)
     
-    #r_z_restraint = dist.Normal(R_pairwise_matrix, r_z_sigma) 
-    #r_z_score = jnp.sum(r_z_restraint.log_prob(z))
-    #numpyro.factor("r_z_score", r_z_score)
+    r_z_restraint = dist.Normal(R_pairwise_matrix, r_z_sigma) 
+    r_z_score = jnp.sum(r_z_restraint.log_prob(z))
+    numpyro.factor("r_z_score", r_z_score)
 
     #r_restraint = dist.Normal(r_mu_scale * R_pairwise_matrix + r_mu_shift, (r_sigma_scale * R_pairwise_matrix)**2 + r_sigma_shift)
     #r_restraint = dist.Normal(z_mu + R_pairwise_matrix -1, (z_sigma * R_pairwise_matrix)*1.1 + r_sigma_shift)
@@ -3014,7 +3014,7 @@ def model23_o_params(model_data,
 
 def model23_o(model_data):
     model23_o_params(model_data,
-    z_mu = -5 ,#-9,
+    z_mu = -6 ,#-9,
     z_sigma = 4.,
     s_sigma_shift = 1e-2,
     _MODEL23_SR_WEIGHT = 1.,
