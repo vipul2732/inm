@@ -8,6 +8,7 @@ from functools import partial
 from collections import defaultdict
 from pathlib import Path
 import matplotlib.pyplot as plt
+import matplotlib.animation as animation
 import pickle as pkl
 import numpy as np
 import pandas as pd
@@ -88,6 +89,7 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
     end_time = time.time()
     logging.info(f"Time to run merged_results_two_subsets_scores_hist_and_test: {end_time - start_time}")
 
+
     # Plot of improving scores
 
     ef = x["extra_fields"]
@@ -108,6 +110,12 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
     costructure_ij = align_reference_to_model(model_data, pdb_ppi_costructure, mode="cullin")
     end_time = time.time()
     logging.info(f"Time to run align_reference_to_model: {end_time - start_time}")
+    
+    plot_roc_as_an_amount_of_sampling(x, direct_ij, save=save, suffix="_direct")
+    plot_roc_as_an_amount_of_sampling(x, costructure_ij, save=save, suffix="_costructure")
+
+    animate_modeling_run_frames(mv.Z2A(x["samples"]["z"]) > 0.5, model_data = model_data, save=save, o=o,)
+    # Plot ROC as a function of increased sampling
 
     def score_vs_plot(rng_key, stat_mat, score_mat, ylabel, title, save,suffix):
         n_chains, n_iter = stat_mat.shape
@@ -468,6 +476,104 @@ def top_ppv_per_chain_based_on_amount_of_sampling(
     results = metric_as_a_function_of_amount_of_sampling_per_chain(x, lambda x: dim_aware_max(ppv_per_iteration_vectorized(x, refij)), amount_of_sampling_list)
     return results
 
+def roc_as_an_amount_of_sampling(aij_mat, refij, amount_of_sampling_list = None, every = 100, n_bootstraps = 3, rseed = 2048):
+    """
+    
+    """
+    rng_key = jax.random.PRNGKey(rseed)
+    assert aij_mat.ndim == 3
+    n_chains, n_iter, vdim = aij_mat.shape
+    total_samples = n_chains * n_iter
+    
+    if amount_of_sampling_list is None:
+        amount_of_sampling_list = [2] + list(np.arange(10, n_iter, every)) 
+    av_aucs = []
+    av_shuff_aucs = []
+    std_aucs = []
+    std_shuff_aucs = []
+    keys = jax.random.split(rng_key, 6)
+    shuff_ij1 = jax.random.permutation(keys[1], refij)
+    shuff_ij2 = jax.random.permutation(keys[2], refij)
+    shuff_ij3 = jax.random.permutation(keys[3], refij)
+    shuff_ij4 = jax.random.permutation(keys[4], refij)
+    shuff_ij5 = jax.random.permutation(keys[5], refij)
+
+    rng_key = keys[0]
+
+    for nsamples in amount_of_sampling_list:
+        aucs = []
+        shuff_aucs = []
+        rng_key, key = jax.random.split(rng_key)
+        for i in range(n_bootstraps):
+            rng_key, key = jax.random.split(rng_key)
+            indices = jax.random.permutation(key, total_samples)[:nsamples]
+            pred = jnp.mean(aij_mat.reshape(-1, aij_mat.shape[-1])[indices, :], axis=0)
+            #fpr, tpr, thresholds = sklearn.metrics.roc_curve(refij, pred)
+            #shuff_fpr, shuff_tpr, shuff_thresholds = sklearn.metrics.roc_curve(shuff_ij, pred)
+            auc = sklearn.metrics.roc_auc_score(y_true = refij, y_score = pred)
+            shuff_auc1 = sklearn.metrics.roc_auc_score(y_true = shuff_ij1, y_score = pred)
+            shuff_auc2 = sklearn.metrics.roc_auc_score(y_true = shuff_ij2, y_score = pred)
+            shuff_auc3 = sklearn.metrics.roc_auc_score(y_true = shuff_ij3, y_score = pred)
+            shuff_auc4 = sklearn.metrics.roc_auc_score(y_true = shuff_ij4, y_score = pred)
+            shuff_auc5 = sklearn.metrics.roc_auc_score(y_true = shuff_ij5, y_score = pred)
+
+            aucs.append(auc)
+            shuff_aucs = shuff_aucs + [shuff_auc1, shuff_auc2, shuff_auc3, shuff_auc4, shuff_auc5]
+        av_auc = np.mean(aucs)
+        av_shuff_auc = np.mean(shuff_aucs)
+        std_auc = np.std(aucs)
+        std_shuff_auc = np.std(shuff_aucs)
+
+        av_aucs.append(av_auc)
+        av_shuff_aucs.append(av_shuff_auc)
+        std_aucs.append(std_auc)
+        std_shuff_aucs.append(std_shuff_auc)
+    return dict(
+        amount_of_sampling_list = amount_of_sampling_list,
+        av_aucs = av_aucs,
+        av_shuff_aucs = av_shuff_aucs, 
+        std_aucs = std_aucs,
+        std_shuff_aucs = std_shuff_aucs,
+    )
+
+
+
+def plot_roc_as_an_amount_of_sampling(x, refij, save=None, suffix=""):
+    aij_mat = mv.Z2A(x['samples']['z']) > 0.5
+    plot_xy_data = roc_as_an_amount_of_sampling(aij_mat, refij) 
+
+    fig, ax = plt.subplots()
+    ax.errorbar(plot_xy_data["amount_of_sampling_list"], plot_xy_data["av_aucs"], yerr=plot_xy_data["std_aucs"], fmt='.', capsize=2, alpha=0.2, label="AUC")
+    ax.errorbar(plot_xy_data["amount_of_sampling_list"], plot_xy_data["av_shuff_aucs"], yerr=plot_xy_data["std_shuff_aucs"], fmt='.', capsize=2, alpha=0.2, label="Shuffled AUC")
+    ax.set_xlabel("N models")
+    ax.set_ylabel("ROC - AUC")
+    ax.legend()
+
+    save("roc_as_amount_of_sampling" + suffix)
+
+def animate_modeling_run_frames(aij_mat, model_data, save=None, o=None, cmap="cividis", interval=10):
+    fig, ax = plt.subplots()
+    N = model_data["N"]
+    if aij_mat.ndim == 3:
+        # select a representative chain
+        a, b, c = aij_mat.shape
+        assert b != c, f"{(b, c)}should be chain, iter, M"
+        aij_mat = aij_mat[0, :, :]
+    n_iter, M = aij_mat.shape 
+
+    nframe = n_iter
+    
+    mat = ax.matshow(mv.flat2matrix(aij_mat[0, :], n=N), cmap=cmap)
+
+    def update(frame):
+        m = mv.flat2matrix(aij_mat[frame, :], n=N)
+        mat.set_data(m)
+    
+    ani = animation.FuncAnimation(fig, update, frames=nframe, repeat=False, interval = interval)
+    ani.save(o / "representative_modeling_run.mp4")
+    ani.save(o / "representative_modeling_run.gif", writer="pillow")
+
+    
 def dim_aware_max(x):
     if x.ndim == 1:
         return jnp.max(x)
@@ -602,8 +708,8 @@ def merged_results_two_subsets_scores_hist_and_test(merged_results, save=None, o
     pd.DataFrame(test_results._asdict(), index = [0],).to_csv(o / "ks_2samp_scores_results.tsv", sep="\t")
 
     fig, ax = plt.subplots()
-    ax.hist(scores1, bins=100, alpha=0.5, label="subset 1")
-    ax.hist(scores2, bins=100, alpha=0.5, label="subset 2")
+    ax.hist(scores1, bins=100, alpha=0.5, label=f"subset 1 N = {len(scores1)}")
+    ax.hist(scores2, bins=100, alpha=0.5, label=f"subset 2 N = {len(scores2)}")
     ax.set_xlabel("score")
     ax.set_ylabel("count")
     plt.legend()
