@@ -646,7 +646,7 @@ def plot_sliding_window_roc(x, model_data, refij, window_size = 25, save=None, s
 
 
 def animate_modeling_run_frames(aij_mat, model_data, save=None, o=None, cmap="cividis", interval=10):
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(12, 12))
     N = model_data["N"]
     if aij_mat.ndim == 3:
         # select a representative chain
