@@ -110,8 +110,12 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
     costructure_ij = align_reference_to_model(model_data, pdb_ppi_costructure, mode="cullin")
     end_time = time.time()
     logging.info(f"Time to run align_reference_to_model: {end_time - start_time}")
-    
+
+    plot_sliding_window_roc(x, model_data, direct_ij, save=save, suffix="_direct")
+    plot_per_frame_roc(x, model_data, direct_ij, save=save, suffix="_direct") 
     plot_roc_as_an_amount_of_sampling(x, direct_ij, save=save, suffix="_direct")
+    plot_sliding_window_roc(x, model_data, costructure_ij, save=save, suffix="_costructure")
+    plot_per_frame_roc(x, model_data, costructure_ij, save=save, suffix="_costructure")
     plot_roc_as_an_amount_of_sampling(x, costructure_ij, save=save, suffix="_costructure")
 
     animate_modeling_run_frames(mv.Z2A(x["samples"]["z"]) > 0.5, model_data = model_data, save=save, o=o,)
@@ -476,6 +480,69 @@ def top_ppv_per_chain_based_on_amount_of_sampling(
     results = metric_as_a_function_of_amount_of_sampling_per_chain(x, lambda x: dim_aware_max(ppv_per_iteration_vectorized(x, refij)), amount_of_sampling_list)
     return results
 
+def sliding_window_roc(aij_mat, model_data, refij, window_size = 25, rseed = 1024):
+    rng_key = jax.random.PRNGKey(rseed)
+    assert aij_mat.ndim == 3
+    n_chains, n_iter, vdim = aij_mat.shape
+    total_samples = n_chains * n_iter
+
+    keys = jax.random.split(rng_key, 6)
+    shuff_ij1 = jax.random.permutation(keys[1], refij)
+
+    n_samples = n_iter * n_chains
+    n_steps = n_samples - window_size
+    aucs = []
+    shuff_aucs = []
+    mean_scores = []
+    scores = model_data["potential_energy"]
+
+    for i in range(n_steps):
+        pred_per_chain = jnp.mean(aij_mat[:, i:i+window_size, :], axis=1)
+        av_score_per_chain = jnp.mean(scores[:, i:i+window_size], axis=1)
+        for j in range(n_chains):
+            auc = sklearn.metrics.roc_auc_score(y_true = refij, y_score = pred_per_chain[j, :])
+            shuff_auc = sklearn.metrics.roc_auc_score(y_true = shuff_ij1, y_score = pred_per_chain[j, :])
+            aucs.append(auc)
+            shuff_auc = shuff_auc + [shuff_auc]
+            mean_scores.append(av_score_per_chain[j])
+    return dict(
+        aucs = np.array(aucs),
+        mean_scores = np.array(mean_scores),
+        shuff_aucs = np.array(shuff_aucs),
+    )
+
+
+
+    
+
+def per_frame_roc(aji_mat, model_data, refij, rseed=512, every=100):
+    rng_key = jax.random.PRNGKey(rseed)
+    assert aij_mat.ndim == 3
+    n_chains, n_iter, vdim = aij_mat.shape
+    total_samples = n_chains * n_iter
+
+    keys = jax.random.split(rng_key, 6)
+    shuff_ij1 = jax.random.permutation(keys[1], refij)
+
+    n_samples = n_iter * n_chains
+    n_steps = n_samples - window_size
+    aucs = []
+    shuff_aucs = []
+    scores_lst = []
+    scores = model_data["potential_energy"]
+    for i in range(n_iter * n_chains):
+        if i % 100 != 0:
+            continue
+        model = aij_mat.reshape(-1, aij_mat.shape[-1])[i, :]
+        score = scores.reshape(-1)[i]
+        auc = sklearn.metrics.roc_auc_score(y_true = refij, y_score = model)
+        aucs.append(auc)
+        scores_lst.append(score)
+    return dict(
+        aucs = np.array(aucs),
+        scores = np.array(scores_lst),
+    )
+
 def roc_as_an_amount_of_sampling(aij_mat, refij, amount_of_sampling_list = None, every = 100, n_bootstraps = 3, rseed = 2048):
     """
     
@@ -550,6 +617,33 @@ def plot_roc_as_an_amount_of_sampling(x, refij, save=None, suffix=""):
     ax.legend()
 
     save("roc_as_amount_of_sampling" + suffix)
+
+def plot_per_frame_roc(x, model_data, refij, save=None, suffix=""):
+    aij_mat = mv.Z2A(x['samples']['z']) > 0.5
+    plot_xy_data = per_frame_roc(aij_mat, model_data, refij)
+
+    fig, ax = plt.subplots()
+    ax.plot(plot_xy_data["aucs"], plot_xy_data["scores"], alpha=0.2)
+    ax.set_xlabel("AUC")
+    ax.set_ylabel("Score")
+    ax.set_title("AUC per model")
+    save("per_frame_roc" + suffix)
+
+def plot_sliding_window_roc(x, model_data, refij, window_size = 25, save=None, suffix=""):
+    assert isinstance(window_size, int)
+    aij_mat = mv.Z2A(x['samples']['z']) > 0.5
+    plot_xy_data = sliding_window_roc(aij_mat, model_data, refij, window_size = window_size)
+    fig, ax = plt.subplots()
+    ax.set_title(f"Sliding window ({window_size}) ROC")
+    ax.plot(plot_xy_data["shuff_aucs"], plot_xy_data["mean_scores"], alpha=0.8, label="Shuffled reference")
+    ax.plot(plot_xy_data["aucs"], plot_xy_data["mean_scores"], alpha=0.2, label=f"{suffix} reference")
+    ax.set_xlabel("AUC")
+    ax.set_yabel("Mean score")
+    ax.legend()
+    save("sliding_window_roc" + suffix)
+
+    
+
 
 def animate_modeling_run_frames(aij_mat, model_data, save=None, o=None, cmap="cividis", interval=10):
     fig, ax = plt.subplots()
