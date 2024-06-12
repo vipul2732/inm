@@ -486,7 +486,7 @@ def top_ppv_per_chain_based_on_amount_of_sampling(
     results = metric_as_a_function_of_amount_of_sampling_per_chain(x, lambda x: dim_aware_max(ppv_per_iteration_vectorized(x, refij)), amount_of_sampling_list)
     return results
 
-def sliding_window_roc(aij_mat, ef, refij, window_size = 25, rseed = 1024, every=5):
+def sliding_window_roc(aij_mat, ef, refij, window_size = 25, rseed = 1024, every=2):
     rng_key = jax.random.PRNGKey(rseed)
     assert aij_mat.ndim == 3
     n_chains, n_iter, vdim = aij_mat.shape
