@@ -112,6 +112,10 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
     logging.info(f"Time to run align_reference_to_model: {end_time - start_time}")
 
     plot_sliding_window_roc(x, ef, direct_ij, save=save, suffix="_direct")
+    plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 15, suffix="_direct")
+    plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 10, suffix="_direct")
+    plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 5, suffix="_direct")
+    plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 2, suffix="_direct")
     plot_per_frame_roc(x, ef, direct_ij, save=save, suffix="_direct") 
     plot_roc_as_an_amount_of_sampling(x, direct_ij, save=save, suffix="_direct")
     plot_sliding_window_roc(x, ef, costructure_ij, save=save, suffix="_costructure")
@@ -635,7 +639,7 @@ def plot_sliding_window_roc(x, ef, refij, window_size = 25, save=None, suffix=""
     ax.set_xlabel("AUC")
     ax.set_ylabel("Mean score")
     ax.legend()
-    save("sliding_window_roc" + suffix)
+    save(f"sliding_window_roc_{window_size}" + suffix)
 
 def animate_modeling_run_frames(aij_mat, model_data, save=None, o=None, cmap="cividis", interval=10):
     fig, ax = plt.subplots(figsize=(12, 12))
