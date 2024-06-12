@@ -635,7 +635,7 @@ def plot_sliding_window_roc(x, ef, refij, window_size = 25, save=None, suffix=""
     ax.plot(plot_xy_data["shuff_aucs"], plot_xy_data["mean_scores"], alpha=0.8, label="Shuffled reference")
     ax.plot(plot_xy_data["aucs"], plot_xy_data["mean_scores"], alpha=0.2, label=f"{suffix} reference")
     ax.set_xlabel("AUC")
-    ax.set_yabel("Mean score")
+    ax.set_ylabel("Mean score")
     ax.legend()
     save("sliding_window_roc" + suffix)
 
