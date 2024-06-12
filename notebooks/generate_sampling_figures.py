@@ -480,7 +480,7 @@ def top_ppv_per_chain_based_on_amount_of_sampling(
     results = metric_as_a_function_of_amount_of_sampling_per_chain(x, lambda x: dim_aware_max(ppv_per_iteration_vectorized(x, refij)), amount_of_sampling_list)
     return results
 
-def sliding_window_roc(aij_mat, ef, refij, window_size = 25, rseed = 1024):
+def sliding_window_roc(aij_mat, ef, refij, window_size = 25, rseed = 1024, every=5):
     rng_key = jax.random.PRNGKey(rseed)
     assert aij_mat.ndim == 3
     n_chains, n_iter, vdim = aij_mat.shape
@@ -496,13 +496,15 @@ def sliding_window_roc(aij_mat, ef, refij, window_size = 25, rseed = 1024):
     scores = ef["potential_energy"]
 
     for i in range(n_steps):
+        if i % every != 0:
+            continue
         pred_per_chain = np.mean(aij_mat[:, i:i+window_size, :], axis=1)
         av_score_per_chain = np.mean(scores[:, i:i+window_size], axis=1)
         for j in range(n_chains):
             auc = sklearn.metrics.roc_auc_score(y_true = refij, y_score = pred_per_chain[j, :])
             shuff_auc = sklearn.metrics.roc_auc_score(y_true = shuff_ij1, y_score = pred_per_chain[j, :])
             aucs.append(auc)
-            shuff_auc = shuff_auc + [shuff_auc]
+            shuff_aucs.append(shuff_auc)
             mean_scores.append(av_score_per_chain[j])
     return dict(
         aucs = np.array(aucs),
