@@ -521,8 +521,6 @@ def per_frame_roc(aij_mat, ef, refij, rseed=512, every=100):
     keys = jax.random.split(rng_key, 6)
     shuff_ij1 = jax.random.permutation(keys[1], refij)
 
-    n_samples = n_iter * n_chains
-    n_steps = n_samples - window_size
     aucs = []
     shuff_aucs = []
     scores_lst = []
@@ -620,7 +618,7 @@ def plot_per_frame_roc(x, ef, refij, save=None, suffix=""):
     plot_xy_data = per_frame_roc(aij_mat, ef, refij)
 
     fig, ax = plt.subplots()
-    ax.plot(plot_xy_data["aucs"], plot_xy_data["scores"], alpha=0.2)
+    ax.plot(plot_xy_data["aucs"], plot_xy_data["scores"], fmt=".", alpha=0.2)
     ax.set_xlabel("AUC")
     ax.set_ylabel("Score")
     ax.set_title("AUC per model")
@@ -632,8 +630,8 @@ def plot_sliding_window_roc(x, ef, refij, window_size = 25, save=None, suffix=""
     plot_xy_data = sliding_window_roc(aij_mat, ef, refij, window_size = window_size)
     fig, ax = plt.subplots()
     ax.set_title(f"Sliding window ({window_size}) ROC")
-    ax.plot(plot_xy_data["shuff_aucs"], plot_xy_data["mean_scores"], alpha=0.8, label="Shuffled reference")
-    ax.plot(plot_xy_data["aucs"], plot_xy_data["mean_scores"], alpha=0.2, label=f"{suffix} reference")
+    ax.plot(plot_xy_data["shuff_aucs"], plot_xy_data["mean_scores"], fmt = ".", alpha=0.8, label="Shuffled reference")
+    ax.plot(plot_xy_data["aucs"], plot_xy_data["mean_scores"], fmt = ".", alpha=0.2, label=f"{suffix} reference")
     ax.set_xlabel("AUC")
     ax.set_ylabel("Mean score")
     ax.legend()
