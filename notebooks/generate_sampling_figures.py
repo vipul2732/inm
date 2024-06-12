@@ -117,14 +117,14 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
     plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 15, suffix="_direct" + suffix)
     plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 10, suffix="_direct" + suffix)
     plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 5, suffix="_direct" + suffix)
-    plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 2, suffix="_direct" + suffix)
+    #plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 2, suffix="_direct" + suffix)
     plot_per_frame_roc(x, ef, direct_ij, save=save, suffix="_direct" + suffix) 
     plot_roc_as_an_amount_of_sampling(x, direct_ij, save=save, suffix="_direct" + suffix)
     plot_sliding_window_roc(x, ef, costructure_ij, save=save, suffix="_costructure" + suffix)
     plot_per_frame_roc(x, ef, costructure_ij, save=save, suffix="_costructure" + suffix)
     plot_roc_as_an_amount_of_sampling(x, costructure_ij, save=save, suffix="_costructure" + suffix)
 
-    animate_modeling_run_frames(mv.Z2A(x["samples"]["z"]) > 0.5, model_data = model_data, save=save, o=o,)
+    animate_modeling_run_frames(mv.Z2A(x["samples"]["z"]) > 0.5, model_data = model_data, save=save, o=o, suffix = suffix)
     # Plot ROC as a function of increased sampling
 
     def score_vs_plot(rng_key, stat_mat, score_mat, ylabel, title, save, suffix):
@@ -810,9 +810,17 @@ def merged_results_two_subsets_scores_hist_and_test(merged_results, save=None, o
     # write a csv file for the two sample test results
     pd.DataFrame(test_results._asdict(), index = [0],).to_csv(o / "ks_2samp_scores_results.tsv", sep="\t")
 
+    mu = np.mean(scores_flat)
+    sigma = np.std(scores_flat)
+    
+    n_sigma = 3.5 
+    max_val = mu + n_sigma * sigma
+    min_val = mu - n_sigma * sigma
+    hist_range = (min_val, max_val)
+
     fig, ax = plt.subplots()
-    ax.hist(scores1, bins=100, alpha=0.5, label=f"subset 1 N = {len(scores1)}")
-    ax.hist(scores2, bins=100, alpha=0.5, label=f"subset 2 N = {len(scores2)}")
+    ax.hist(scores1, bins=100, alpha=0.5, label=f"subset 1 N = {len(scores1)}", range=hist_range)
+    ax.hist(scores2, bins=100, alpha=0.5, label=f"subset 2 N = {len(scores2)}", range=hist_range)
     ax.set_xlabel("score")
     ax.set_ylabel("count")
     plt.legend()
