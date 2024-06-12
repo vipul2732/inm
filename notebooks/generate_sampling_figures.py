@@ -641,6 +641,17 @@ def plot_sliding_window_roc(x, ef, refij, window_size = 25, save=None, suffix=""
     ax.legend()
     save(f"sliding_window_roc_{window_size}" + suffix)
 
+    fig, ax = plt.subplots()
+    ax.set_title(f"Sliding window ({window_size}) ROC")
+    ax.plot(plot_xy_data["shuff_aucs"], np.log10(plot_xy_data["mean_scores"]), ".", alpha=0.8,  label="Shuffled reference")
+    ax.plot(plot_xy_data["aucs"],       np.log10(plot_xy_data["mean_scores"]),  ".", alpha=0.2, label=f"{suffix} reference")
+    ax.set_xlabel("AUC")
+    ax.set_ylabel("log10 Mean score")
+    ax.legend()
+    save(f"sliding_window_roc_{window_size}_log10" + suffix)
+
+    
+
 def animate_modeling_run_frames(aij_mat, model_data, save=None, o=None, cmap="cividis", interval=10):
     fig, ax = plt.subplots(figsize=(12, 12))
     N = model_data["N"]
