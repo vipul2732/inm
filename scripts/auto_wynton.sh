@@ -11,5 +11,5 @@ while true; do
 	tar -czvf ../results/"$MODEL1"_merged/figs300.tar.gz ../results/"$MODEL1"_merged/*300.png
 	tar -czvf ../results/"$MODEL2"_merged/figs300.tar.gz ../results/"$MODEL2"_merged/*300.png
 
-	sleep 300
+	sleep $1 
 done
