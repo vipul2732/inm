@@ -85,7 +85,7 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
         ax.set_title(title)
         save(savename)
     start_time = time.time()    
-    merged_results_two_subsets_scores_hist_and_test(x, save=save, o = o)   
+    merged_results_two_subsets_scores_hist_and_test(x, save=save, o = o, suffix=suffix)   
     end_time = time.time()
     logging.info(f"Time to run merged_results_two_subsets_scores_hist_and_test: {end_time - start_time}")
 
@@ -793,7 +793,7 @@ def n_fn(aij, refij):
 def n_edge(aij):
     return np.sum(aij > 0.5)
 
-def merged_results_two_subsets_scores_hist_and_test(merged_results, save=None, o = None):
+def merged_results_two_subsets_scores_hist_and_test(merged_results, save=None, o = None, suffix=""):
     scores = merged_results["extra_fields"]["potential_energy"]
     
     nchains, n_iter = scores.shape
@@ -821,7 +821,7 @@ def merged_results_two_subsets_scores_hist_and_test(merged_results, save=None, o
 
     s = f"Two-sample KS test\nD={D}\np-value={pval}"
     plt.text(0.6, 0.6, s, transform=plt.gca().transAxes)
-    save("scores_2_hist")
+    save("scores_2_hist" + suffix)
 
 
 
