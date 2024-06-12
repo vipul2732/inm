@@ -111,6 +111,8 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
     end_time = time.time()
     logging.info(f"Time to run align_reference_to_model: {end_time - start_time}")
 
+    plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 100, suffix="_direct")
+    plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 50, suffix="_direct")
     plot_sliding_window_roc(x, ef, direct_ij, save=save, suffix="_direct")
     plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 15, suffix="_direct")
     plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 10, suffix="_direct")
