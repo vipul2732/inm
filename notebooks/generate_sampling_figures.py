@@ -1866,8 +1866,8 @@ def _main(o, i, mode, merge = False):
             save = save,
             o = o)
                 
-        gplot(x = x, suffix = "_w_warmup")
-        gplot(x2)
+        #gplot(x = x, suffix = "_w_warmup")
+        #gplot(x2)
 
 
 
