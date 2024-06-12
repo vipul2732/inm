@@ -489,8 +489,7 @@ def sliding_window_roc(aij_mat, ef, refij, window_size = 25, rseed = 1024):
     keys = jax.random.split(rng_key, 6)
     shuff_ij1 = jax.random.permutation(keys[1], refij)
 
-    n_samples = n_iter * n_chains
-    n_steps = n_samples - window_size
+    n_steps = n_iter - window_size
     aucs = []
     shuff_aucs = []
     mean_scores = []
@@ -1898,6 +1897,7 @@ def optional_flatten(x):
     If z is in matrix form, flatten it
     """
     samples = x["samples"]
+    ef = x["extra_fields"]
     temp = {}
     flatf = jax.jit(mv.matrix2flat)
     flattened_lst = []
@@ -1921,6 +1921,20 @@ def optional_flatten(x):
     for key in temp:
         x["samples"][key] = temp[key]
     return x
+
+def remove_nans(x):
+    """
+    Remove iterations with NaNs 
+    """
+    samples = x["samples"]
+    nans_at_samples = np.isnan(samples['z']).any(axis=2)
+    nans_at_scores = np.isnan(x['extra_fields']['potential_energy'])
+    
+
+
+
+    
+
 
 
             
