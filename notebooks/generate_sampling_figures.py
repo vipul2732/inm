@@ -496,8 +496,8 @@ def sliding_window_roc(aij_mat, ef, refij, window_size = 25, rseed = 1024):
     scores = ef["potential_energy"]
 
     for i in range(n_steps):
-        pred_per_chain = jnp.mean(aij_mat[:, i:i+window_size, :], axis=1)
-        av_score_per_chain = jnp.mean(scores[:, i:i+window_size], axis=1)
+        pred_per_chain = np.mean(aij_mat[:, i:i+window_size, :], axis=1)
+        av_score_per_chain = np.mean(scores[:, i:i+window_size], axis=1)
         for j in range(n_chains):
             auc = sklearn.metrics.roc_auc_score(y_true = refij, y_score = pred_per_chain[j, :])
             shuff_auc = sklearn.metrics.roc_auc_score(y_true = shuff_ij1, y_score = pred_per_chain[j, :])
@@ -509,10 +509,6 @@ def sliding_window_roc(aij_mat, ef, refij, window_size = 25, rseed = 1024):
         mean_scores = np.array(mean_scores),
         shuff_aucs = np.array(shuff_aucs),
     )
-
-
-
-    
 
 def per_frame_roc(aij_mat, ef, refij, rseed=512, every=100):
     rng_key = jax.random.PRNGKey(rseed)
