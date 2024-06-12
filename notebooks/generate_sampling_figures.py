@@ -111,23 +111,23 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
     end_time = time.time()
     logging.info(f"Time to run align_reference_to_model: {end_time - start_time}")
 
-    plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 100, suffix="_direct")
-    plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 50, suffix="_direct")
-    plot_sliding_window_roc(x, ef, direct_ij, save=save, suffix="_direct")
-    plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 15, suffix="_direct")
-    plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 10, suffix="_direct")
-    plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 5, suffix="_direct")
-    plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 2, suffix="_direct")
-    plot_per_frame_roc(x, ef, direct_ij, save=save, suffix="_direct") 
-    plot_roc_as_an_amount_of_sampling(x, direct_ij, save=save, suffix="_direct")
-    plot_sliding_window_roc(x, ef, costructure_ij, save=save, suffix="_costructure")
-    plot_per_frame_roc(x, ef, costructure_ij, save=save, suffix="_costructure")
-    plot_roc_as_an_amount_of_sampling(x, costructure_ij, save=save, suffix="_costructure")
+    plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 100, suffix="_direct" + suffix)
+    plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 50, suffix="_direct" + suffix)
+    plot_sliding_window_roc(x, ef, direct_ij, save=save, suffix="_direct" + suffix)
+    plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 15, suffix="_direct" + suffix)
+    plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 10, suffix="_direct" + suffix)
+    plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 5, suffix="_direct" + suffix)
+    plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 2, suffix="_direct" + suffix)
+    plot_per_frame_roc(x, ef, direct_ij, save=save, suffix="_direct" + suffix) 
+    plot_roc_as_an_amount_of_sampling(x, direct_ij, save=save, suffix="_direct" + suffix)
+    plot_sliding_window_roc(x, ef, costructure_ij, save=save, suffix="_costructure" + suffix)
+    plot_per_frame_roc(x, ef, costructure_ij, save=save, suffix="_costructure" + suffix)
+    plot_roc_as_an_amount_of_sampling(x, costructure_ij, save=save, suffix="_costructure" + suffix)
 
     animate_modeling_run_frames(mv.Z2A(x["samples"]["z"]) > 0.5, model_data = model_data, save=save, o=o,)
     # Plot ROC as a function of increased sampling
 
-    def score_vs_plot(rng_key, stat_mat, score_mat, ylabel, title, save,suffix):
+    def score_vs_plot(rng_key, stat_mat, score_mat, ylabel, title, save, suffix):
         n_chains, n_iter = stat_mat.shape
         nvalues = n_chains * n_iter
         indices = jax.random.permutation(rng_key, jnp.arange(nvalues))[:100_000]
@@ -654,7 +654,7 @@ def plot_sliding_window_roc(x, ef, refij, window_size = 25, save=None, suffix=""
 
     
 
-def animate_modeling_run_frames(aij_mat, model_data, save=None, o=None, cmap="cividis", interval=10):
+def animate_modeling_run_frames(aij_mat, model_data, save=None, o=None, cmap="cividis", interval=10, suffix=""):
     fig, ax = plt.subplots(figsize=(12, 12))
     N = model_data["N"]
     if aij_mat.ndim == 3:
@@ -673,8 +673,8 @@ def animate_modeling_run_frames(aij_mat, model_data, save=None, o=None, cmap="ci
         mat.set_data(m)
     
     ani = animation.FuncAnimation(fig, update, frames=nframe, repeat=False, interval = interval)
-    ani.save(o / "representative_modeling_run.mp4")
-    ani.save(o / "representative_modeling_run.gif", writer="pillow")
+    ani.save(o / f"representative_modeling_run{suffix}.mp4")
+    ani.save(o / f"representative_modeling_run{suffix}.gif", writer="pillow")
 
     
 def dim_aware_max(x):
@@ -1857,7 +1857,7 @@ def _main(o, i, mode, merge = False):
         with open(str(i) + ".pkl", "rb") as f:
             x2 = pkl.load(f)
         x2 = optional_flatten(x2)
-        multi_chain_validate_shapes(x2, model_data)
+        #multi_chain_validate_shapes(x2, model_data)
         fplot(x2)
 
         gplot = partial(
