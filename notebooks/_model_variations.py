@@ -2866,12 +2866,14 @@ def model23_n_(model_data):
     degree_expected = jnp.ones(N) * 3
     degree_restraint = dist.Normal(degree_expected, 3)
     degree_score = jnp.sum(degree_restraint.log_prob(degree))
-    numpyro.factor("degree_score", degree_score)
+    numpyro.factor("degree_score_", degree_score)
+    numpyro.deterministic("degree_score", -degree_score)
 
     n_edges = jnp.sum(degree) / 2
     n_edges_restraint = dist.Normal(300, 100)
     n_edges_score = n_edges_restraint.log_prob(n_edges)
-    numpyro.factor("n_edges_score", n_edges_score)
+    numpyro.factor("n_edges_score_", n_edges_score)
+    numpyro.deterministic("n_edges_score", -n_edges_score)
     
     # Pull edges towards the profile similarity
     # If profile similiary is 1 N(R | 1, 0.3)
@@ -2888,11 +2890,13 @@ def model23_n_(model_data):
 
     r_z_restraint = dist.Normal(R_pairwise_matrix, 2) #0.7)
     r_z_score = jnp.sum(r_z_restraint.log_prob(z))
-    numpyro.factor("r_z_score", r_z_score)
+    numpyro.factor("r_z_score_", r_z_score)
+    numpyro.deterministic("r_z_score", -r_z_score)
 
     r_restraint = dist.Normal(R_pairwise_matrix - 0.5, R_pairwise_matrix**2 + 1e-2)
     r_score = jnp.sum(r_restraint.log_prob(z))
-    numpyro.factor("r_score", r_score)
+    numpyro.factor("r_score_", r_score)
+    numpyro.deterministic("r_score", -r_score)
 
     # N edges restraint
     #n_edges = jnp.sum(aij) // 2
@@ -2913,7 +2917,8 @@ def model23_n(model_data):
     saint_max_pair_score_pairwise_matrix, z = model23_n_(model_data)
     s_restraint = dist.Normal(saint_max_pair_score_pairwise_matrix-0.5, saint_max_pair_score_pairwise_matrix ** 2 + 1e-2)
     s_score = jnp.sum(s_restraint.log_prob(z))
-    numpyro.factor("s_score", s_score)
+    numpyro.factor("s_score_", s_score)
+    numpyro.deterministic("s_score", -s_score)
 
 def model23_o_params(model_data,
     z_mu = 0.1, z_sigma = 1.,
