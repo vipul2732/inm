@@ -554,7 +554,7 @@ def roc_as_an_amount_of_sampling(aij_mat, refij, amount_of_sampling_list = None,
     total_samples = n_chains * n_iter
     
     if amount_of_sampling_list is None:
-        amount_of_sampling_list = [2] + list(np.arange(10, n_iter, every)) 
+        amount_of_sampling_list = [1, 2, 3, 4, 5, 6, 7, 8, 9] + list(np.arange(10, n_iter, every)) 
     av_aucs = []
     av_shuff_aucs = []
     std_aucs = []
@@ -674,7 +674,7 @@ def animate_modeling_run_frames(aij_mat, model_data, save=None, o=None, cmap="ci
     
     ani = animation.FuncAnimation(fig, update, frames=nframe, repeat=False, interval = interval)
     ani.save(o / f"representative_modeling_run{suffix}.mp4")
-    ani.save(o / f"representative_modeling_run{suffix}.gif", writer="pillow")
+    #ani.save(o / f"representative_modeling_run{suffix}.gif", writer="pillow")
 
     
 def dim_aware_max(x):
@@ -1171,7 +1171,8 @@ def run_multi_chain_version_of_single_chain_plots(x, model_data, save, o, suffix
             savename = "accept_prob" + suffix,)
 
     for key in ("accept_prob", "mean_accept_prob", "diverging", "num_steps",
-                "r_score", "sij_score", "z_score", "n_edges_score", "grad_r_score", "grad_z_score"):
+                "r_score", "sij_score", "z_score", "n_edges_score", "grad_r_score", "grad_z_score",
+                "degree_score"):
         plot_stuff = False
         if (key in ef):  
             d = ef
