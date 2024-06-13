@@ -286,7 +286,7 @@ mini_model23_n_mock_10k = from_template(
 mini_model23_n_all_2k = from_template(
     mini_model23_n,
     num_samples = 2_000,
-    num_warmup = 50,
+    num_warmup = 0,
     model_output_dirpath = "../results/mini_model23_n_all_2k",
     filter_kw = "all",
 )
