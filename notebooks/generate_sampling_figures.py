@@ -65,6 +65,7 @@ def input_load(i, fbasename, suffix):
     with open(i / f"{fbasename}{suffix}.pkl", "rb") as f:
         return pkl.load(f)
 
+
 def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None):
     """
     Params:
@@ -89,7 +90,6 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
     end_time = time.time()
     logging.info(f"Time to run merged_results_two_subsets_scores_hist_and_test: {end_time - start_time}")
 
-
     # Plot of improving scores
 
     ef = x["extra_fields"]
@@ -113,6 +113,8 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
 
     plot_a_b_roc(x, direct_ij, save=save, suffix="_direct" + suffix)
     plot_a_b_roc(x, costructure_ij, save=save, suffix="_costructure" + suffix)
+
+    plot_degree_plots(x, save=save, suffix=suffix)
 
     #plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 100, suffix="_direct" + suffix)
     #plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 50, suffix="_direct" + suffix)
@@ -547,6 +549,31 @@ def per_frame_roc(aij_mat, ef, refij, rseed=512, every=100):
         scores = np.array(scores_lst),
     )
 
+def plot_degree_plots(x, save = None, suffix = ""): 
+    aij_mat = mv.Z2A(x["samples"]["z"]) > 0.5
+
+    n_chains, n_iter, N, N2 = aij_mat.shape
+    assert N == N2, (N, N2)
+
+    degree_mat = np.sum(aij_mat, axis=3)
+
+    # Plot degree over all chains
+    fig, ax = plt.subplots()
+    ax.hist(np.ravel(degree_mat), bins=100)
+    ax.set_xlabel("Degree per iteration per node")
+    ax.set_ylabel("Count")
+    save("degree_hist" + suffix)
+
+    weighted_degree_mat = np.mean(aij_mat, axis=1) # Average network per chain
+    weighted_degree_mat = np.sum(weighted_degree_mat, axis=2)
+
+    fig, ax = plt.subplots()
+    ax.hist(np.ravel(weighted_degree_mat), bins=100)
+    ax.set_xlabel("Weighted degree")
+    ax.set_ylabel("Count")
+    save("weighted_degree_hist" + suffix)
+
+
 def roc_as_an_amount_of_sampling(aij_mat, refij, amount_of_sampling_list = None, every = 1, n_bootstraps = 3, rseed = 2048):
     """
     
@@ -606,8 +633,6 @@ def roc_as_an_amount_of_sampling(aij_mat, refij, amount_of_sampling_list = None,
         std_aucs = std_aucs,
         std_shuff_aucs = std_shuff_aucs,
     )
-
-
 
 def plot_roc_as_an_amount_of_sampling(x, refij, save=None, suffix=""):
     aij_mat = mv.Z2A(x['samples']['z']) > 0.5
