@@ -1924,6 +1924,8 @@ def optional_flatten(x):
     flatf = jax.jit(mv.matrix2flat)
     flattened_lst = []
     for key, val in samples.items():
+        if val.ndim < 2:
+            continue 
         shape = val.shape
         if shape[-1] == shape[-2]:
             if val.ndim == 3: # (iter, N, N)
