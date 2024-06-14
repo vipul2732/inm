@@ -114,8 +114,6 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
     plot_a_b_roc(x, direct_ij, save=save, suffix="_direct" + suffix)
     plot_a_b_roc(x, costructure_ij, save=save, suffix="_costructure" + suffix)
 
-    plot_degree_plots(x, save=save, suffix=suffix)
-
     #plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 100, suffix="_direct" + suffix)
     #plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 50, suffix="_direct" + suffix)
     #plot_sliding_window_roc(x, ef, direct_ij, save=save, suffix="_direct" + suffix)
@@ -1906,6 +1904,7 @@ def _main(o, i, mode, merge = False):
         
         N = model_data['N']
         start_time = time.time()
+        plot_degree_plots(x, save=save)
         x = optional_flatten(x)
         end_time = time.time()
         logging.info(f"Time to flatten samples {end_time - start_time}")
