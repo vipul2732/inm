@@ -679,10 +679,10 @@ def plot_a_b_roc(x, refij, save=None, suffix=""):
     for key, model in models.items():
         auc = sklearn.metrics.roc_auc_score(y_true = refij, y_score = model)
         fpr, tpr, thresholds = sklearn.metrics.roc_curve(refij, model)
-        ax.plot(fpr, tpr, 'k-', alpha=0.2, label=f"{key} - AUC={auc}")
+        ax.plot(fpr, tpr, alpha=0.4, label=f"{key} - AUC={auc}")
     ax.set_xlabel("FPR")
     ax.set_ylabel("TPR")
-    ax.legend(f"ROC {key} - AUC={auc}")
+    ax.legend()
     save(f"ab_roc" + suffix)
 
 
