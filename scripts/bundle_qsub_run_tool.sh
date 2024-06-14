@@ -29,7 +29,6 @@ conda activate wyndevpy39
 echo $1
 echo $2
 
-python3 run_tool.py $1 --rseed $2
 python3 run_tool.py $1 --jax2numpy-path ../results/"$1"_rseed_"$2"/
 python3 run_tool.py $1 --rseed $2 --figures
 
