@@ -544,7 +544,7 @@ def per_frame_roc(aij_mat, ef, refij, rseed=512, every=100):
         scores = np.array(scores_lst),
     )
 
-def roc_as_an_amount_of_sampling(aij_mat, refij, amount_of_sampling_list = None, every = 100, n_bootstraps = 3, rseed = 2048):
+def roc_as_an_amount_of_sampling(aij_mat, refij, amount_of_sampling_list = None, every = 10, n_bootstraps = 3, rseed = 2048):
     """
     
     """
@@ -554,7 +554,7 @@ def roc_as_an_amount_of_sampling(aij_mat, refij, amount_of_sampling_list = None,
     total_samples = n_chains * n_iter
     
     if amount_of_sampling_list is None:
-        amount_of_sampling_list = [1, 2, 3, 4, 5, 6, 7, 8, 9] + list(np.arange(10, n_iter, every)) 
+        amount_of_sampling_list = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 18,] + list(np.arange(20, n_iter, every)) 
     av_aucs = []
     av_shuff_aucs = []
     std_aucs = []
