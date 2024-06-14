@@ -544,7 +544,7 @@ def per_frame_roc(aij_mat, ef, refij, rseed=512, every=100):
         scores = np.array(scores_lst),
     )
 
-def roc_as_an_amount_of_sampling(aij_mat, refij, amount_of_sampling_list = None, every = 10, n_bootstraps = 3, rseed = 2048):
+def roc_as_an_amount_of_sampling(aij_mat, refij, amount_of_sampling_list = None, every = 1, n_bootstraps = 3, rseed = 2048):
     """
     
     """
