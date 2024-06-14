@@ -1714,7 +1714,7 @@ def _main(o, i, mode, merge = False):
 
             for key in ("accept_prob", "mean_accept_prob", "diverging", "num_steps",
                     "r_score", "sij_score", "z_score", "n_edges_score", "grad_r_score", "grad_z_score",
-                        "s_score"):
+                    "degree_score", "s_score"):
                 plot_stuff = False
                 if (key in ef):  
                     d = ef
