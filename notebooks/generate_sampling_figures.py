@@ -683,7 +683,7 @@ def plot_a_b_roc(x, refij, save=None, suffix=""):
     ax.set_xlabel("FPR")
     ax.set_ylabel("TPR")
     ax.legend(f"ROC {key} - AUC={auc}")
-    save(f"roc_{key}" + suffix)
+    save(f"ab_roc" + suffix)
 
 
 
