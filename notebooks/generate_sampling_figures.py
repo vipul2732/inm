@@ -111,17 +111,20 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
     end_time = time.time()
     logging.info(f"Time to run align_reference_to_model: {end_time - start_time}")
 
-    plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 100, suffix="_direct" + suffix)
-    plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 50, suffix="_direct" + suffix)
-    plot_sliding_window_roc(x, ef, direct_ij, save=save, suffix="_direct" + suffix)
-    plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 15, suffix="_direct" + suffix)
-    plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 10, suffix="_direct" + suffix)
-    plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 5, suffix="_direct" + suffix)
+    plot_a_b_roc(x, direct_ij, save=save, suffix="_direct" + suffix)
+    plot_a_b_roc(x, costructure_ij, save=save, suffix="_costructure" + suffix)
+
+    #plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 100, suffix="_direct" + suffix)
+    #plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 50, suffix="_direct" + suffix)
+    #plot_sliding_window_roc(x, ef, direct_ij, save=save, suffix="_direct" + suffix)
+    #plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 15, suffix="_direct" + suffix)
+    #plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 10, suffix="_direct" + suffix)
+    #plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 5, suffix="_direct" + suffix)
     #plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 2, suffix="_direct" + suffix)
-    plot_per_frame_roc(x, ef, direct_ij, save=save, suffix="_direct" + suffix) 
+    #plot_per_frame_roc(x, ef, direct_ij, save=save, suffix="_direct" + suffix) 
     plot_roc_as_an_amount_of_sampling(x, direct_ij, save=save, suffix="_direct" + suffix)
-    plot_sliding_window_roc(x, ef, costructure_ij, save=save, suffix="_costructure" + suffix)
-    plot_per_frame_roc(x, ef, costructure_ij, save=save, suffix="_costructure" + suffix)
+    #plot_sliding_window_roc(x, ef, costructure_ij, save=save, suffix="_costructure" + suffix)
+    #plot_per_frame_roc(x, ef, costructure_ij, save=save, suffix="_costructure" + suffix)
     plot_roc_as_an_amount_of_sampling(x, costructure_ij, save=save, suffix="_costructure" + suffix)
 
     animate_modeling_run_frames(mv.Z2A(x["samples"]["z"]) > 0.5, model_data = model_data, save=save, o=o, suffix = suffix)
@@ -629,6 +632,38 @@ def plot_per_frame_roc(x, ef, refij, save=None, suffix=""):
     ax.set_ylabel("Score")
     ax.set_title("AUC per model")
     save("per_frame_roc" + suffix)
+
+def plot_a_b_roc(x, refij, save=None, suffix=""):
+    """
+    Plot ROC of A, B, and A+B 
+    """
+    aij_mat = mv.Z2A(x["samples"]["z"]) > 0.5
+    n_chains, n_iter, M = aij_mat.shape
+    # flatten the first two dimensions
+    aij_mat_flat = aij_mat.reshape(-1, M)
+    indices = jax.random.permutation(jax.random.PRNGKey(0), jnp.arange(n_chains * n_iter))
+    midpoint = len(indices) // 2
+    av_a_models = np.mean(aij_mat_flat[indices[:midpoint], :], axis=0)
+    av_b_models = np.mean(aij_mat_flat[indices[midpoint:], :], axis=0)
+    av_ab_models = np.mean(aij_mat_flat, axis=0)
+
+    representative_model1 = np.array(aij_mat_flat[0, :])
+    representative_modelm = np.array(aij_mat_flat[midpoint, :])
+    representative_modelm2 = np.array(aij_mat_flat[-1, :])
+
+    models = dict(a=av_a_models, b=av_b_models, ab=av_ab_models, n1=representative_model1, n2=representative_modelm, n3=representative_modelm2)
+    fig, ax = plt.subplots()
+    for key, model in models.items():
+        auc = sklearn.metrics.roc_auc_score(y_true = refij, y_score = model)
+        fpr, tpr, thresholds = sklearn.metrics.roc_curve(refij, model)
+        ax.plot(fpr, tpr, 'k-', alpha=0.2, label=f"{key} - AUC={auc}")
+    ax.set_xlabel("FPR")
+    ax.set_ylabel("TPR")
+    ax.legend(f"ROC {key} - AUC={auc}")
+    save(f"roc_{key}" + suffix)
+
+
+
 
 def plot_sliding_window_roc(x, ef, refij, window_size = 25, save=None, suffix=""):
     assert isinstance(window_size, int)
@@ -1829,7 +1864,6 @@ def _main(o, i, mode, merge = False):
         direct_ref = data_io.get_pdb_ppi_predict_direct_reference()
         costructure_ref = data_io.get_pdb_ppi_predict_cocomplex_reference()
 
-
         direct_ij = align_reference_to_model(model_data, direct_ref, mode=mode) 
         costructure_ij = align_reference_to_model(model_data, costructure_ref, mode=mode)
 
@@ -1878,14 +1912,11 @@ def _main(o, i, mode, merge = False):
         #gplot(x = x, suffix = "_w_warmup")
         #gplot(x2)
 
-
-
     if not merge: 
         single_chain_sampling_analysis()
     else:
         multi_chain_sampling_analysis()
     #return samples
-
 
 def multi_chain_validate_shapes(x, model_data):
     samples = x['samples']
