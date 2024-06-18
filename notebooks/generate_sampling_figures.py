@@ -112,6 +112,9 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
     costructure_ij = align_reference_to_model(model_data, pdb_ppi_costructure, mode="cullin")
     end_time = time.time()
     logging.info(f"Time to run align_reference_to_model: {end_time - start_time}")
+    
+    # optional None or synthetic network
+    synthetic_ij = None if "synthetic_network" not in model_data else model_data["synthetic_network"]
 
     plot_a_b_roc(x, direct_ij, save=save, suffix="_direct" + suffix)
     plot_a_b_roc(x, costructure_ij, save=save, suffix="_costructure" + suffix)
@@ -665,6 +668,8 @@ def plot_a_b_roc(x, refij, save=None, suffix=""):
     """
     Plot ROC of A, B, and A+B 
     """
+    if refij is None:
+        return None
     aij_mat = mv.Z2A(x["samples"]["z"]) > 0.5
     n_chains, n_iter, M = aij_mat.shape
     # flatten the first two dimensions
@@ -798,6 +803,8 @@ def get_and_align_HuRI_predictions(x, model_data):
     ...
 
 def plot_humap_saint_inm_roc(x, refij, save=None, o=None, suffix="", decimals=2):
+    if refij is None:
+        return None
     model_data = x["model_data"]
     humap_pred = get_and_align_humap_prediction(model_data)
     saint_pred = get_and_align_saint_prediction(model_data, o)
