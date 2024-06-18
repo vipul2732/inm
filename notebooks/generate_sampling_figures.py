@@ -25,7 +25,9 @@ import logging
 import data_io
 import _model_variations as mv
 import tpr_ppr
+import undirected_edge_list as uel
 import merge_analysis as merge 
+import generate_benchmark_figures as gbf
 
 import scipy as sp
 
@@ -113,6 +115,9 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
 
     plot_a_b_roc(x, direct_ij, save=save, suffix="_direct" + suffix)
     plot_a_b_roc(x, costructure_ij, save=save, suffix="_costructure" + suffix)
+
+    plot_humap_saint_inm_roc(x, direct_ij, save=save, suffix="_direct" + suffix)
+    plot_humap_saint_inm_roc(x, costructure_ij, save=save, suffix="_costructure" + suffix)
 
     #plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 100, suffix="_direct" + suffix)
     #plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 50, suffix="_direct" + suffix)
@@ -685,7 +690,129 @@ def plot_a_b_roc(x, refij, save=None, suffix=""):
     ax.legend()
     save(f"ab_roc" + suffix)
 
+def filter_by_nodes(df, node_lst, a_col, b_col):
+    df = df[df[a_col].isin(node_lst) & df[b_col].isin(node_lst)]
+    return df
 
+def build_expected_edges(node_lst):
+    edge_dict = {}
+    for i, a in enumerate(node_lst):
+        for j in range(i+1, len(node_lst)):
+            b = node_lst[j]
+            edge_dict[frozenset((a, b))] = 1
+    return edge_dict
+
+def build_new_edge_dict(uref, expected_edges):
+    uref._build_edge_dict()
+    new_edge_dict = {}
+    for edge in expected_edges:
+        if edge in uref._edge_dict:
+            new_edge_dict[edge] = uref._edge_dict[edge]
+        else:
+            new_edge_dict[edge] = 0.
+    return new_edge_dict
+
+def edge_dict2df(edge_dict, acolname="auid", bcolname="buid"):
+    a = []
+    b = []
+    w = []
+    for edge, weight in edge_dict.items():
+        edge = list(edge)
+        a.append(edge[0])
+        b.append(edge[1])
+        w.append(weight)
+    return pd.DataFrame({acolname: a, bcolname: b, "w": w})
+
+def get_buffered_humap_prediction_df(model_data, humap2_str_path="../data/processed/references/humap2_ppis_all.tsv"):
+    humap2_all_pred = pd.read_csv(humap2_str_path, sep="\t")
+    name2uid = gbf.get_cullin_reindexer()
+    nodes = [name2uid[name] for name in model_data["name2node_idx"]] 
+    humap2_all_pred = filter_by_nodes(humap2_all_pred, nodes, "auid", "buid")
+    # Add zeros to edge pairs that were not guessed
+    u = uel.UndirectedEdgeList()
+    u.update_from_df(humap2_all_pred, "auid", "buid", edge_value_colname="w", multi_edge_value_merge_strategy="max")
+    new_edge_dict = build_new_edge_dict(u, build_expected_edges(nodes))
+    return edge_dict2df(new_edge_dict)
+
+def get_buffered_saint_prediction_df(model_data):
+    saint_scores = data_io.get_cullin_saint_scores_edgelist()
+    name2uid = gbf.get_cullin_reindexer()
+    nodes = [name2uid[name] for name in model_data["name2node_idx"]] 
+    saint_scores = filter_by_nodes(saint_scores, nodes, "auid", "buid")
+
+    
+    return saint_scores
+        
+
+def get_and_align_humap_prediction(model_data, humap2_str_path="../data/processed/references/humap2_ppis_all.tsv"):
+    humap2_buffered_df = get_buffered_humap_prediction_df(model_data, humap2_str_path)
+    u = uel.UndirectedEdgeList()
+    u.update_from_df(humap2_buffered_df, "auid", "buid", edge_value_colname="w", multi_edge_value_merge_strategy="max")
+    assert u.nedges == model_data["M"], (len(u._edge_dict), model_data["M"])
+    aligned_prediction = align_prediction_to_model(model_data, u)
+    return aligned_prediction 
+
+def get_and_align_saint_prediction(model_data, o):
+    saint_max_bait_prey_buffered_df = get_maximal_bait_prey_composite_scores(model_data, o)
+    u = uel.UndirectedEdgeList()
+    u.update_from_df(saint_max_bait_prey_buffered_df, "auid", "buid", edge_value_colname="w", multi_edge_value_merge_strategy="max")
+    assert u.nedges == model_data["M"], (len(u._edge_dict), model_data["M"])
+    aligned_prediction = align_prediction_to_model(model_data, u)
+    return aligned_prediction 
+
+def get_maximal_bait_prey_composite_scores(model_data, o):
+    composite_table_df = pd.read_csv(o / "composite_table.tsv", sep="\t")
+    reindexer = data_io.get_cullin_reindexer()
+    uids = [reindexer[x] for x in model_data["name2node_idx"]]
+
+    bait_prey_scores = defaultdict(float) 
+    for i, r in composite_table_df.iterrows():
+        bait_uid = reindexer[r["Bait"]]
+        prey_uid = reindexer[r["Prey"]]
+
+        if bait_uid in uids and prey_uid in uids:
+            dict_score = bait_prey_scores[(bait_uid, prey_uid)]
+            current_score = r["MSscore"]
+            if current_score > dict_score:
+                bait_prey_scores[(bait_uid, prey_uid)] = current_score 
+    
+    bait_uid = []
+    prey_uid = []
+    scores = []
+    for (b, p), s in bait_prey_scores.items():
+        bait_uid.append(b)
+        prey_uid.append(p)
+        scores.append(s)
+
+    df = pd.DataFrame({"auid": bait_uid, "buid": prey_uid, "w": scores}) 
+    u = uel.UndirectedEdgeList()
+    u.update_from_df(df, "auid", "buid", edge_value_colname="w", multi_edge_value_merge_strategy="max")
+    new_edge_dict = build_new_edge_dict(u, build_expected_edges(uids))
+    return edge_dict2df(new_edge_dict)
+    
+def get_and_align_HuRI_predictions(x, model_data):
+    huri_all_pred = pd.read_csv("../data/processed/references/HuRI_reference.tsv", sep="\t")
+    nodes = list(model_data["node_name2uid"].keys())
+    huri_all_pred = filter_by_nodes(huri_all_pred, nodes, "auid", "buid")
+    
+    ...
+
+def plot_humap_saint_inm_roc(x, refij, save=None, o=None, suffix="", decimals=2):
+    model_data = x["model_data"]
+    humap_pred = get_and_align_humap_prediction(model_data)
+    saint_pred = get_and_align_saint_prediction(model_data, o)
+    
+
+    hfpr, htpr, hthresholds = sklearn.metrics.roc_curve(refij, humap_pred)
+    sfpr, stpr, _ = sklearn.metrics.roc_curve(refij, saint_pred)
+    hauc = sklearn.metrics.roc_auc_score(y_true = refij, y_score = humap_pred)
+    sauc = sklearn.metric.roc_auc_score(y_true = refij, y_score = saint_pred)
+
+    fig, ax = plt.subplots()
+    ax.plot(hfpr, htpr, alpha=0.2, label=f"HuMAP - AUC={hauc:.{decimals}f}")
+    ax.plot(sfpr, stpr, alpha=0.2, label=f"SAINT - AUC={sauc:.{decimals}f}")
+    ax.legend()
+    save("humap_roc" + suffix)
 
 
 def plot_sliding_window_roc(x, ef, refij, window_size = 25, save=None, suffix=""):
@@ -974,6 +1101,7 @@ def align_reference_to_model(model_data, uref, mode="cullin",):
     """
     Order edges in the reference according to the model.
     """
+    assert isinstance(uref, uel.UndirectedEdgeList)
     n_possible_edges = model_data['M']
     node_idx2name = model_data["node_idx2name"]
     n_nodes = model_data['N']
@@ -995,6 +1123,37 @@ def align_reference_to_model(model_data, uref, mode="cullin",):
             reflist_out[k] = 1
         k += 1
     assert j == n_nodes -1
+    return reflist_out
+
+def align_prediction_to_model(model_data, upred, mode="cullin"):
+    assert isinstance(upred, uel.UndirectedEdgeList)
+    assert np.sum(upred.edge_values) > 10 
+    n_possible_edges = model_data['M']
+    n_nodes = model_data['N']
+    if mode == "cullin":
+        reindexer = data_io.get_cullin_reindexer()
+
+    edge_dict = {}
+
+    for idx, a_node in enumerate(upred.a_nodes):
+        b_node = upred.b_nodes[idx]
+        edge_weight = upred.edge_values[idx]  
+        edge_dict[frozenset((a_node, b_node))] = edge_weight
+
+    assert n_possible_edges == len(edge_dict) 
+
+    reflist_out = np.zeros(n_possible_edges, dtype=np.float64)
+    for k in range(n_possible_edges):
+        i, j = mv.ij_from(k, n_nodes)
+        i_node_name = model_data["node_idx2name"][i]
+        j_node_name = model_data["node_idx2name"][j]
+        i_node_uid = reindexer[i_node_name]
+        j_node_uid = reindexer[j_node_name]
+        edge_ = frozenset((i_node_uid, j_node_uid))
+        assert edge_ in edge_dict
+        edge_weight = edge_dict[edge_]
+        reflist_out[k] = edge_weight
+    assert np.sum(reflist_out) > 10
     return reflist_out
 
 def bootstrap_samples(rng_key, refij, n_boostraps = 100):
