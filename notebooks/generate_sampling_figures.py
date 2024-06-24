@@ -16,6 +16,7 @@ import jax
 import jax.numpy as jnp
 import matplotlib.animation as animation
 import matplotlib as mpl
+import networkx as nx
 import scipy as sp
 import sklearn 
 import time
@@ -118,9 +119,11 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
 
     plot_a_b_roc(x, direct_ij, save=save, suffix="_direct" + suffix)
     plot_a_b_roc(x, costructure_ij, save=save, suffix="_costructure" + suffix)
+    plot_a_b_roc(x, synthetic_ij, save=save, suffix="_synthetic" + suffix)
 
     plot_humap_saint_inm_roc(x, direct_ij, save=save, suffix="_direct" + suffix)
     plot_humap_saint_inm_roc(x, costructure_ij, save=save, suffix="_costructure" + suffix)
+    plot_humap_saint_inm_roc(x, synthetic_ij, save=save, suffix="_synthetic" + suffix)
 
     #plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 100, suffix="_direct" + suffix)
     #plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 50, suffix="_direct" + suffix)
@@ -134,6 +137,7 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
     #plot_sliding_window_roc(x, ef, costructure_ij, save=save, suffix="_costructure" + suffix)
     #plot_per_frame_roc(x, ef, costructure_ij, save=save, suffix="_costructure" + suffix)
     plot_roc_as_an_amount_of_sampling(x, costructure_ij, save=save, suffix="_costructure" + suffix)
+    plot_roc_as_an_amount_of_sampling(x, synthetic_ij, save=save, suffix="_synthetic" + suffix)
 
     animate_modeling_run_frames(mv.Z2A(x["samples"]["z"]) > 0.5, model_data = model_data, save=save, o=o, suffix = suffix)
     # Plot ROC as a function of increased sampling
@@ -178,6 +182,8 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
         save(title + suffix)
 
     def run_plots(x, ef, refij, save, o, jf_tp, jf_tn, M, suffix):
+        if refij is None:
+            return
         start_time = time.time()
 
         # calculate positive predictions
@@ -235,11 +241,10 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
 
     run_plots(x, ef, direct_ij, save, o,  jf_tp, jf_tn, M, suffix="_direct" + suffix)
     run_plots(x, ef, costructure_ij, save, o,  jf_tp, jf_tn, M, suffix="_costructure" + suffix)
+    run_plots(x, ef, synthetic_ij, save, o,  jf_tp, jf_tn, M, suffix="_synthetic" + suffix)
     run_plots(x, ef, shuff_direct_ij, save, o, jf_tp, jf_tn, M, suffix="_shuff_direct" + suffix)
     shuff_costructure_ij = jax.random.permutation(rng_key, costructure_ij)
     run_plots(x, ef, shuff_costructure_ij, save, o, jf_tp, jf_tn, M, suffix="_shuff_costructure" + suffix)
-
-    
 
     #start_time = time.time()
     #score_vs_ppv_plot(jax.random.PRNGKey(0), x["samples"], ef, direct_ij, save=save, o=o, suffix="_direct_" + suffix)
@@ -641,6 +646,8 @@ def roc_as_an_amount_of_sampling(aij_mat, refij, amount_of_sampling_list = None,
     )
 
 def plot_roc_as_an_amount_of_sampling(x, refij, save=None, suffix=""):
+    if refij is None:
+        return
     aij_mat = mv.Z2A(x['samples']['z']) > 0.5
     plot_xy_data = roc_as_an_amount_of_sampling(aij_mat, refij) 
 
@@ -669,7 +676,7 @@ def plot_a_b_roc(x, refij, save=None, suffix=""):
     Plot ROC of A, B, and A+B 
     """
     if refij is None:
-        return None
+        return
     aij_mat = mv.Z2A(x["samples"]["z"]) > 0.5
     n_chains, n_iter, M = aij_mat.shape
     # flatten the first two dimensions
@@ -689,7 +696,7 @@ def plot_a_b_roc(x, refij, save=None, suffix=""):
     for key, model in models.items():
         auc = sklearn.metrics.roc_auc_score(y_true = refij, y_score = model)
         fpr, tpr, thresholds = sklearn.metrics.roc_curve(refij, model)
-        ax.plot(fpr, tpr, alpha=0.4, label=f"{key} - AUC={auc}")
+        ax.plot(fpr, tpr, alpha=0.4, label=f"{key} - AUC={round(auc, 2)}")
     ax.set_xlabel("FPR")
     ax.set_ylabel("TPR")
     ax.legend()
@@ -799,12 +806,10 @@ def get_and_align_HuRI_predictions(x, model_data):
     huri_all_pred = pd.read_csv("../data/processed/references/HuRI_reference.tsv", sep="\t")
     nodes = list(model_data["node_name2uid"].keys())
     huri_all_pred = filter_by_nodes(huri_all_pred, nodes, "auid", "buid")
-    
-    ...
 
 def plot_humap_saint_inm_roc(x, refij, save=None, o=None, suffix="", decimals=2):
     if refij is None:
-        return None
+        return
     model_data = x["model_data"]
     humap_pred = get_and_align_humap_prediction(model_data)
     saint_pred = get_and_align_saint_prediction(model_data, o)
@@ -2108,6 +2113,9 @@ def _main(o, i, mode, merge = False):
         multi_chain_sampling_analysis()
     #return samples
 
+
+
+
 def multi_chain_validate_shapes(x, model_data):
     samples = x['samples']
     ef = x['extra_fields']
@@ -2175,6 +2183,26 @@ def remove_nans(x):
     nans_at_samples = np.isnan(samples['z']).any(axis=2)
     nans_at_scores = np.isnan(x['extra_fields']['potential_energy'])
     
+
+def networkx_graph_from_aij(aij_mat, model_data, threshold = 0.9):
+    nchains, niter, M = aij_mat.shape
+
+    G = nx.Graph()
+    average_network = np.mean(aij_mat, axis=(0, 1))
+    N = model_data["N"]
+    nodeidx2name = model_data["node_idx2name"]
+    for k in range(len(average_network)):
+        weight = float(average_network[k])
+        if weight > threshold:
+            i, j = mv.flat2ij(k, N)
+            u = nodeidx2name[i]
+            v = nodeidx2name[j]
+            G.add_edge(u, v, weight = float(average_network[k]))
+    return G
+
+def plot_degree_network(G, node_name):
+
+    ...
 
 
 
