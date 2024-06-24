@@ -704,7 +704,7 @@ def plot_a_b_roc(x, refij, o, save=None, suffix=""):
 
     n_ref = np.sum(refij)
     df = pd.DataFrame({"ref type" : [suffix], "n ref" : [n_ref], "auc" : [auc]})
-    df.to_csv(o / "ab_roc_table" + suffix + ".tsv", sep="\t", index=False)
+    df.to_csv(o / ("ab_roc_table" + suffix + ".tsv"), sep="\t", index=False)
 
 def filter_by_nodes(df, node_lst, a_col, b_col):
     df = df[df[a_col].isin(node_lst) & df[b_col].isin(node_lst)]
