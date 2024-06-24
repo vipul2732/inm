@@ -821,7 +821,7 @@ def plot_humap_saint_inm_roc(x, model_data, refij, save=None, o=None, suffix="",
     hfpr, htpr, hthresholds = sklearn.metrics.roc_curve(refij, humap_pred)
     sfpr, stpr, _ = sklearn.metrics.roc_curve(refij, saint_pred)
     hauc = sklearn.metrics.roc_auc_score(y_true = refij, y_score = humap_pred)
-    sauc = sklearn.metric.roc_auc_score(y_true = refij, y_score = saint_pred)
+    sauc = sklearn.metrics.roc_auc_score(y_true = refij, y_score = saint_pred)
 
     fig, ax = plt.subplots()
     ax.plot(hfpr, htpr, alpha=0.2, label=f"HuMAP - AUC={hauc:.{decimals}f}")
