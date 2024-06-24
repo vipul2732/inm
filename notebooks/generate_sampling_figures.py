@@ -117,9 +117,9 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
     # optional None or synthetic network
     synthetic_ij = None if "synthetic_network" not in model_data else model_data["synthetic_network"]
 
-    plot_a_b_roc(x, direct_ij, save=save, suffix="_direct" + suffix)
-    plot_a_b_roc(x, costructure_ij, save=save, suffix="_costructure" + suffix)
-    plot_a_b_roc(x, synthetic_ij, save=save, suffix="_synthetic" + suffix)
+    plot_a_b_roc(x, direct_ij, o = o, save=save, suffix="_direct" + suffix)
+    plot_a_b_roc(x, costructure_ij, o = o, save=save, suffix="_costructure" + suffix)
+    plot_a_b_roc(x, synthetic_ij, o = o, save=save, suffix="_synthetic" + suffix)
 
     plot_humap_saint_inm_roc(x, direct_ij, save=save, suffix="_direct" + suffix)
     plot_humap_saint_inm_roc(x, costructure_ij, save=save, suffix="_costructure" + suffix)
@@ -671,7 +671,7 @@ def plot_per_frame_roc(x, ef, refij, save=None, suffix=""):
     ax.set_title("AUC per model")
     save("per_frame_roc" + suffix)
 
-def plot_a_b_roc(x, refij, save=None, suffix=""):
+def plot_a_b_roc(x, refij, o, save=None, suffix=""):
     """
     Plot ROC of A, B, and A+B 
     """
@@ -701,6 +701,10 @@ def plot_a_b_roc(x, refij, save=None, suffix=""):
     ax.set_ylabel("TPR")
     ax.legend()
     save(f"ab_roc" + suffix)
+
+    n_ref = np.sum(refij)
+    df = pd.DataFrame({"ref type" : [suffix], "n ref" : [n_ref], "auc" : [auc]})
+    df.to_csv(o / "ab_roc_table" + suffix + ".tsv", sep="\t", index=False)
 
 def filter_by_nodes(df, node_lst, a_col, b_col):
     df = df[df[a_col].isin(node_lst) & df[b_col].isin(node_lst)]
