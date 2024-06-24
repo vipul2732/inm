@@ -121,9 +121,9 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
     plot_a_b_roc(x, costructure_ij, o = o, save=save, suffix="_costructure" + suffix)
     plot_a_b_roc(x, synthetic_ij, o = o, save=save, suffix="_synthetic" + suffix)
 
-    plot_humap_saint_inm_roc(x, model_data, direct_ij, save=save, suffix="_direct" + suffix)
-    plot_humap_saint_inm_roc(x, model_data, costructure_ij, save=save, suffix="_costructure" + suffix)
-    plot_humap_saint_inm_roc(x, model_data, synthetic_ij, save=save, suffix="_synthetic" + suffix)
+    plot_humap_saint_inm_roc(x, model_data, direct_ij, save=save, o = o, suffix="_direct" + suffix)
+    plot_humap_saint_inm_roc(x, model_data, costructure_ij, save=save, o = o, suffix="_costructure" + suffix)
+    plot_humap_saint_inm_roc(x, model_data, synthetic_ij, save=save, o = o, suffix="_synthetic" + suffix)
 
     #plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 100, suffix="_direct" + suffix)
     #plot_sliding_window_roc(x, ef, direct_ij, save=save, window_size = 50, suffix="_direct" + suffix)
