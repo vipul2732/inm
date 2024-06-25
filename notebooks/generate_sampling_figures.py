@@ -671,7 +671,7 @@ def plot_per_frame_roc(x, ef, refij, save=None, suffix=""):
     ax.set_title("AUC per model")
     save("per_frame_roc" + suffix)
 
-def plot_a_b_roc(x, refij, o, save=None, suffix=""):
+def plot_a_b_roc(x, refij, o, save=None, suffix="", alpha=0.6):
     """
     Plot ROC of A, B, and A+B 
     """
@@ -696,7 +696,7 @@ def plot_a_b_roc(x, refij, o, save=None, suffix=""):
     for key, model in models.items():
         auc = sklearn.metrics.roc_auc_score(y_true = refij, y_score = model)
         fpr, tpr, thresholds = sklearn.metrics.roc_curve(refij, model)
-        ax.plot(fpr, tpr, alpha=0.4, label=f"{key} - AUC={round(auc, 2)}")
+        ax.plot(fpr, tpr, alpha=alpha, label=f"{key} - AUC={round(auc, 2)}")
     ax.set_xlabel("FPR")
     ax.set_ylabel("TPR")
     ax.legend()
@@ -811,7 +811,7 @@ def get_and_align_HuRI_predictions(x, model_data):
     nodes = list(model_data["node_name2uid"].keys())
     huri_all_pred = filter_by_nodes(huri_all_pred, nodes, "auid", "buid")
 
-def plot_humap_saint_inm_roc(x, model_data, refij, save=None, o=None, suffix="", decimals=2):
+def plot_humap_saint_inm_roc(x, model_data, refij, save=None, o=None, suffix="", decimals=2, alpha=0.6):
     if refij is None:
         return
     humap_pred = get_and_align_humap_prediction(model_data)
@@ -829,9 +829,9 @@ def plot_humap_saint_inm_roc(x, model_data, refij, save=None, o=None, suffix="",
 
 
     fig, ax = plt.subplots()
-    ax.plot(hfpr, htpr, alpha=0.2, label=f"HuMAP 2.0 - AUC={hauc:.{decimals}f}")
-    ax.plot(sfpr, stpr, alpha=0.2, label=f"SAINT     - AUC={sauc:.{decimals}f}")
-    ax.plot(afpr, atpr, alpha=0.2, label=f"INM       - AUC={aauc:.{decimals}f}")
+    ax.plot(hfpr, htpr, alpha=alpha, label=f"HuMAP 2.0 - AUC={hauc:.{decimals}f}")
+    ax.plot(sfpr, stpr, alpha=alpha, label=f"SAINT     - AUC={sauc:.{decimals}f}")
+    ax.plot(afpr, atpr, alpha=alpha, label=f"INM       - AUC={aauc:.{decimals}f}")
     ax.legend()
     save("humap_roc" + suffix)
 
