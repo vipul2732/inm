@@ -816,16 +816,22 @@ def plot_humap_saint_inm_roc(x, model_data, refij, save=None, o=None, suffix="",
         return
     humap_pred = get_and_align_humap_prediction(model_data)
     saint_pred = get_and_align_saint_prediction(model_data, o)
+    assert aij_mat.ndim == 3
+    av_aij_mat = np.mean(mv.Z2A(x["samples"]["z"]) > 0.5, axis=(0, 1))
     
-
     hfpr, htpr, hthresholds = sklearn.metrics.roc_curve(refij, humap_pred)
     sfpr, stpr, _ = sklearn.metrics.roc_curve(refij, saint_pred)
+    afpr, atpr, _ = sklearn.metrics.roc_curve(refij, av_aij_mat)
+
     hauc = sklearn.metrics.roc_auc_score(y_true = refij, y_score = humap_pred)
     sauc = sklearn.metrics.roc_auc_score(y_true = refij, y_score = saint_pred)
+    aauc = sklearn.metrics.roc_auc_score(y_true = refij, y_score = av_aij_mat)
+
 
     fig, ax = plt.subplots()
-    ax.plot(hfpr, htpr, alpha=0.2, label=f"HuMAP - AUC={hauc:.{decimals}f}")
-    ax.plot(sfpr, stpr, alpha=0.2, label=f"SAINT - AUC={sauc:.{decimals}f}")
+    ax.plot(hfpr, htpr, alpha=0.2, label=f"HuMAP 2.0 - AUC={hauc:.{decimals}f}")
+    ax.plot(sfpr, stpr, alpha=0.2, label=f"SAINT     - AUC={sauc:.{decimals}f}")
+    ax.plot(afpr, atpr, alpha=0.2, label=f"INM       - AUC={aauc:.{decimals}f}")
     ax.legend()
     save("humap_roc" + suffix)
 
@@ -1010,12 +1016,12 @@ def merged_results_two_subsets_scores_hist_and_test(merged_results, save=None, o
     # write a csv file for the two sample test results
     pd.DataFrame(test_results._asdict(), index = [0],).to_csv(o / "ks_2samp_scores_results.tsv", sep="\t")
 
-    mu = np.mean(scores_flat)
+    med = np.median(scores_flat)
     sigma = np.std(scores_flat)
     
-    n_sigma = 3.5 
-    max_val = mu + n_sigma * sigma
-    min_val = mu - n_sigma * sigma
+    n_sigma = 1. 
+    max_val = med + n_sigma * sigma
+    min_val = med - n_sigma * sigma
     hist_range = (min_val, max_val)
 
     fig, ax = plt.subplots()
@@ -1030,8 +1036,6 @@ def merged_results_two_subsets_scores_hist_and_test(merged_results, save=None, o
     s = f"Two-sample KS test\nD={D}\np-value={pval}"
     plt.text(0.6, 0.6, s, transform=plt.gca().transAxes)
     save("scores_2_hist" + suffix)
-
-
 
 def _loop(aij_mat, refij, f):
     N, _ = aij_mat.shape
