@@ -89,7 +89,7 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
         ax.set_title(title)
         save(savename)
     start_time = time.time()    
-    merged_results_two_subsets_scores_hist_and_test(x, save=save, o = o, suffix=suffix)   
+    merged_results_two_subsets_scores_hist_and_test(x, save=save, o = o, suffix=suffix, min_val = 131_000, max_val = 134_000)   
     end_time = time.time()
     logging.info(f"Time to run merged_results_two_subsets_scores_hist_and_test: {end_time - start_time}")
 
@@ -999,7 +999,7 @@ def n_fn(aij, refij):
 def n_edge(aij):
     return np.sum(aij > 0.5)
 
-def merged_results_two_subsets_scores_hist_and_test(merged_results, save=None, o = None, suffix=""):
+def merged_results_two_subsets_scores_hist_and_test(merged_results, save=None, o = None, suffix="", min_val=None, max_val=None):
     scores = merged_results["extra_fields"]["potential_energy"]
     
     nchains, n_iter = scores.shape
@@ -1018,10 +1018,11 @@ def merged_results_two_subsets_scores_hist_and_test(merged_results, save=None, o
 
     med = np.median(scores_flat)
     sigma = np.std(scores_flat)
-    
-    n_sigma = 1. 
-    max_val = med + n_sigma * sigma
-    min_val = med - n_sigma * sigma
+
+    if (min_val is None) and (max_val is None):
+        n_sigma = 1. 
+        max_val = med + n_sigma * sigma
+        min_val = med - n_sigma * sigma
     hist_range = (min_val, max_val)
 
     fig, ax = plt.subplots()
@@ -2150,6 +2151,7 @@ def save_composite_table(model_data, o, samples):
     outpath = str(o / "composite_N.tsv")
     df.to_csv(outpath, sep="\t")
 
+
 def optional_flatten(x):
     """
     If z is in matrix form, flatten it
@@ -2182,6 +2184,7 @@ def optional_flatten(x):
         x["samples"][key] = temp[key]
     return x
 
+
 def remove_nans(x):
     """
     Remove iterations with NaNs 
@@ -2204,22 +2207,17 @@ def networkx_graph_from_aij(aij_mat, model_data, threshold = 0.9):
             i, j = mv.flat2ij(k, N)
             u = nodeidx2name[i]
             v = nodeidx2name[j]
-            G.add_edge(u, v, weight = float(average_network[k]))
+            G.add_edge(u, v, weight=float(average_network[k]))
     return G
+
 
 def plot_degree_network(G, node_name):
 
     ...
 
 
-
-    
-
-
-
-            
-
-_example = {"i" : "../cullin_run0/0_model23_ll_lp_13.pkl", "o": "../cullin_run0/"}
+_example = {
+    "i": "../cullin_run0/0_model23_ll_lp_13.pkl", "o": "../cullin_run0/"}
 
 if __name__ == "__main__":
     main()
