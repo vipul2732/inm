@@ -816,7 +816,7 @@ def plot_humap_saint_inm_roc(x, model_data, refij, save=None, o=None, suffix="",
         return
     humap_pred = get_and_align_humap_prediction(model_data)
     saint_pred = get_and_align_saint_prediction(model_data, o)
-    assert aij_mat.ndim == 3
+    assert x["samples"]["z"].ndim == 3, x["samples"]["z"].shape
     av_aij_mat = np.mean(mv.Z2A(x["samples"]["z"]) > 0.5, axis=(0, 1))
     
     hfpr, htpr, hthresholds = sklearn.metrics.roc_curve(refij, humap_pred)
