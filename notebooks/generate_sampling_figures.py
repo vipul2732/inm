@@ -69,7 +69,7 @@ def input_load(i, fbasename, suffix):
         return pkl.load(f)
 
 
-def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None):
+def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None, do_animate = False):
     """
     Params:
       x : { 
@@ -138,8 +138,9 @@ def run_multichain_specific_plots(x, model_data, suffix="", save=None, o = None)
     #plot_per_frame_roc(x, ef, costructure_ij, save=save, suffix="_costructure" + suffix)
     plot_roc_as_an_amount_of_sampling(x, costructure_ij, save=save, suffix="_costructure" + suffix)
     plot_roc_as_an_amount_of_sampling(x, synthetic_ij, save=save, suffix="_synthetic" + suffix)
-
-    animate_modeling_run_frames(mv.Z2A(x["samples"]["z"]) > 0.5, model_data = model_data, save=save, o=o, suffix = suffix)
+    
+    if do_animate:
+        animate_modeling_run_frames(mv.Z2A(x["samples"]["z"]) > 0.5, model_data = model_data, save=save, o=o, suffix = suffix)
     # Plot ROC as a function of increased sampling
 
     def score_vs_plot(rng_key, stat_mat, score_mat, ylabel, title, save, suffix):
