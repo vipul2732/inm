@@ -813,7 +813,8 @@ def get_and_align_HuRI_predictions(x, model_data):
     huri_all_pred = filter_by_nodes(huri_all_pred, nodes, "auid", "buid")
 
 def get_norm_and_deg_reweight(aij):
-    assert aij.ndim == 2
+    assert aij.ndim == 1
+    aij = mv.matrix2flat(aij)
     N, N2 = aij.shape
     assert N == N2, (N, N2)
     min_val = np.min(aij)
@@ -824,6 +825,7 @@ def get_norm_and_deg_reweight(aij):
     compliment = 1 - weighted_degree
     aij = aij * compliment
     aij = aij * compliment.T
+    aij = mv.flat2matrix(aij, n=N)
     return aij
 
 def plot_humap_saint_inm_roc(x, model_data, refij, save=None, o=None, suffix="", decimals=2, alpha=0.6):
