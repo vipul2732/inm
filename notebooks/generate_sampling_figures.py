@@ -812,9 +812,10 @@ def get_and_align_HuRI_predictions(x, model_data):
     nodes = list(model_data["node_name2uid"].keys())
     huri_all_pred = filter_by_nodes(huri_all_pred, nodes, "auid", "buid")
 
-def get_norm_and_deg_reweight(aij):
+def get_norm_and_deg_reweight(aij, model_data):
     assert aij.ndim == 1
-    aij = mv.matrix2flat(aij)
+    N = model_data["N"]
+    aij = mv.flat2matrix(aij, n=N)
     N, N2 = aij.shape
     assert N == N2, (N, N2)
     min_val = np.min(aij)
@@ -825,20 +826,18 @@ def get_norm_and_deg_reweight(aij):
     compliment = 1 - weighted_degree
     aij = aij * compliment
     aij = aij * compliment.T
-    aij = mv.flat2matrix(aij, n=N)
+    aij = mv.matrix2flat(aij)
     return aij
 
 def plot_humap_saint_inm_roc(x, model_data, refij, save=None, o=None, suffix="", decimals=2, alpha=0.6):
-
     if refij is None:
         return
     humap_pred = get_and_align_humap_prediction(model_data)
     saint_pred = get_and_align_saint_prediction(model_data, o)
     assert x["samples"]["z"].ndim == 3, x["samples"]["z"].shape
     av_aij_mat = np.mean(mv.Z2A(x["samples"]["z"]) > 0.5, axis=(0, 1))
-    norm_and_deg_reweight = get_norm_and_deg_reweight(av_aij_mat)
+    norm_and_deg_reweight = get_norm_and_deg_reweight(av_aij_mat, model_data)
      
-    
     hfpr, htpr, hthresholds = sklearn.metrics.roc_curve(refij, humap_pred)
     sfpr, stpr, _ = sklearn.metrics.roc_curve(refij, saint_pred)
     afpr, atpr, _ = sklearn.metrics.roc_curve(refij, av_aij_mat)
@@ -849,12 +848,12 @@ def plot_humap_saint_inm_roc(x, model_data, refij, save=None, o=None, suffix="",
     aauc = sklearn.metrics.roc_auc_score(y_true = refij, y_score = av_aij_mat)
     nauc = sklearn.metrics.roc_auc_score(y_true = refij, y_score = norm_and_deg_reweight)
 
-
     fig, ax = plt.subplots()
     ax.plot(hfpr, htpr, alpha=alpha, label=f"HuMAP 2.0 - AUC={hauc:.{decimals}f}")
     ax.plot(sfpr, stpr, alpha=alpha, label=f"SAINT     - AUC={sauc:.{decimals}f}")
     ax.plot(afpr, atpr, alpha=alpha, label=f"INM       - AUC={aauc:.{decimals}f}")
     ax.plot(nfpr, ntpr, alpha=alpha, label=f"INM (norm and deg reweighted) - AUC={nauc:.{decimals}f}")
+
     ax.legend()
     save("humap_roc" + suffix)
 
