@@ -318,6 +318,24 @@ mini_model23_n_all_20k = from_template(
     filter_kw = "all",
 )
 
+mini_model23_n_mock_20k = from_template(
+    mini_model23_n_all_20k,
+    model_output_dirpath = "../results/mini_model23_n_mock_20k",
+    filter_kw = "mock",
+)
+
+mini_model23_n_vif_20k = from_template(
+    mini_model23_n_all_20k,
+    model_output_dirpath = "../results/mini_model23_n_vif_20k",
+    filter_kw = "vif",
+)
+
+mini_model23_n_wt_20k = from_template(
+    mini_model23_n_all_20k,
+    model_output_dirpath = "../results/mini_model23_n_wt_20k",
+    filter_kw = "wt",
+)
+
 mini_model23_n__all_20k_synthetic = from_template(
     mini_model23_n_all_20k,
     model_name = "model23_n_",
