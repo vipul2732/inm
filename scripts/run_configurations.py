@@ -339,7 +339,7 @@ mini_model23_n_p_r_all_5k = from_template(
     model_output_dirpath = "../results/mini_model23_n_p_r_all_5k",
 )
 
-mini_model23_n_p_d_all_5kk = from_template(
+mini_model23_n_p_d_all_5k = from_template(
     mini_model23_n_p_all_5k,
     model_name = "model23_n_p_d",
     model_output_dirpath = "../results/mini_model23_n_p_d_all_5k",
