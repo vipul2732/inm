@@ -2923,6 +2923,156 @@ def model23_n(model_data):
     numpyro.factor("s_score_", s_score)
     numpyro.deterministic("s_score", -s_score)
 
+def model23_n_prior_(model_data):
+    """The prior 'piece' of model23_n"""
+# unpack model variables
+    (N, M, alpha, beta, composite_dict_p_is_1, composite_dict_norm_approx, R,
+     R0, null_dist, zero_clipped_null_log_like, disconectivity_distance, max_distance, saint_max_pair_score_edgelist) = model23_unpack_model_data(model_data)
+
+     # define global variables
+    mu = 0.1
+    sigma = 1.
+    _MODEL23_SR_WEIGHT = 1.1
+    _MODEL23_RZ_SIGMA = 0.4
+    SAINT_PAIR_SCORE = jnp.log(saint_max_pair_score_edgelist)
+    diag_indices = jnp.diag_indices(N)
+    flat2matrix_f = partial(flat2matrix, n = N)
+
+    RO_pairwise_matrix = flat2matrix_f(R0)
+    R_pairwise_matrix = flat2matrix_f(R)
+    zero_clipped_null_log_like_pairwise_matrix = flat2matrix_f(zero_clipped_null_log_like)
+    saint_max_pair_score_pairwise_matrix = flat2matrix_f(saint_max_pair_score_edgelist)
+    saint_max_pair_score_pairwise_matrix = saint_max_pair_score_pairwise_matrix.at[diag_indices].set(0)
+    R_pairwise_matrix = R_pairwise_matrix.at[diag_indices].set(0)
+    
+    # cleanup 
+    del zero_clipped_null_log_like
+    del saint_max_pair_score_edgelist
+    del R
+    del R0
+    NxN = N * N
+
+    # Sample z in matrix form
+    z = numpyro.sample("z", dist.Normal(mu, sigma).expand([N, N]))
+    return saint_max_pair_score_pairwise_matrix, R_pairwise_matrix, z
+
+def model23_n_saint_(model_data, saint_max_pair_score_pairwise_matrix, z):
+    """The saint 'piece' of model23_n"""
+    N = model_data["N"]
+    NxN = N * N
+    s_restraint = dist.Normal(saint_max_pair_score_pairwise_matrix-0.5, saint_max_pair_score_pairwise_matrix ** 2 + 1e-2)
+    s_score = jnp.sum(s_restraint.log_prob(z)) 
+    numpyro.factor("s_score_", s_score)
+    numpyro.deterministic("s_score", -s_score)
+
+def model23_n_r_(R_pairwise_matrix, z):
+    """The R 'piece' of model23_n"""
+    r_z_restraint = dist.Normal(R_pairwise_matrix, 2) #0.7)
+    r_z_score = jnp.sum(r_z_restraint.log_prob(z)) 
+    numpyro.factor("r_z_score_", r_z_score)
+    numpyro.deterministic("r_z_score", -r_z_score)
+
+    r_restraint = dist.Normal(R_pairwise_matrix - 0.5, R_pairwise_matrix**2 + 1e-2)
+    r_score = jnp.sum(r_restraint.log_prob(z)) 
+    numpyro.factor("r_score_", r_score)
+    numpyro.deterministic("r_score", -r_score)
+
+def model23_n_degree_(z, diag_indices, N):
+    """The degree 'piece' of model23_n"""
+    # Define aij from z
+    aij = Z2A(z)
+    # # Set the diagonal to 0
+
+    aij = aij.at[diag_indices].set(0)
+    aij = jnp.tril(aij, k=-1)
+    aij = (aij + aij.T)
+    degree = jnp.sum(aij, axis = 1)
+
+    # Restrain the degree distribution to be somewhere around 0-5
+    degree_expected = jnp.ones(N) * 3
+    degree_restraint = dist.Normal(degree_expected, 3)
+    degree_score = jnp.sum(degree_restraint.log_prob(degree)) 
+    numpyro.factor("degree_score_", degree_score)
+    numpyro.deterministic("degree_score", -degree_score)
+
+def model23_n_nedges_(degree):
+    """The nedges 'piece' of model23_n"""
+    n_edges = jnp.sum(degree) / 2
+    n_edges_restraint = dist.Normal(300, 100)
+    n_edges_score = n_edges_restraint.log_prob(n_edges)
+    numpyro.factor("n_edges_score_", n_edges_score)
+    numpyro.deterministic("n_edges_score", -n_edges_score)
+
+def model23_n_p(model_data):
+    """S(M) = SP(M)"""
+    model23_n_prior_(model_data)
+
+def model23_n_p_s(model_data):
+    """S(M) = SP(M) + SS(M)"""
+    saint_max_pair_score_matrix, _, z = model23_n_prior_(model_data)
+    model23_n_saint_(model_data, saint_max_pair_score_matrix, z)
+    
+
+def model23_n_p_r(model_data):
+    """S(M) = SP(M) + SR(M)"""
+    _, R_pairwise_matrix, z = model23_n_prior_(model_data)
+    model23_n_r_(R_pairwise_matrix, z)
+
+
+def model23_n_p_d(model_data):
+    """S(M) = SP(M) + SD(M)"""
+    _, R_pairwise_matrix, z = model23_n_prior_(model_data)
+    N = model_data["N"]
+    diag_indices = jnp.diag_indices(N)
+    model23_n_degree_(z, diag_indices, N)
+
+def model23_n_p_ne(model_data):
+    """S(M) = SP(M) + SE(M)"""
+    _, R_pairwise_matrix, z = model23_n_prior_(model_data) 
+    aij = Z2A(z)
+    # # Set the diagonal to 0
+
+    aij = aij.at[diag_indices].set(0)
+    aij = jnp.tril(aij, k=-1)
+    aij = (aij + aij.T)
+    degree = jnp.sum(aij, axis = 1)
+    model23_n_nedges_(degree)
+
+def model23_n_p_s_r(model_data):
+    """S(M) = SP(M) + SS(M) + SR(M)"""
+    saint_max_pair_score_matrix, R_pairwise_matrix, z = model23_n_prior_(model_data)
+    model23_n_saint_(model_data, saint_max_pair_score_matrix, z)
+    model23_n_r_(R_pairwise_matrix, z)
+
+def model23_n_p_s_d(model_data):
+    """S(M) = SP(M) + SS(M) + SD(M)"""
+    saint_max_pair_score_matrix, _, z = model23_n_prior_(model_data)
+    model23_n_saint_(model_data, saint_max_pair_score_matrix, z)
+    N = model_data["N"]
+    diag_indices = jnp.diag_indices(N)
+    model23_n_degree_(z, diag_indices, N)
+
+def model23_n_p_s_ne(model_data):
+    """S(M) = SP(M) + SS(M) + SE(M)"""
+    saint_max_pair_score_matrix, _, z = model23_n_prior_(model_data)
+    model23_n_saint_(model_data, saint_max_pair_score_matrix, z)
+    aij = Z2A(z)
+    # # Set the diagonal to 0
+
+    aij = aij.at[diag_indices].set(0)
+    aij = jnp.tril(aij, k=-1)
+    aij = (aij + aij.T)
+    degree = jnp.sum(aij, axis = 1)
+    model23_n_nedges_(degree)
+
+def model23_n_p_r_d(model_data):
+    """S(M) = SP(M) + SR(M) + SD(M)"""
+    _, R_pairwise_matrix, z = model23_n_prior_(model_data)
+    N = model_data["N"]
+    diag_indices = jnp.diag_indices(N)
+    model23_n_degree_(z, diag_indices, N)
+    model23_n_r_(R_pairwise_matrix, z)
+
 def model23_o_params(model_data,
     z_mu = 0.1, z_sigma = 1.,
     _MODEL23_SR_WEIGHT = 1.1,
@@ -3488,6 +3638,9 @@ def model_dispatcher(model_name, model_data, save_dir, init_strat_dispatch_key="
                          "model23_e", "model23_f", "model23_g", "model23_h",
                          "model23_i", "model23_j", "model23_k", "model23_l",
                          "model23_m", "model23_n", "model23_n_", "model23_o", "model23_q",
+                         "model23_n_p", "model23_n_p_s", "model23_n_p_r", "model23_n_p_d",
+                         "model23_n_p_ne", "model23_n_p_s_r", "model23_n_p_s_d", "model23_n_p_s_ne",
+                         "model23_n_p_r_d",
                          ):
         model = dict(model23_ll_lp = model23_ll_lp,
                      model23_se = model23_se,
@@ -3510,7 +3663,16 @@ def model_dispatcher(model_name, model_data, save_dir, init_strat_dispatch_key="
                      model23_m = model23_m,
                      model23_n = model23_n,
                      model23_n_ = model23_n_,
-                     model23_o = model23_o,)[model_name] 
+                     model23_o = model23_o,
+                     model23_n_p = model23_n_p,
+                     model23_n_p_s = model23_n_p_s,
+                     model23_n_p_r = model23_n_p_r,
+                     model23_n_p_d = model23_n_p_d,
+                     model23_n_p_ne = model23_n_p_ne,
+                     model23_n_p_s_r = model23_n_p_s_r,
+                     model23_n_p_s_d = model23_n_p_s_d,
+                     model23_n_p_s_ne = model23_n_p_s_ne,
+                     model23_n_p_r_d = model23_n_p_r_d,)[model_name] 
 
         model_data = model23_ll_lp_data_getter(save_dir)
         # Don't calculate compoistes for models that don't need it
@@ -3518,7 +3680,10 @@ def model_dispatcher(model_name, model_data, save_dir, init_strat_dispatch_key="
                           "model23_a", "model23_b", "model23_c", "model23_d",
                           "model23_e", "model23_f", "model23_g", "model23_h",
                           "model23_i", "model23_j", "model23_k", "model23_l",
-                          "model23_m", "model23_n", "model23_n_", "model23_o", "model23_q"):
+                          "model23_m", "model23_n", "model23_n_", "model23_o", "model23_q",
+                          "model23_n_p", "model23_n_p_s", "model23_n_p_r", "model23_n_p_d",
+                          "model23_n_p_ne", "model23_n_p_s_r", "model23_n_p_s_d", "model23_n_p_s_ne",
+                          "model23_n_p_r_d",):
             model_data = model23_data_transformer(model_data, calculate_composites = False, synthetic_N = synthetic_N, synthetic_Mtrue = synthetic_Mtrue, synthetic_rseed = synthetic_rseed)
         else:
             model_data = model23_data_transformer(model_data, calculate_composites = True, synthetic_N = synthetic_N, synthetic_Mtrue = synthetic_Mtrue, synthetic_rseed = synthetic_rseed)

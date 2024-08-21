@@ -318,6 +318,65 @@ mini_model23_n_all_20k = from_template(
     filter_kw = "all",
 )
 
+mini_model23_n_p_all_5k = from_template(
+    mini_model23_n,
+    model_name = "model23_n_p",
+    model_output_dirpath = "../results/mini_model23_n_p_all_5k",
+    num_samples = 5_000,
+    num_warmup = 1_000,
+    filter_kw = "all",
+)
+
+mini_model23_n_p_s_all_5k = from_template(
+    mini_model23_n_p_all_5k,
+    model_name = "model23_n_p_s",
+    model_output_dirpath = "../results/mini_model23_n_p_s_all_5k",
+)
+
+mini_model23_n_p_r_all_5k = from_template(
+    mini_model23_n_p_all_5k,
+    model_name = "model23_n_p_r",
+    model_output_dirpath = "../results/mini_model23_n_p_r_all_5k",
+)
+
+mini_model23_n_p_d_all_5kk = from_template(
+    mini_model23_n_p_all_5k,
+    model_name = "model23_n_p_d",
+    model_output_dirpath = "../results/mini_model23_n_p_d_all_5k",
+)
+
+mini_model23_n_p_ne_all_5k = from_template(
+    mini_model23_n_p_all_5k,
+    model_name = "model23_n_p_ne",
+    model_output_dirpath = "../results/mini_model23_n_p_ne_all_5k",
+)
+
+mini_model23_n_p_s_r_all_5k = from_template(
+    mini_model23_n_p_all_5k,
+    model_name = "model23_n_p_s_r",
+    model_output_dirpath = "../results/mini_model23_n_p_s_r_all_5k",
+)
+
+mini_model23_n_p_s_d_all_5k = from_template(
+    mini_model23_n_p_all_5k,
+    model_name = "model23_n_p_s_d",
+    model_output_dirpath = "../results/mini_model23_n_p_s_d_all_5k",
+)
+
+mini_model23_n_p_s_ne_all_5k = from_template(
+    mini_model23_n_p_all_5k,
+    model_name = "model23_n_p_s_ne",
+    model_output_dirpath = "../results/mini_model23_n_p_s_ne_all_5k",
+)
+
+mini_model23_n_p_r_d_all_5k = from_template(
+    mini_model23_n_p_all_5k,
+    model_name = "model23_n_p_r_d",
+    model_output_dirpath = "../results/mini_model23_n_p_r_d_all_5k",
+)
+
+
+
 mini_model23_n_mock_20k = from_template(
     mini_model23_n_all_20k,
     model_output_dirpath = "../results/mini_model23_n_mock_20k",
