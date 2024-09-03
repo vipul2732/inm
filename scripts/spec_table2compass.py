@@ -28,7 +28,7 @@ def _main(i: Path, o: Path, debug: bool):
     with open(i, "r"):
         df = pd.read_csv(i, sep="\t", index_col=0)
     outdf = parse_df(df, debug)
-    outdf.to_csv(o / "spec_table_compass.tsv", sep="\t")
+    outdf.to_csv(o / "spec_table_compass.tsv", sep="\t", index=False)
 
 
 
