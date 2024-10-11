@@ -481,7 +481,7 @@ def best_score_per_chain_based_on_amount_of_sampling(
         raise ValueError("Only 2 or 3 dimensions are supported")
     if amount_of_sampling_list is None:
         if n_iter > 2_000:
-            amount_of_sampling_list = [1] + list(np.arange(10, n_iter, 1_000)) 
+            amount_of_sampling_list = [1, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000,] + list(np.arange(1100, n_iter, 1_000)) 
         else: 
             amount_of_sampling_list = _STD_AMOUNT_OF_SAMPING 
     results = metric_as_a_function_of_amount_of_sampling_per_chain(x, lambda x: jnp.min(x, axis=_ITER_DIM), amount_of_sampling_list)
@@ -596,7 +596,7 @@ def roc_as_an_amount_of_sampling(aij_mat, refij, amount_of_sampling_list = None,
     total_samples = n_chains * n_iter
     
     if amount_of_sampling_list is None:
-        amount_of_sampling_list = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 18,] + list(np.arange(20, n_iter, every)) 
+        amount_of_sampling_list = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 18, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200]#] + list(np.arange(20, n_iter, every)) 
     av_aucs = []
     av_shuff_aucs = []
     std_aucs = []
@@ -653,8 +653,8 @@ def plot_roc_as_an_amount_of_sampling(x, refij, save=None, suffix=""):
     plot_xy_data = roc_as_an_amount_of_sampling(aij_mat, refij) 
 
     fig, ax = plt.subplots()
-    ax.errorbar(plot_xy_data["amount_of_sampling_list"], plot_xy_data["av_aucs"], yerr=plot_xy_data["std_aucs"], fmt='.', capsize=2, alpha=0.2, label="AUC")
-    ax.errorbar(plot_xy_data["amount_of_sampling_list"], plot_xy_data["av_shuff_aucs"], yerr=plot_xy_data["std_shuff_aucs"], fmt='.', capsize=2, alpha=0.2, label="Shuffled AUC")
+    ax.errorbar(plot_xy_data["amount_of_sampling_list"], plot_xy_data["av_aucs"], yerr=plot_xy_data["std_aucs"], fmt='.', capsize=2, alpha=0.5, label="AUC")
+    ax.errorbar(plot_xy_data["amount_of_sampling_list"], plot_xy_data["av_shuff_aucs"], yerr=plot_xy_data["std_shuff_aucs"], fmt='.', capsize=2, alpha=0.5, label="Shuffled AUC")
     ax.set_xlabel("N models")
     ax.set_ylabel("ROC - AUC")
     ax.legend()
