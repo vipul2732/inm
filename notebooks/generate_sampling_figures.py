@@ -596,7 +596,7 @@ def roc_as_an_amount_of_sampling(aij_mat, refij, amount_of_sampling_list = None,
     total_samples = n_chains * n_iter
     
     if amount_of_sampling_list is None:
-        amount_of_sampling_list = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 18, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200]#] + list(np.arange(20, n_iter, every)) 
+        amount_of_sampling_list = [1, 10, 20, 30, 40, 50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300,]
     av_aucs = []
     av_shuff_aucs = []
     std_aucs = []
