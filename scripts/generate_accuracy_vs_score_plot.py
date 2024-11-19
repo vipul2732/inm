@@ -27,8 +27,8 @@ def plot_figure():
 
     plt.xlabel("score")
     plt.ylabel("accuracy")
-    plt.savefig(dpath / (fname + "_300.png", dpi=300))
-    plt.savefig(dpath / (fname + "_1200.png", dpi=1200))
+    plt.savefig(dpath / (fname + "_300.png"), dpi=300)
+    plt.savefig(dpath / (fname + "_1200.png"), dpi=1200)
 
 
 if __name__ == "__main__":
