@@ -17,7 +17,7 @@ import sys
 import click
 from pathlib import Path
 
-sys.path.append("../notebooks")
+sys.path.append("../src")
 
 import preprocess_data
 import _model_variations as mv
