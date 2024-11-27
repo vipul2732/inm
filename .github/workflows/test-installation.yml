@@ -19,7 +19,7 @@ jobs:
     - name: Set Up Python 
       uses: conda-incubator/setup-miniconda@v2 
       with:
-        python-version "3.9"
+        python-version: "3.9"
    
     # Step 3: Install dependencies 
     - name: Create and Activate Conda Environment
