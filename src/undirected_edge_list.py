@@ -15,6 +15,10 @@ u = EdgeList
 """
 import pandas as pd
 import numpy as np
+from pathlib import Path
+
+module_dir = Path(__file__).parent
+root_dir = module_dir.parent
 
 class UndirectedEdge:
     def __init__(self, a, b):

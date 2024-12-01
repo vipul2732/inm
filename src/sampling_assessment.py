@@ -33,6 +33,9 @@ import pdb
 import _model_variations as mv
 import generate_benchmark_figures as gbf
 
+module_dir = Path(__file__).parent
+root_dir = module_dir.parent
+
 
 def pkl_load(x):
     with open(x, "rb") as f:
@@ -106,9 +109,9 @@ def get_rhat_results(samples):
 
 
 
-_e1 = "../results/se_sr_low_prior_1_uniform_mock_20k/"
-_e2 = "../results/se_sr_low_prior_1_uniform_mock_20k_rseed_9"
+_e1 = root_dir / "results/se_sr_low_prior_1_uniform_mock_20k/"
+_e2 = root_dir / "results/se_sr_low_prior_1_uniform_mock_20k_rseed_9"
 
-_e3 = "../results/se_sr_low_prior_2_uniform_mock_20k"
-_e4 = "../results/se_sr_low_prior_2_uniform_mock_100k"
+_e3 = root_dir / "results/se_sr_low_prior_2_uniform_mock_20k"
+_e4 = root_dir / "results/se_sr_low_prior_2_uniform_mock_100k"
 

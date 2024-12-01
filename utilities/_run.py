@@ -20,7 +20,8 @@ from pathlib import Path
 module_dir = Path(__file__).parent
 root_dir = module_dir.parent
 
-sys.path.append(root_dir / "src")
+sys.path.append((root_dir / "src").as_posix())
+print(sys.path)
 
 import preprocess_data
 import _model_variations as mv

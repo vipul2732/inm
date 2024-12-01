@@ -26,6 +26,9 @@ import generate_sampling_figures as gsf
 import tpr_ppr
 import matplotlib.pyplot as plt
 
+module_dir = Path(__file__).parent
+root_dir = module_dir.parent
+
 def load_cullin_composite_saint_scores():
     df = pd.read_csv(root_dir / "data/processed/cullin/composite_table.tsv", sep="\t")
     return df
