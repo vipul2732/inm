@@ -407,8 +407,8 @@ def _test_node_select2():
 
 
 
-_example_path = {"biogrid_ref" : "../data/processed/references/biogrid_reference.tsv",
-                 "huri_ref": "../data/processed/references/HuRI_reference.tsv",
-                 "huMAP_medium_ref" : "../data/processed/references/humap2_ppis_medium.tsv",
-                 "huMAP_high_ref" : "../data/processed/references/humap2_ppis_high.tsv",
-                 "cullin" : "../data/processed/cullin/composite_table.tsv"}
+_example_path = {"biogrid_ref" : root_dir / "data/processed/references/biogrid_reference.tsv",
+                 "huri_ref": root_dir / "data/processed/references/HuRI_reference.tsv",
+                 "huMAP_medium_ref" : root_dir / "data/processed/references/humap2_ppis_medium.tsv",
+                 "huMAP_high_ref" : root_dir / "data/processed/references/humap2_ppis_high.tsv",
+                 "cullin" : root_dir / "data/processed/cullin/composite_table.tsv"}

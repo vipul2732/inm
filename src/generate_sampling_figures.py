@@ -36,6 +36,9 @@ logger = logging.getLogger(__name__)
 # Globals
 hist_range = (-1, 1)
 
+module_dir = Path(__file__).parent
+root_dir = module_dir.parent
+
 @click.command()
 @click.option("--o", type=str, help="output directory")
 @click.option("--i", type=str, help="input file")
@@ -740,7 +743,7 @@ def edge_dict2df(edge_dict, acolname="auid", bcolname="buid"):
         w.append(weight)
     return pd.DataFrame({acolname: a, bcolname: b, "w": w})
 
-def get_buffered_humap_prediction_df(model_data, humap2_str_path="../data/processed/references/humap2_ppis_all.tsv"):
+def get_buffered_humap_prediction_df(model_data, humap2_str_path=root_dir / "data/processed/references/humap2_ppis_all.tsv"):
     humap2_all_pred = pd.read_csv(humap2_str_path, sep="\t")
     name2uid = gbf.get_cullin_reindexer()
     nodes = [name2uid[name] for name in model_data["name2node_idx"]] 
@@ -761,7 +764,7 @@ def get_buffered_saint_prediction_df(model_data):
     return saint_scores
         
 
-def get_and_align_humap_prediction(model_data, humap2_str_path="../data/processed/references/humap2_ppis_all.tsv"):
+def get_and_align_humap_prediction(model_data, humap2_str_path=root_dir / "data/processed/references/humap2_ppis_all.tsv"):
     humap2_buffered_df = get_buffered_humap_prediction_df(model_data, humap2_str_path)
     u = uel.UndirectedEdgeList()
     u.update_from_df(humap2_buffered_df, "auid", "buid", edge_value_colname="w", multi_edge_value_merge_strategy="max")
@@ -808,7 +811,7 @@ def get_maximal_bait_prey_composite_scores(model_data, o):
     return edge_dict2df(new_edge_dict)
     
 def get_and_align_HuRI_predictions(x, model_data):
-    huri_all_pred = pd.read_csv("../data/processed/references/HuRI_reference.tsv", sep="\t")
+    huri_all_pred = pd.read_csv(root_dir / "data/processed/references/HuRI_reference.tsv", sep="\t")
     nodes = list(model_data["node_name2uid"].keys())
     huri_all_pred = filter_by_nodes(huri_all_pred, nodes, "auid", "buid")
 

@@ -16,15 +16,18 @@
 import pandas as pd
 import pickle as pkl
 import matplotlib.pyplot as plt
+from pathlib import Path
 import sys
-sys.path.append("../../scripts/")
+
+module_dir = Path(__file__).parent
+root_dir = module_dir.parent
+
 
 import preprocess_data
 from preprocess_data import (
 get_spec_table_and_composites
 )
 import numpy as np
-from pathlib import Path
 with open("0_model23_ll_lp_13.pkl", "rb") as f:
     d = pkl.load(f)
 # -

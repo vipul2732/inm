@@ -17,7 +17,10 @@ import sys
 import click
 from pathlib import Path
 
-sys.path.append("../src")
+module_dir = Path(__file__).parent
+root_dir = module_dir.parent
+
+sys.path.append(root_dir / "src")
 
 import preprocess_data
 import _model_variations as mv
@@ -141,7 +144,7 @@ def main(
     # Copy the files from the preprocessed data to the modeling output dir
     shutil.copy(preprocessor_output_dirpath / "spec_table.tsv", model_output_dirpath / "spec_table.tsv")
     shutil.copy(preprocessor_output_dirpath / "composite_table.tsv", model_output_dirpath / "composite_table.tsv")
-    shutil.copy("../notebooks/shuffled_apms_correlation_matrix.pkl",
+    shutil.copy(root_dir / "notebooks/shuffled_apms_correlation_matrix.pkl",
                 model_output_dirpath / "shuffled_apms_correlation_matrix.pkl")
 
     modeler_vars = {"alpha" : hyper_param_alpha,

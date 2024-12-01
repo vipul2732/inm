@@ -7,7 +7,11 @@ from pathlib import Path
 import pickle as pkl
 import pandas as pd
 import sys
-sys.path.append("../notebooks")
+
+module_dir = Path(__file__).parent
+root_dir = module_dir.parent
+
+sys.path.append(root_dir / "notebooks")
 
 import generate_sampling_figures as gsf
 

@@ -16,11 +16,14 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+module_dir = Path(__file__).parent
+root_dir = module_dir.parent
+
 @click.command()
 @click.option("--ds-name")
 @click.option("--dont-remap", is_flag=True, default=False)
 def main(ds_name, dont_remap):
-    out_path = "../data/processed/" + ds_name
+    out_path = root_dir / ("data/processed/" + ds_name)
     do_remap = not dont_remap 
     if ds_name in _raw_data_paths:
         preprocess_data(ds_name, enforce_bait_remapping=do_remap)
@@ -228,7 +231,7 @@ def prey_parser(prey_name, strat):
 def get_mapping_dict(xlsx_path):
     fpath = Path(xlsx_path).parent / "bait_remapping" 
     keyword = fpath.parent.stem 
-    to_path = Path("../data/processed") / keyword
+    to_path = (root_dir / "data/processed") / keyword
     to_path = to_path / "bait_remapping"
     to_path = str(to_path)
     fpath = str(fpath)
@@ -389,7 +392,7 @@ def preprocess_cullin(prey_colname="PreyGene", enforce_bait_remapping=False):
             enforce_bait_remapping=enforce_bait_remapping) 
     log_unmapped_bait(composites)
     
-    write_tables(spec_table, composites, output_dir = Path("../data/processed/cullin"))
+    write_tables(spec_table, composites, output_dir = root_dir / "data/processed/cullin")
 
 def preprocess_spec_table(input_path,
                           output_dir,
@@ -540,7 +543,7 @@ def preprocess_dub(prey_colname="Prey", enforce_bait_remapping=False):
             bait_parser_strat="all",
             enforce_bait_remapping=enforce_bait_remapping)
     log_unmapped_bait(composites)
-    write_tables(spec_table, composites, output_dir = Path("../data/processed/dub"))
+    write_tables(spec_table, composites, output_dir = root_dir / "data/processed/dub")
 
 def preprocess_tip49(prey_colname="Prey", enforce_bait_remapping=False):
     spec_table, composites = get_spec_table_and_composites(
@@ -550,7 +553,7 @@ def preprocess_tip49(prey_colname="Prey", enforce_bait_remapping=False):
             prey_colname=prey_colname,
             enforce_bait_remapping=enforce_bait_remapping)
     log_unmapped_bait(composites)
-    write_tables(spec_table, composites, output_dir = Path("../data/processed/tip49"))
+    write_tables(spec_table, composites, output_dir = root_dir / "data/processed/tip49")
 
 def preprocess_sars2(prey_colname="PreyGene", enforce_bait_remapping=False):
     spec_table, composites = get_spec_table_and_composites(
@@ -562,7 +565,7 @@ def preprocess_sars2(prey_colname="PreyGene", enforce_bait_remapping=False):
             bait_parser_strat="all",
             enforce_bait_remapping=enforce_bait_remapping)
     log_unmapped_bait(composites)
-    write_tables(spec_table, composites, output_dir = Path("../data/processed/gordon_sars_cov_2"))
+    write_tables(spec_table, composites, output_dir = root_dir / "data/processed/gordon_sars_cov_2")
 
 
 #References 
@@ -597,16 +600,16 @@ _preprocess_reference = {
         }
 
 _raw_data_paths = {
-    "dub" : "../data/dub/41592_2011_BFnmeth1541_MOESM593_ESM.xls",
-    "cullin" : "../data/cullin/1-s2.0-S1931312819302537-mmc2.xlsx",
-    "tip49" : "../data/tip49/NIHMS252278-supplement-2.xls",
-    "gordon_sars_cov_2" : "../data/gordon_sars_cov_2/41586_2020_2286_MOESM5_ESM.xlsx",
+    "dub" : root_dir / "data/dub/41592_2011_BFnmeth1541_MOESM593_ESM.xls",
+    "cullin" : root_dir / "data/cullin/1-s2.0-S1931312819302537-mmc2.xlsx",
+    "tip49" : root_dir / "data/tip49/NIHMS252278-supplement-2.xls",
+    "gordon_sars_cov_2" : root_dir / "data/gordon_sars_cov_2/41586_2020_2286_MOESM5_ESM.xlsx",
         }
 
 _raw_reference_paths = {
-        "biogrid" : "../data/biogrid",
-        "huri" : "../data/huri",
-        "huMAP2" : "../data/humap2",
+        "biogrid" : root_dir / "data/biogrid",
+        "huri" : root_dir / "data/huri",
+        "huMAP2" : root_dir / "data/humap2",
 }
 
 if __name__ == "__main__":

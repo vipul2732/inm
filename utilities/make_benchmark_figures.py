@@ -37,7 +37,12 @@ matrix vs edge_list comparison -> matrix vs matrix
 """
 
 import sys
-sys.path = ["../notebooks"] + sys.path
+
+from pathlib import Path
+module_dir = Path(__file__).parent
+root_dir = module_dir.parent
+
+sys.path.append(root_dir / "notebooks")
 
 from _BSASA_functions import *
 
@@ -46,7 +51,6 @@ import numpy as np
 import scipy as sp
 import pandas as pd
 import xarray as xr
-from pathlib import Path
 from functools import partial
 
 # IO

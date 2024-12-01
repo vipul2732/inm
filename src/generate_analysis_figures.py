@@ -8,6 +8,9 @@ import click
 
 logger = logging.getLogger(__name__)
 
+module_dir = Path(__file__).parent
+root_dir = module_dir.parent
+
 def model_output_graph_from_average_edge_list(
         modeling_output_dirpath: Path,
         fname="average_predicted_edge_scores.tsv",
@@ -160,7 +163,7 @@ def nested_plot_from_output_dir(o, view_threshold, edge_threshold):
     plot_nested_edgeview(g = g, modeling_output_dirpath = o, view_threshold = view_threshold, r=1)
 
 
-_2024_04_01_dummy = Path("../results/2024_04_01_dummy/")
+_2024_04_01_dummy = root_dir / "results/2024_04_01_dummy/"
 
 @click.command()
 @click.option("--o")

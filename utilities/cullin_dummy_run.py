@@ -1,10 +1,15 @@
 import _run
+from pathlib import Path
+
+
+module_dir = Path(__file__).parent
+root_dir = module_dir.parent
 
 _run.main(
-        model_output_dirpath = "../results/2024_04_01_dummy",
-        model_input_fpath = "../data/cullin/1-s2.0-S1931312819302537-mmc2.xlsx",
+        model_output_dirpath = root_dir / "results/2024_04_01_dummy",
+        model_input_fpath = root_dir / "data/cullin/1-s2.0-S1931312819302537-mmc2.xlsx",
         preprocessor_protocol_name = "cullin_standard",
-        preprocessor_output_dirpath = "../data/processed/cullin/",
+        preprocessor_output_dirpath = root_dir / "data/processed/cullin/",
         model_id = 0,
         rseed = 13,
         model_name = "model23_ll_lp",

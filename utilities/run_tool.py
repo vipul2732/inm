@@ -16,12 +16,14 @@ from pathlib import Path
 import run_configurations as rc
 import _run
 
-sys.path.append("../notebooks")
+module_dir = Path(__file__).parent
+root_dir = module_dir.parent
+
+sys.path.append("notebooks")
 from sampling_assessment import (
         get_results
 )
 import data_io
-
 
 from data_io import (
     pklload,

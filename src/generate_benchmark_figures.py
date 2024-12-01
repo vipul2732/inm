@@ -27,11 +27,11 @@ import tpr_ppr
 import matplotlib.pyplot as plt
 
 def load_cullin_composite_saint_scores():
-    df = pd.read_csv("../data/processed/cullin/composite_table.tsv", sep="\t")
+    df = pd.read_csv(root_dir / "data/processed/cullin/composite_table.tsv", sep="\t")
     return df
 
 def load_sars2_composite_saint_scores():
-    df = pd.read_csv("../data/processed/gordon_sars_cov_2/composite_table.tsv", sep="\t")
+    df = pd.read_csv(root_dir / "data/processed/gordon_sars_cov_2/composite_table.tsv", sep="\t")
     return df
 
 def get_cullin_saint_scores_edgelist():
@@ -45,7 +45,7 @@ def get_cullin_saint_scores_edgelist():
     return c
 
 def get_sars2_reindexer():
-    reindex_df = pd.read_csv("../data/processed/cullin/id_map.tsv", sep="\t", names=["PreyGene", "uid"])
+    reindex_df = pd.read_csv(root_dir / "data/processed/cullin/id_map.tsv", sep="\t", names=["PreyGene", "uid"])
     reindexer = {}
     for i, r in reindex_df.iterrows():
         prey_gene = r['PreyGene']
@@ -66,7 +66,7 @@ def get_sars2_saint_scores_edgelist():
     return c
 
 def get_cullin_reindexer():
-    reindex_df = pd.read_csv("../data/processed/cullin/id_map.tsv", sep="\t", names=["PreyGene", "uid"])
+    reindex_df = pd.read_csv(root_dir / "data/processed/cullin/id_map.tsv", sep="\t", names=["PreyGene", "uid"])
     reindexer = {}
     for i, r in reindex_df.iterrows():
         prey_gene = r['PreyGene']
@@ -76,31 +76,31 @@ def get_cullin_reindexer():
     return reindexer
 
 def get_huri_reference():
-    df = pd.read_csv("../data/processed/references/HuRI_reference.tsv", sep="\t")
+    df = pd.read_csv(root_dir / "data/processed/references/HuRI_reference.tsv", sep="\t")
     u = UndirectedEdgeList()
     u.update_from_df(df)
     return u 
 
 def get_humap_all_reference():
-    df = pd.read_csv("../data/processed/references/humap2_ppis_all.tsv", sep="\t")
+    df = pd.read_csv(root_dir / "data/processed/references/humap2_ppis_all.tsv", sep="\t")
     u = UndirectedEdgeList()
     u.update_from_df(df, edge_value_colname="w", multi_edge_value_merge_strategy="max")
     return u
 
 def get_humap_medium_reference():
-    df = pd.read_csv("../data/processed/references/humap2_ppis_medium.tsv", sep="\t")
+    df = pd.read_csv(root_dir / "data/processed/references/humap2_ppis_medium.tsv", sep="\t")
     u = UndirectedEdgeList()
     u.update_from_df(df)
     return u
 
 def get_humap_high_reference() -> UndirectedEdgeList:
-    df = pd.read_csv("../data/processed/references/humap2_ppis_high.tsv", sep="\t")
+    df = pd.read_csv(root_dir / "data/processed/references/humap2_ppis_high.tsv", sep="\t")
     u = UndirectedEdgeList()
     u.update_from_df(df)
     return u
 
 def get_biogrid_reference():
-    df = pd.read_csv("../data/processed/references/biogrid_reference.tsv", sep="\t")
+    df = pd.read_csv(root_dir / "data/processed/references/biogrid_reference.tsv", sep="\t")
     u = UndirectedEdgeList()
     u.update_from_df(df)
     return u
@@ -141,7 +141,7 @@ def get_pdb_ppi_predict_direct_reference(source="tsv"):
             direct_matrix = ref.reference.matrix
             df = xarray_matrix2edge_list_df(direct_matrix)
     elif source == "tsv":
-        df = pd.read_csv("../data/processed/references/pdb_ppi_prediction/direct_benchmark.tsv", names=["auid", "buid"], sep="\t")
+        df = pd.read_csv(root_dir / "data/processed/references/pdb_ppi_prediction/direct_benchmark.tsv", names=["auid", "buid"], sep="\t")
     else:
         raise NotImplementedError
     u = UndirectedEdgeList()
@@ -158,7 +158,7 @@ def get_pdb_ppi_predict_cocomplex_reference(source="tsv"):
             xar = ref.reference.matrix
             df = xarray_matrix2edge_list_df(xar)
     elif source == "tsv":
-        df = pd.read_csv("../data/processed/references/pdb_ppi_prediction/cocomplex_benchmark.tsv", names=["auid", "buid"], sep="\t")
+        df = pd.read_csv(root_dir / "data/processed/references/pdb_ppi_prediction/cocomplex_benchmark.tsv", names=["auid", "buid"], sep="\t")
     else:
         raise NotImplementedError
     u = UndirectedEdgeList()
@@ -172,7 +172,7 @@ def get_intact_all_first_uid_reference():
     return u 
 
 def get_pre_ppi_af_hc():
-    df = pd.read_csv("../data/processed/preppi/preppi.human_af.interactome_LR379.txt", sep="\t")
+    df = pd.read_csv(root_dir / "data/processed/preppi/preppi.human_af.interactome_LR379.txt", sep="\t")
     u = UndirectedEdgeList() 
     u.update_from_df(df, a_colname="prot1", b_colname="prot2", edge_value_colname="total_score", multi_edge_value_merge_strategy = "max")
     return u
@@ -255,7 +255,7 @@ def benchmark_cullin_max_saint(ds_dict):
     return results
 
 def benchmark_and_save_humap_all():
-    outdir = "../results/generate_benchmark_figures/"
+    outdir = root_dir / "results/generate_benchmark_figures/"
     ds_dict = get_all_intersection_datasets()
     humap2_all = ds_dict['humap2_all']
     acceptable_references = ["biogrid_all", "pdb_ppi_direct", "pdb_ppi_cocomplex", "huri", "pre_ppi_af_hc"]
@@ -284,7 +284,7 @@ def cullin_against_pre_ppi():
     b = get_pre_ppi_af_hc()
     x = tpr_ppr.PprTprCalculator(pred = a, ref = b) 
     r = x.crunch()
-    outdir = "../results/generate_benchmark_figures/"
+    outdir = root_dir / "results/generate_benchmark_figures/"
     name = f"cullin_saint_max__pre_ppi_af_hc" 
     save_path = outdir + name 
     plotter = tpr_ppr.PprTprPlotter()
@@ -300,14 +300,14 @@ def cullin_run0_benchmark():
         node_i.append(len(u.node_intersection(v)))
         edge_i.append(len(u.edge_identity_intersection(v)))
     df = pd.DataFrame({'node' : node_i, 'edge' : edge_i}, index=list(ds_dict.keys()))
-    df.T.to_csv("../results/generate_benchmark_figures/inm_cullin0_intersections.tsv", sep="\t")
+    df.T.to_csv(root_dir / "results/generate_benchmark_figures/inm_cullin0_intersections.tsv", sep="\t")
 
 def cullin_inm_vs_pre_ppi():
     a = get_cullin_run0_predictions()
     b = get_pre_ppi_af_hc()
     x = tpr_ppr.PprTprCalculator(pred = a, ref = b) 
     r = x.crunch()
-    outdir = "../results/2024_03_19_cullin_model23_connectivity_and_prior/"
+    outdir = root_dir / "results/2024_03_19_cullin_model23_connectivity_and_prior/"
     name = f"cullin_run0_inm__pre_ppi_af_hc" 
     save_path = outdir + name 
     plotter = tpr_ppr.PprTprPlotter()
@@ -323,7 +323,7 @@ def cullin_run0_inm_vs_many():
     
     a = get_cullin_run0_predictions()
     b = get_pre_ppi_af_hc()
-    outdir = "../results/2024_03_19_cullin_model23_connectivity_and_prior/"
+    outdir = root_dir / "results/2024_03_19_cullin_model23_connectivity_and_prior/"
     name = f"cullin_run0_inm__pre_ppi_af_hc" 
     body(a, b, outdir, name)
 
@@ -524,7 +524,7 @@ def to_dirpath(str_or_dirpath):
 
 
 
-def humap_bench(bench_output = "../results/humap_bench", topN=None):
+def humap_bench(bench_output = root_dir / "results/humap_bench", topN=None):
     bench_output = to_dirpath(bench_output)
     assert bench_output.is_dir()
     pdb_direct = get_pdb_ppi_predict_direct_reference()
@@ -746,7 +746,7 @@ def model23_matrix2u(A, model_data):
     # Calculate the edge intersection table for all edges
 
 def main():
-    outdir = "../results/generate_benchmark_figures/"
+    outdir = root_dir / "results/generate_benchmark_figures/"
     ds_dict = get_all_intersection_datasets()
     de = get_edge_intersection_matrix(ds_dict)
     dn = get_node_intersection_matrix(ds_dict)

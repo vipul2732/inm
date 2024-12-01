@@ -13,6 +13,9 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+module_dir = Path(__file__).parent
+root_dir = module_dir.parent
+
 def pklload(path):
     with open(path, "rb") as f:
         return pkl.load(f)
@@ -37,11 +40,11 @@ def find_model_data_file_path(chain_path):
     raise FileNotFoundError("model data file not found")
 
 def load_cullin_composite_saint_scores():
-    df = pd.read_csv("../data/processed/cullin/composite_table.tsv", sep="\t")
+    df = pd.read_csv(root_dir / "data/processed/cullin/composite_table.tsv", sep="\t")
     return df
 
 def load_sars2_composite_saint_scores():
-    df = pd.read_csv("../data/processed/gordon_sars_cov_2/composite_table.tsv", sep="\t")
+    df = pd.read_csv(root_dir / "data/processed/gordon_sars_cov_2/composite_table.tsv", sep="\t")
     return df
 
 def get_cullin_saint_scores_edgelist():
@@ -55,7 +58,7 @@ def get_cullin_saint_scores_edgelist():
     return c
 
 def get_sars2_reindexer():
-    reindex_df = pd.read_csv("../data/processed/cullin/id_map.tsv", sep="\t", names=["PreyGene", "uid"])
+    reindex_df = pd.read_csv(root_dir / "data/processed/cullin/id_map.tsv", sep="\t", names=["PreyGene", "uid"])
     reindexer = {}
     for i, r in reindex_df.iterrows():
         prey_gene = r['PreyGene']
@@ -76,7 +79,7 @@ def get_sars2_saint_scores_edgelist():
     return c
 
 def get_cullin_reindexer():
-    reindex_df = pd.read_csv("../data/processed/cullin/id_map.tsv", sep="\t", names=["PreyGene", "uid"])
+    reindex_df = pd.read_csv(root_dir / "data/processed/cullin/id_map.tsv", sep="\t", names=["PreyGene", "uid"])
     reindexer = {}
     for i, r in reindex_df.iterrows():
         prey_gene = r['PreyGene']
@@ -86,31 +89,31 @@ def get_cullin_reindexer():
     return reindexer
 
 def get_huri_reference():
-    df = pd.read_csv("../data/processed/references/HuRI_reference.tsv", sep="\t")
+    df = pd.read_csv(root_dir / "data/processed/references/HuRI_reference.tsv", sep="\t")
     u = UndirectedEdgeList()
     u.update_from_df(df)
     return u 
 
 def get_humap_all_reference():
-    df = pd.read_csv("../data/processed/references/humap2_ppis_all.tsv", sep="\t")
+    df = pd.read_csv(root_dir / "data/processed/references/humap2_ppis_all.tsv", sep="\t")
     u = UndirectedEdgeList()
     u.update_from_df(df, edge_value_colname="w", multi_edge_value_merge_strategy="max")
     return u
 
 def get_humap_medium_reference():
-    df = pd.read_csv("../data/processed/references/humap2_ppis_medium.tsv", sep="\t")
+    df = pd.read_csv(root_dir / "data/processed/references/humap2_ppis_medium.tsv", sep="\t")
     u = UndirectedEdgeList()
     u.update_from_df(df)
     return u
 
 def get_humap_high_reference() -> UndirectedEdgeList:
-    df = pd.read_csv("../data/processed/references/humap2_ppis_high.tsv", sep="\t")
+    df = pd.read_csv(root_dir / "data/processed/references/humap2_ppis_high.tsv", sep="\t")
     u = UndirectedEdgeList()
     u.update_from_df(df)
     return u
 
 def get_biogrid_reference():
-    df = pd.read_csv("../data/processed/references/biogrid_reference.tsv", sep="\t")
+    df = pd.read_csv(root_dir / "data/processed/references/biogrid_reference.tsv", sep="\t")
     u = UndirectedEdgeList()
     u.update_from_df(df)
     return u
@@ -151,7 +154,7 @@ def get_pdb_ppi_predict_direct_reference(source="tsv"):
             direct_matrix = ref.reference.matrix
             df = xarray_matrix2edge_list_df(direct_matrix)
     elif source == "tsv":
-        df = pd.read_csv("../data/processed/references/pdb_ppi_prediction/direct_benchmark.tsv", names=["auid", "buid"], sep="\t")
+        df = pd.read_csv(root_dir / "data/processed/references/pdb_ppi_prediction/direct_benchmark.tsv", names=["auid", "buid"], sep="\t")
     else:
         raise NotImplementedError
     u = UndirectedEdgeList()

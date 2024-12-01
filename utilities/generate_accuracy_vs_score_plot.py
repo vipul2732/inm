@@ -4,7 +4,10 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 
-sys.path.append("../notebooks")
+module_dir = Path(__file__).parent
+root_dir = module_dir.parent
+
+sys.path.append(root_dir / "notebooks")
 
 @click.command()
 @click.option("--dpath", help="path to the output directory")
